@@ -5,6 +5,7 @@ project(skai-edge-native VERSION 0.1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+find_package(Threads REQUIRED)
 
 add_library(skai-cli src/cli.cpp)
 target_include_directories(skai-cli PUBLIC include)
@@ -18,8 +19,12 @@ add_library(skai-config src/config.cpp)
 target_include_directories(skai-config PUBLIC include)
 target_link_libraries(skai-config PUBLIC yaml-cpp skai-logging)
 
+add_library(skai-application src/application.cpp)
+target_include_directories(skai-application PUBLIC include)
+target_link_libraries(skai-application PUBLIC skai-config skai-logging Threads::Threads)
+
 add_executable(skai-edge src/main.cpp)
-target_link_libraries(skai-edge PRIVATE skai-cli skai-config skai-logging)
+target_link_libraries(skai-edge PRIVATE skai-cli skai-application)
 
 enable_testing()
 add_subdirectory(tests)

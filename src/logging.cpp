@@ -52,9 +52,14 @@ const char* log_level_name(LogLevel level) {
 Logger::Logger(std::ostream& output, LogLevel minimum_level)
     : output_(output), minimum_level_(minimum_level) {}
 
-void Logger::log(LogLevel level, const std::string& module, const std::string& message) {
-    if (level < minimum_level_) return;
+void Logger::set_minimum_level(LogLevel level) {
     std::lock_guard<std::mutex> lock(mutex_);
+    minimum_level_ = level;
+}
+
+void Logger::log(LogLevel level, const std::string& module, const std::string& message) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (level < minimum_level_) return;
     output_ << "timestamp=\"" << timestamp() << "\" level=" << log_level_name(level)
             << " module=" << module << " message=\"" << escape(message) << "\"\n"
             << std::flush;
