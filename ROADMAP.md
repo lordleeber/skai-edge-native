@@ -374,7 +374,7 @@ Rules:
 
 ### 4.8 Test-first development
 
-This project is developed test-first. Every PR follows:
+This project is developed test-first. Every step follows:
 
 ```text
 write failing tests for the new behavior (red)
@@ -386,12 +386,25 @@ refactor with the tests still passing
 
 Rules:
 
-- The test framework exists from PR 1; no PR is allowed to postpone its tests to a later "testing phase".
-- Each PR's Acceptance list is turned into automated tests wherever it can be automated. Items that cannot (for example "Chrome on another LAN machine receives video") are written as a manual verification checklist in the PR description.
+- The test framework exists from Step 1; no step is allowed to postpone its tests to a later "testing phase".
+- Each step's Acceptance list is turned into automated tests wherever it can be automated. Items that cannot (for example "Chrome on another LAN machine receives video") are written as a manual verification checklist in the pull request description.
 - Framework: GoogleTest driven by CTest (`find_package(GTest REQUIRED)`, `gtest_discover_tests`). Ubuntu 22.04 / JetPack 6 provides it as `libgtest-dev`.
 - Tests that need Jetson hardware (NVDEC, TensorRT, CUDA) or a live network fixture carry CTest labels (`jetson`, `rtsp`, `webrtc`) so x86 Linux can run the rest with `ctest -LE jetson`.
 - Keep hardware-bound code thin and pure logic separate, so that the logic is testable on x86 without a GPU. Examples: RTSP reconnect/stall state machine, YOLO postprocessing/NMS, alert rules, GPS config validation, WHEP/SDP validation, JSON DTOs.
 - Test fixtures (for example the local RTSP test server) live under `tests/` and are never linked into `skai-edge`. They must not create a back door for non-RTSP input into the application.
+
+### 4.9 Step size and splitting
+
+Each numbered step is a deliverable, not a fixed-size change. If its planned or
+actual implementation and test code exceeds 800 changed lines, split it before
+submission into consecutive substeps: `step-N-a`, `step-N-b`, `step-N-c`, and so
+on; title them `Step N-a`, `Step N-b`, etc. Keep each substep at or below 800
+changed code lines. Count code under `include/`, `src/`, `tests/`, and `cmake/` (including
+`CMakeLists.txt`); exclude documentation, assets, and generated files. Give each
+substep a clear behavior and its own failing tests, then keep all earlier tests
+passing. Divide the parent step's acceptance criteria across the substeps and
+verify the complete acceptance list in the final substep. Keep the original
+step number for traceability in commits and pull requests.
 
 ---
 
@@ -399,7 +412,7 @@ Rules:
 
 Goal: establish a new repository with no dependency on the old ROS 2 implementation.
 
-## PR 1 — Repository skeleton
+## Step 1 — Repository skeleton
 
 Create:
 
@@ -451,7 +464,7 @@ ctest --test-dir build --output-on-failure
 
 ---
 
-## PR 2 — Configuration and logging
+## Step 2 — Configuration and logging
 
 Add a configuration layer.
 
@@ -519,7 +532,7 @@ Acceptance:
 
 Goal: build the internal runtime that replaces ROS 2 lifecycle/topic behavior.
 
-## PR 3 — Application lifecycle
+## Step 3 — Application lifecycle
 
 Implement:
 
@@ -559,7 +572,7 @@ Acceptance:
 
 ---
 
-## PR 4 — BoundedQueue and event primitives
+## Step 4 — BoundedQueue and event primitives
 
 Implement a small reusable bounded queue.
 
@@ -609,7 +622,7 @@ class RtspSource;
 
 Its job is to turn an RTSP stream into decoded frames suitable for TensorRT.
 
-## PR 5 — GStreamer runtime wrapper
+## Step 5 — GStreamer runtime wrapper
 
 Create minimal RAII wrappers for:
 
@@ -621,7 +634,7 @@ Create minimal RAII wrappers for:
 
 Initialize GStreamer once from `main()`.
 
-Add the RTSP test fixture here, because PR 6 and PR 7 are tested against it:
+Add the RTSP test fixture here, because Step 6 and Step 7 are tested against it:
 
 ```text
 tests/fixtures/rtsp_test_server
@@ -641,7 +654,7 @@ Acceptance:
 
 ---
 
-## PR 6 — RtspSource
+## Step 6 — RtspSource
 
 Implement:
 
@@ -723,7 +736,7 @@ Acceptance:
 
 ---
 
-## PR 7 — RTSP recovery, latency, and diagnostics
+## Step 7 — RTSP recovery, latency, and diagnostics
 
 Make RTSP behavior production-oriented.
 
@@ -802,7 +815,7 @@ Acceptance:
 - a stalled stream is detected even when no immediate GStreamer ERROR is emitted
 - reconnect attempts do not leak pipelines, threads, or file descriptors
 - the application can be stopped cleanly while reconnecting
-- each item above is an automated test driving the PR 5 RTSP test fixture (offline at start, restart, stall); the CONNECTED/STALLED/RECONNECTING state machine is also unit-tested without GStreamer
+- each item above is an automated test driving Step 5's RTSP test fixture (offline at start, restart, stall); the CONNECTED/STALLED/RECONNECTING state machine is also unit-tested without GStreamer
 
 ---
 
@@ -811,7 +824,7 @@ Acceptance:
 
 Goal: add a production-quality inference path independently from web and recording.
 
-## PR 8 — TensorRT engine loader
+## Step 8 — TensorRT engine loader
 
 Implement:
 
@@ -835,7 +848,7 @@ Acceptance:
 
 ---
 
-## PR 9 — CUDA preprocessing
+## Step 9 — CUDA preprocessing
 
 Implement GPU preprocessing:
 
@@ -862,7 +875,7 @@ Acceptance:
 
 ---
 
-## PR 10 — YOLO11 inference and postprocessing
+## Step 10 — YOLO11 inference and postprocessing
 
 Implement:
 
@@ -887,7 +900,7 @@ Acceptance:
 
 ---
 
-## PR 11 — Annotation
+## Step 11 — Annotation
 
 Draw:
 
@@ -911,7 +924,7 @@ Acceptance:
 
 Goal: replace Flask/FastAPI completely with a native C++ control plane.
 
-## PR 12 — HTTP server foundation
+## Step 12 — HTTP server foundation
 
 Implement using:
 
@@ -952,8 +965,8 @@ Requirements:
 - clear routing layer
 - no framework above Beast
 
-Scope split with PR 40: this PR sets baseline limits so the server is never unbounded
-from day one. PR 40 audits every entry point added later (WebSocket, WHEP, static
+Scope split with Step 40: this step sets baseline limits so the server is never unbounded
+from day one. Step 40 audits every entry point added later (WebSocket, WHEP, static
 files), makes limits configurable, and adds the remaining hardening.
 
 Suggested structure:
@@ -969,7 +982,7 @@ src/web/
 
 ---
 
-## PR 13 — REST API surface
+## Step 13 — REST API surface
 
 Add:
 
@@ -996,7 +1009,7 @@ Use explicit DTOs.
 
 ---
 
-## PR 14 — WebSocket event channel
+## Step 14 — WebSocket event channel
 
 Endpoint:
 
@@ -1042,7 +1055,7 @@ Requirements:
 
 Goal: provide a useful monitoring frontend with zero JavaScript framework dependencies.
 
-## PR 15 — Static frontend
+## Step 15 — Static frontend
 
 Serve from Beast:
 
@@ -1084,7 +1097,7 @@ Do NOT use:
 The frontend should be editable and runnable without npm.
 
 The static file handler is confined to the web root from its first version, not
-deferred to PR 40.
+deferred to Step 40.
 
 Tests written first:
 
@@ -1103,7 +1116,7 @@ canonical web root. Do not rely on string matching for `..`.
 
 ---
 
-## PR 16 — Live status UI
+## Step 16 — Live status UI
 
 Connect:
 
@@ -1127,7 +1140,7 @@ Goal: provide GPS data without ROS messages.
 
 **First version: fixed position at Taipei 101. No GPS hardware is read.**
 
-## PR 17 — Fixed-position GpsSource
+## Step 17 — Fixed-position GpsSource
 
 Implement a concrete class (no virtual interface yet — see rule 24):
 
@@ -1159,7 +1172,7 @@ are never mistaken for a real position:
 
 - `GET /api/v1/gps` and the WebSocket `gps` event include `"source": "fixed"`
 - the UI labels the position as fixed/simulated
-- the `alerts` table records `gps_source` (see PR 18)
+- the `alerts` table records `gps_source` (see Step 18)
 
 Tests written first:
 
@@ -1193,7 +1206,7 @@ WebSocket gps event
 
 Goal: establish durable, queryable local storage before alert persistence is implemented.
 
-## PR 18 — SQLite database foundation
+## Step 18 — SQLite database foundation
 
 Use the official SQLite C API through:
 
@@ -1306,7 +1319,7 @@ Acceptance:
 
 Goal: generate useful edge events without coupling the detector to the web layer.
 
-## PR 19 — Alert rules
+## Step 19 — Alert rules
 
 Implement basic rules:
 
@@ -1334,7 +1347,7 @@ AlertManager decides whether those detections are events.
 
 ---
 
-## PR 20 — Snapshot and alert persistence
+## Step 20 — Snapshot and alert persistence
 
 For every accepted alert:
 
@@ -1405,7 +1418,7 @@ Acceptance:
 
 Goal: preserve the useful recording functionality while keeping media handling inside GStreamer.
 
-## PR 21 — H.264 encoder pipeline
+## Step 21 — H.264 encoder pipeline
 
 Annotated frame:
 
@@ -1441,7 +1454,7 @@ A slow browser must never stall capture or inference.
 
 ---
 
-## PR 22 — Segmented MP4 recording
+## Step 22 — Segmented MP4 recording
 
 Pipeline:
 
@@ -1497,7 +1510,7 @@ WebRtcManager
 H.264 media to browser
 ```
 
-## PR 23 — Integrate skai-ice and libdatachannel
+## Step 23 — Integrate skai-ice and libdatachannel
 
 Add pinned dependencies:
 
@@ -1570,7 +1583,7 @@ Acceptance:
 
 ---
 
-## PR 24 — Boost.Beast WHEP session API
+## Step 24 — Boost.Beast WHEP session API
 
 Implement WHEP signaling with Boost.Beast.
 
@@ -1650,7 +1663,7 @@ Acceptance:
 
 ---
 
-## PR 25 — H.264 media delivery to libdatachannel
+## Step 25 — H.264 media delivery to libdatachannel
 
 Connect the existing GStreamer H.264 output to libdatachannel.
 
@@ -1724,7 +1737,7 @@ Acceptance:
 
 ---
 
-## PR 26 — WebRTC/ICE hardening and diagnostics
+## Step 26 — WebRTC/ICE hardening and diagnostics
 
 Expose WebRTC state through:
 
@@ -1777,7 +1790,7 @@ Acceptance:
 
 # Phase 11 — Optional RTSP Output
 
-## PR 27 — RTSP output
+## Step 27 — RTSP output
 
 Implement only if a non-browser RTSP consumer is still required.
 
@@ -1803,7 +1816,7 @@ libdatachannel.
 
 # Phase 12 — Observability and Diagnostics
 
-## PR 28 — Metrics
+## Step 28 — Metrics
 
 Track:
 
@@ -1837,7 +1850,7 @@ Prometheus format can be added later if useful.
 
 ---
 
-## PR 29 — Diagnostic page
+## Step 29 — Diagnostic page
 
 Add a simple `/diagnostics` page showing:
 
@@ -1858,7 +1871,7 @@ Still vanilla JavaScript.
 
 # Phase 13 — Reliability
 
-## PR 30 — Failure recovery
+## Step 30 — Failure recovery
 
 Test and handle:
 
@@ -1890,7 +1903,7 @@ Avoid terminating the whole process for a recoverable media-source or peer error
 
 ---
 
-## PR 31 — Watchdog and health model
+## Step 31 — Watchdog and health model
 
 Internal states:
 
@@ -1923,10 +1936,10 @@ A single failed browser peer should not mark the whole service failed.
 
 # Phase 14 — Test Hardening
 
-## PR 32 — Test coverage audit and sanitizer builds
+## Step 32 — Test coverage audit and sanitizer builds
 
-The test framework has existed since PR 1 and every PR shipped its own tests (see 4.8).
-This PR does not introduce testing; it audits and closes gaps.
+The test framework has existed since Step 1 and every step shipped its own tests (see 4.8).
+This step does not introduce testing; it audits and closes gaps.
 
 Add:
 
@@ -1959,13 +1972,13 @@ boundary instead.
 
 ---
 
-## PR 33 — Integration tests
+## Step 33 — Integration tests
 
-Compose the per-module integration tests written since PR 5 into end-to-end
+Compose the per-module integration tests written since Step 5 into end-to-end
 tests of the main pipeline.
 
 The application must still receive video through RTSP. For deterministic CI,
-the PR 5 RTSP test fixture publishes a known stream through a local RTSP server;
+Step 5's RTSP test fixture publishes a known stream through a local RTSP server;
 the application itself must not gain a file-input code path.
 
 ```text
@@ -2004,7 +2017,7 @@ Use a fixed test video and deterministic expected detections where possible.
 
 ---
 
-## PR 34 — Jetson smoke tests
+## Step 34 — Jetson smoke tests
 
 Script:
 
@@ -2030,7 +2043,7 @@ Verify:
 
 # Phase 15 — Packaging and Deployment
 
-## PR 35 — systemd service
+## Step 35 — systemd service
 
 Create:
 
@@ -2058,7 +2071,7 @@ journalctl -u skai-edge
 
 ---
 
-## PR 36 — install/package flow
+## Step 36 — install/package flow
 
 Support:
 
@@ -2095,7 +2108,7 @@ Later add `.deb` packaging if deployment becomes frequent.
 
 Optimization comes only after the end-to-end system is measurable.
 
-## PR 37 — Profiling baseline
+## Step 37 — Profiling baseline
 
 Record:
 
@@ -2118,7 +2131,7 @@ Create a baseline on Orin Nano.
 
 ---
 
-## PR 38 — Zero-copy investigation
+## Step 38 — Zero-copy investigation
 
 Investigate reducing:
 
@@ -2147,7 +2160,7 @@ libdatachannel.
 
 ---
 
-## PR 39 — Encoder optimization
+## Step 39 — Encoder optimization
 
 If `x264enc` consumes too much CPU:
 
@@ -2166,18 +2179,18 @@ Do not optimize blindly.
 
 # Phase 17 — Security
 
-## PR 40 — Web server and WHEP hardening
+## Step 40 — Web server and WHEP hardening
 
-Starting from the PR 12 baseline, audit every entry point and add:
+Starting from Step 12's baseline, audit every entry point and add:
 
-- configurable request size limits (extends PR 12 baseline)
+- configurable request size limits (extends Step 12 baseline)
 - SDP body size limit
-- path traversal protection (re-verifies PR 15 tests against all static routes, including `/diagnostics`)
-- static-file root confinement (re-verifies PR 15)
+- path traversal protection (re-verifies Step 15 tests against all static routes, including `/diagnostics`)
+- static-file root confinement (re-verifies Step 15)
 - WebSocket message size limits
-- per-endpoint timeouts (extends PR 12 baseline)
+- per-endpoint timeouts (extends Step 12 baseline)
 - connection limits
-- WebRTC peer limits (verifies PR 26 enforcement)
+- WebRTC peer limits (verifies Step 26 enforcement)
 - safe JSON parsing
 - no shell-command API
 - predictable cleanup of abandoned WHEP sessions
@@ -2383,7 +2396,7 @@ Avoid adding endpoints until there is a real caller.
 
 ## Milestone A — Headless perception
 
-Complete through PR 11.
+Complete through Step 11.
 
 Result:
 
@@ -2403,7 +2416,7 @@ No web UI required yet.
 
 ## Milestone B — Native edge server
 
-Complete through PR 16.
+Complete through Step 16.
 
 Result:
 
@@ -2424,7 +2437,7 @@ its control plane.
 
 ## Milestone C — Edge appliance
 
-Complete through PR 22.
+Complete through Step 22.
 
 Result:
 
@@ -2438,7 +2451,7 @@ This is the first version useful as a standalone field device.
 
 ## Milestone D — LAN browser video
 
-Complete through PR 26.
+Complete through Step 26.
 
 Result:
 
@@ -2458,7 +2471,7 @@ No Agora, no MediaMTX requirement, no frontend framework, and no `webrtcbin`.
 
 ## Milestone E — Deployable product baseline
 
-Complete through PR 36.
+Complete through Step 36.
 
 Result:
 
@@ -2501,7 +2514,7 @@ Recommended implementation order:
 ```
 
 Every step above is test-first (see 4.8): tests are written with, and before,
-the implementation in the same PR. Step 20 audits coverage; it is not where
+the implementation in the same step. Item 20 audits coverage; it is not where
 testing starts.
 
 The key rule is:
@@ -2529,7 +2542,7 @@ WebRTC path.
 
 ---
 
-# Architectural Rules for Future PRs
+# Architectural Rules for Future Steps
 
 1. No ROS 2 dependency.
 2. No Python runtime dependency.
@@ -2557,7 +2570,7 @@ WebRTC path.
 24. Add abstractions only when at least two real implementations require them.
 25. Profile before optimizing.
 26. Prefer explicit, readable C++ over framework-like internal infrastructure.
-27. Test-first: write failing tests for new behavior before implementing it; a PR without tests for its new behavior is incomplete.
+27. Test-first: write failing tests for new behavior before implementing it; a step without tests for its new behavior is incomplete.
 28. Test fixtures stay under `tests/` and never add a non-RTSP input path to the application.
 
 ---

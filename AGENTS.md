@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This C++17 Jetson service keeps public APIs in `include/skai/` (`core/` queues, `video/` RTSP/GStreamer, `inference/` TensorRT loader) and implementations and `main.cpp` in `src/`. `Application` owns the RTSP video module; web, detector execution, and GPS modules are future work. Unit tests are in `tests/unit/`, executable and source tests in `tests/integration/`, and the test-only RTSP server in `tests/fixtures/rtsp_test_server/`. `config/` contains example YAML; `models/`, `web/`, `systemd/`, `scripts/`, `cmake/`, `docs/`, and `third_party/` are placeholders. Read `ROADMAP.md` before adding features.
+Public APIs live in `include/skai/` (`core/` queues, `video/` RTSP, `inference/` TensorRT); implementations and `main.cpp` live in `src/`. Unit tests are in `tests/unit/`, integration tests in `tests/integration/`, and the RTSP fixture in `tests/fixtures/rtsp_test_server/`. `config/` has example YAML; `models/` and other module directories await later steps. Read `ROADMAP.md` before adding features.
 
 ## Build, Test, and Development Commands
 
@@ -18,7 +18,7 @@ ctest --test-dir build --output-on-failure
 ./build/skai-edge --rtsp-test --config config/config.example.yaml
 ```
 
-The first two commands configure and build the executable and tests; CTest runs the discovered GoogleTest cases. Running `./build/skai-edge` without options tries the built-in loopback RTSP URL. `--config` validates YAML; the RTSP worker reconnects in the background if the endpoint is offline. `--rtsp-test` prints source metrics without inference. Keep generated files under the ignored `build/` directory.
+The first two commands configure and build; CTest runs GoogleTest cases. Without options, `skai-edge` tries the loopback RTSP URL. `--config` validates YAML, and `--rtsp-test` prints source metrics. Keep generated files in ignored `build/`.
 
 ## Coding Style & Naming Conventions
 
@@ -26,7 +26,7 @@ Use C++17 without compiler extensions, as configured in `CMakeLists.txt`. Follow
 
 ## Testing Guidelines
 
-Use GoogleTest assertions (`TEST`, `EXPECT_*`, `ASSERT_*`). Name test files `*_test.cpp` and cases by behavior, as in `TEST(RtspSource, ReceivesH264OverUdp)`. For each roadmap PR, write tests first and confirm they fail; implement until they pass, then keep them passing while refactoring. Add unit tests for isolated logic and integration tests for executable behavior. RTSP tests carry the `rtsp` CTest label; hardware tests carry `jetson`. TensorRT is optional in CMake; use `-DSKAI_ENABLE_TENSORRT=ON` to require its CUDA and TensorRT development files. Run `ctest --test-dir build --output-on-failure` before submitting. There is no configured coverage threshold.
+Use GoogleTest assertions (`TEST`, `EXPECT_*`, `ASSERT_*`). Name test files `*_test.cpp` and cases by behavior, as in `TEST(RtspSource, ReceivesH264OverUdp)`. For each roadmap step, write failing tests first, then implement and refactor while they pass. If implementation and test code exceeds 800 changed lines, split it into `step-N-a`, `step-N-b`, and so on; keep each at or below 800 lines with its own tests. Add unit tests for isolated logic and integration tests for executable behavior. RTSP tests carry the `rtsp` CTest label; hardware tests carry `jetson`. TensorRT is optional in CMake; use `-DSKAI_ENABLE_TENSORRT=ON` to require its CUDA and TensorRT development files. Run `ctest --test-dir build --output-on-failure` before submitting. There is no configured coverage threshold.
 
 ## Commit & Pull Request Guidelines
 

@@ -4,17 +4,17 @@ A clean-room C++17 edge AI service for NVIDIA Jetson. The only planned video
 input is one configured RTSP URL. See [ROADMAP.md](ROADMAP.md) for the staged
 implementation and architectural rules.
 
-PR 1 provides the native executable, command-line options, GoogleTest/CTest,
-and graceful SIGINT/SIGTERM shutdown. PR 2 adds validated YAML configuration
-and structured logging. PR 3 adds an Application lifecycle that loads config,
+Step 1 provides the native executable, command-line options, GoogleTest/CTest,
+and graceful SIGINT/SIGTERM shutdown. Step 2 adds validated YAML configuration
+and structured logging. Step 3 adds an Application lifecycle that loads config,
 initializes modules in web/detector/video/GPS order, starts their workers, and
-stops and joins them in reverse order. PR 4 adds a bounded producer/consumer
-queue for future real-time paths. PR 5 adds a GStreamer runtime wrapper and a
-test-only loopback RTSP server. PR 6 adds the single RTSP input module: it
+stops and joins them in reverse order. Step 4 adds a bounded producer/consumer
+queue for future real-time paths. Step 5 adds a GStreamer runtime wrapper and a
+test-only loopback RTSP server. Step 6 adds the single RTSP input module: it
 decodes H.264/H.265 into packed BGR frames in a bounded inference queue. Web,
-inference, and GPS modules are still future work. PR 7 adds automatic recovery,
-frame-freshness stall detection, and JSON RTSP diagnostics. PR 8 adds an
-independent TensorRT engine loader; inference execution comes in PR 10.
+inference, and GPS modules are still future work. Step 7 adds automatic recovery,
+frame-freshness stall detection, and JSON RTSP diagnostics. Step 8 adds an
+independent TensorRT engine loader; inference execution comes in Step 10.
 
 ## Build and test
 
@@ -92,7 +92,7 @@ engines using NVIDIA standard plugins, the application must create one
 `TensorRtBootstrap` at process startup, call
 `initialize_standard_plugins()` once before engine loading, and keep the
 bootstrap alive until its engines are destroyed. Engine reloads do not
-re-register plugins. PR 8 accepts fixed-shape, linear, device-resident
+re-register plugins. Step 8 accepts fixed-shape, linear, device-resident
 tensors; dynamic profiles,
 vectorized formats, host shape tensors and packed INT4 are rejected with a
 specific error until their sizing and address rules are implemented. The
