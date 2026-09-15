@@ -9,6 +9,7 @@
 #include <cstring>
 #include <exception>
 #include <iterator>
+#include <sstream>
 #include <string>
 #include <utility>
 
@@ -33,7 +34,40 @@ ElementNames elements_for(const std::string& codec) {
                             : ElementNames{"rtph264depay", "h264parse", "avdec_h264"};
 }
 
+const char* health_name(SourceHealth health) {
+    switch (health) {
+    case SourceHealth::Stopped: return "stopped";
+    case SourceHealth::Connecting: return "connecting";
+    case SourceHealth::Connected: return "connected";
+    case SourceHealth::Degraded: return "degraded";
+    case SourceHealth::Stalled: return "stalled";
+    case SourceHealth::Reconnecting: return "reconnecting";
+    case SourceHealth::Error: return "error";
+    }
+    return "unknown";
+}
+
 } // namespace
+
+std::string serialize_rtsp_metrics(const RtspDiagnostics& d) {
+    std::ostringstream json;
+    json << "{\"url_configured\":" << (d.url_configured ? "true" : "false")
+         << ",\"connected\":" << ((d.health == SourceHealth::Connected ||
+                                      d.health == SourceHealth::Degraded) ? "true" : "false")
+         << ",\"health\":\"" << health_name(d.health) << "\""
+         << ",\"transport\":\"" << d.transport << "\""
+         << ",\"codec\":\"" << d.codec << "\""
+         << ",\"width\":" << d.width << ",\"height\":" << d.height
+         << ",\"fps_in\":" << d.fps_in
+         << ",\"frames_received\":" << d.frames_received
+         << ",\"frames_dropped\":" << d.frames_dropped
+         << ",\"last_frame_age_ms\":" << d.last_frame_age_ms
+         << ",\"reconnect_count\":" << d.reconnect_count
+         << ",\"packets_lost\":" << d.packets_lost
+         << ",\"packets_late\":" << d.packets_late
+         << ",\"avg_jitter_ns\":" << d.avg_jitter_ns << '}';
+    return json.str();
+}
 
 RtspSource::RtspSource(BoundedQueue<Frame>& frames, Logger& logger, DecodeMode decode_mode)
     : frames_(frames), logger_(logger), decode_mode_(decode_mode) {}
@@ -41,68 +75,69 @@ RtspSource::RtspSource(BoundedQueue<Frame>& frames, Logger& logger, DecodeMode d
 RtspSource::~RtspSource() { stop(); }
 
 bool RtspSource::start(const VideoConfig& config, std::string& error) {
-    if (pipeline_) {
+    if (worker_.joinable()) {
         error = "RTSP source is already running";
         return false;
     }
     if (!validate_video_config(config, error)) return false;
+    if (!gst_is_initialized()) {
+        error = "GStreamer must be initialized before the RTSP source";
+        return false;
+    }
+    config_ = config;
+    sink_ = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(diagnostics_mutex_);
+        diagnostics_ = {};
+        diagnostics_.health = SourceHealth::Connecting;
+        diagnostics_.url_configured = !config.rtsp_url.empty();
+        diagnostics_.transport = config.transport;
+        last_frame_time_ = {};
+        prior_frame_time_ = {};
+    }
+    try {
+        running_ = true;
+        worker_ = std::thread(&RtspSource::capture_loop, this);
+    } catch (const std::exception& failure) {
+        running_ = false;
+        error = failure.what();
+        return false;
+    }
+    error.clear();
+    return true;
+}
+
+bool RtspSource::open_pipeline(std::string& error) {
+    sink_ = nullptr;
     pipeline_ = gst::Pipeline::create_empty(logger_, error);
     if (!pipeline_) return false;
 
     GstElement* source = gst_element_factory_make("rtspsrc", "rtsp_source");
     if (!source) {
         error = "GStreamer rtspsrc plugin is unavailable";
-        stop();
+        close_pipeline();
         return false;
     }
-    g_object_set(source, "location", config.rtsp_url.c_str(), "latency", config.latency_ms,
-                 "protocols", config.transport == "tcp" ? GST_RTSP_LOWER_TRANS_TCP
-                                                         : GST_RTSP_LOWER_TRANS_UDP,
+    g_object_set(source, "location", config_.rtsp_url.c_str(), "latency", config_.latency_ms,
+                 "protocols", config_.transport == "tcp" ? GST_RTSP_LOWER_TRANS_TCP
+                                                          : GST_RTSP_LOWER_TRANS_UDP,
                  nullptr);
-    if (!config.username.empty()) {
-        g_object_set(source, "user-id", config.username.c_str(), "user-pw",
-                     config.password.c_str(), nullptr);
+    if (!config_.username.empty()) {
+        g_object_set(source, "user-id", config_.username.c_str(), "user-pw",
+                     config_.password.c_str(), nullptr);
     }
     if (!gst_bin_add(GST_BIN(pipeline_->element()), source)) {
         gst_object_unref(source);
         error = "could not add rtspsrc to RTSP pipeline";
-        stop();
+        close_pipeline();
         return false;
-    }
-    {
-        std::lock_guard<std::mutex> lock(diagnostics_mutex_);
-        diagnostics_ = {};
-        diagnostics_.health = SourceHealth::Connecting;
     }
     g_signal_connect(source, "pad-added", G_CALLBACK(on_rtp_pad), this);
+    g_signal_connect(source, "new-manager", G_CALLBACK(on_new_manager), this);
     if (!pipeline_->start(std::chrono::seconds(6))) {
         const auto detail = diagnostics().last_error;
-        error = !detail.empty() ? detail
-                               : pipeline_->last_error();
-        stop();
-        return false;
-    }
-    try {
-        running_ = true;
-        worker_ = std::thread(&RtspSource::capture_loop, this);
-    } catch (const std::exception& failure) {
-        error = failure.what();
-        stop();
-        return false;
-    }
-    {
-        std::unique_lock<std::mutex> lock(diagnostics_mutex_);
-        diagnostics_changed_.wait_for(lock, std::chrono::seconds(6), [this] {
-            return diagnostics_.health == SourceHealth::Connected ||
-                   diagnostics_.health == SourceHealth::Error;
-        });
-        if (diagnostics_.health != SourceHealth::Connected) {
-            error = !diagnostics_.last_error.empty() ? diagnostics_.last_error
-                                                     : "RTSP source did not receive a video frame before timeout";
-        }
-    }
-    if (!error.empty()) {
-        stop();
+        error = !detail.empty() ? detail : pipeline_->last_error();
+        close_pipeline();
         return false;
     }
     error.clear();
@@ -111,19 +146,38 @@ bool RtspSource::start(const VideoConfig& config, std::string& error) {
 
 void RtspSource::stop() noexcept {
     request_stop();
-    if (pipeline_) pipeline_->stop();
     if (worker_.joinable()) worker_.join();
-    sink_ = nullptr;
-    pipeline_.reset();
     std::lock_guard<std::mutex> lock(diagnostics_mutex_);
     diagnostics_.health = SourceHealth::Stopped;
 }
 
-void RtspSource::request_stop() noexcept { running_ = false; }
+void RtspSource::request_stop() noexcept {
+    running_ = false;
+    backoff_changed_.notify_all();
+}
+
+void RtspSource::close_pipeline() noexcept {
+    if (pipeline_) pipeline_->stop();
+    {
+        std::lock_guard<std::mutex> lock(jitter_mutex_);
+        if (jitterbuffer_) gst_object_unref(jitterbuffer_);
+        jitterbuffer_ = nullptr;
+        pipeline_packets_lost_ = 0;
+        pipeline_packets_late_ = 0;
+    }
+    sink_ = nullptr;
+    pipeline_.reset();
+}
 
 RtspDiagnostics RtspSource::diagnostics() const {
     std::lock_guard<std::mutex> lock(diagnostics_mutex_);
-    return diagnostics_;
+    auto snapshot = diagnostics_;
+    snapshot.frames_dropped = frames_.stats().dropped;
+    if (last_frame_time_ != std::chrono::steady_clock::time_point{}) {
+        snapshot.last_frame_age_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - last_frame_time_).count();
+    }
+    return snapshot;
 }
 
 void RtspSource::set_error(const std::string& error) {
@@ -138,6 +192,44 @@ void RtspSource::set_error(const std::string& error) {
 
 void RtspSource::on_rtp_pad(GstElement*, GstPad* pad, gpointer user_data) {
     static_cast<RtspSource*>(user_data)->connect_rtp_pad(pad);
+}
+
+void RtspSource::on_new_manager(GstElement*, GstElement* manager, gpointer user_data) {
+    g_signal_connect(manager, "new-jitterbuffer", G_CALLBACK(on_new_jitterbuffer), user_data);
+}
+
+void RtspSource::on_new_jitterbuffer(GstElement*, GstElement* jitterbuffer,
+                                     unsigned int, unsigned int, gpointer user_data) {
+    auto* self = static_cast<RtspSource*>(user_data);
+    std::lock_guard<std::mutex> lock(self->jitter_mutex_);
+    if (self->jitterbuffer_) gst_object_unref(self->jitterbuffer_);
+    self->jitterbuffer_ = GST_ELEMENT(gst_object_ref(jitterbuffer));
+    self->pipeline_packets_lost_ = 0;
+    self->pipeline_packets_late_ = 0;
+}
+
+void RtspSource::read_jitter_stats(RtspRecovery& recovery) {
+    GstStructure* stats = nullptr;
+    std::lock_guard<std::mutex> jitter_lock(jitter_mutex_);
+    if (jitterbuffer_) g_object_get(jitterbuffer_, "stats", &stats, nullptr);
+    if (!stats) return;
+    std::uint64_t lost = 0, late = 0, jitter = 0;
+    gst_structure_get_uint64(stats, "num-lost", &lost);
+    gst_structure_get_uint64(stats, "num-late", &late);
+    gst_structure_get_uint64(stats, "avg-jitter", &jitter);
+    gst_structure_free(stats);
+    if (lost > pipeline_packets_lost_) recovery.packet_loss();
+    {
+        std::lock_guard<std::mutex> lock(diagnostics_mutex_);
+        diagnostics_.packets_lost += lost >= pipeline_packets_lost_
+                                         ? lost - pipeline_packets_lost_ : lost;
+        diagnostics_.packets_late += late >= pipeline_packets_late_
+                                         ? late - pipeline_packets_late_ : late;
+        diagnostics_.avg_jitter_ns = jitter;
+    }
+    pipeline_packets_lost_ = lost;
+    pipeline_packets_late_ = late;
+    if (recovery.health() == SourceHealth::Degraded) publish_recovery(recovery);
 }
 
 void RtspSource::connect_rtp_pad(GstPad* pad) {
@@ -207,58 +299,149 @@ void RtspSource::connect_rtp_pad(GstPad* pad) {
     for (auto* element : elements) gst_element_sync_state_with_parent(element);
 }
 
-void RtspSource::capture_loop() noexcept {
-    while (running_) {
-        const auto event = pipeline_->poll(std::chrono::milliseconds(sink_ ? 0 : 100));
-        if (event.type == gst::BusEventType::Error || event.type == gst::BusEventType::Eos) {
-            set_error(event.detail);
-            break;
-        }
-        GstElement* sink = sink_.load();
-        if (!sink) continue;
-        GstSample* sample = gst_app_sink_try_pull_sample(GST_APP_SINK(sink), 100 * GST_MSECOND);
-        if (!sample) continue;
-        GstCaps* caps = gst_sample_get_caps(sample);
-        GstBuffer* buffer = gst_sample_get_buffer(sample);
-        GstVideoInfo info{};
-        GstVideoFrame video_frame{};
-        if (caps && buffer && gst_video_info_from_caps(&info, caps) &&
-            gst_video_frame_map(&video_frame, &info, buffer, GST_MAP_READ)) {
-            const int width = GST_VIDEO_INFO_WIDTH(&info);
-            const int height = GST_VIDEO_INFO_HEIGHT(&info);
-            const int source_stride = GST_VIDEO_FRAME_PLANE_STRIDE(&video_frame, 0);
-            const auto* source_pixels = static_cast<const std::uint8_t*>(
-                GST_VIDEO_FRAME_PLANE_DATA(&video_frame, 0));
-            if (width > 0 && height > 0 && source_stride >= width * 3) {
-                Frame frame;
-                frame.timestamp = std::chrono::steady_clock::now();
-                frame.pts_ns = GST_CLOCK_TIME_IS_VALID(GST_BUFFER_PTS(buffer))
-                                   ? GST_BUFFER_PTS(buffer) : 0;
-                frame.width = width;
-                frame.height = height;
-                frame.stride = width * 3;
-                frame.bgr.resize(static_cast<std::size_t>(frame.stride) * height);
-                for (int row = 0; row < height; ++row) {
-                    std::memcpy(frame.bgr.data() + static_cast<std::size_t>(row) * frame.stride,
-                                source_pixels + static_cast<std::size_t>(row) * source_stride,
-                                static_cast<std::size_t>(frame.stride));
-                }
-                {
-                    std::lock_guard<std::mutex> lock(diagnostics_mutex_);
-                    frame.sequence = ++diagnostics_.frames_received;
-                    diagnostics_.health = SourceHealth::Connected;
-                    diagnostics_.width = width;
-                    diagnostics_.height = height;
-                    diagnostics_.fps_num = info.fps_n;
-                    diagnostics_.fps_den = info.fps_d;
-                }
-                diagnostics_changed_.notify_all();
-                frames_.push(std::move(frame));
-            }
-            gst_video_frame_unmap(&video_frame);
-        }
-        gst_sample_unref(sample);
+void RtspSource::publish_recovery(const RtspRecovery& recovery) {
+    {
+        std::lock_guard<std::mutex> lock(diagnostics_mutex_);
+        diagnostics_.health = recovery.health();
+        diagnostics_.reconnect_count = recovery.reconnect_count();
+        if (recovery.health() == SourceHealth::Connected) diagnostics_.last_error.clear();
     }
+    diagnostics_changed_.notify_all();
+}
+
+bool RtspSource::capture_sample(GstSample* sample, RtspRecovery& recovery) {
+    GstCaps* caps = gst_sample_get_caps(sample);
+    GstBuffer* buffer = gst_sample_get_buffer(sample);
+    GstVideoInfo info{};
+    GstVideoFrame video_frame{};
+    if (!caps || !buffer || !gst_video_info_from_caps(&info, caps) ||
+        !gst_video_frame_map(&video_frame, &info, buffer, GST_MAP_READ)) return false;
+
+    bool captured = false;
+    const int width = GST_VIDEO_INFO_WIDTH(&info);
+    const int height = GST_VIDEO_INFO_HEIGHT(&info);
+    const int source_stride = GST_VIDEO_FRAME_PLANE_STRIDE(&video_frame, 0);
+    const auto* source_pixels = static_cast<const std::uint8_t*>(
+        GST_VIDEO_FRAME_PLANE_DATA(&video_frame, 0));
+    if (width > 0 && height > 0 && source_stride >= width * 3) {
+        Frame frame;
+        frame.timestamp = std::chrono::steady_clock::now();
+        frame.pts_ns = GST_CLOCK_TIME_IS_VALID(GST_BUFFER_PTS(buffer))
+                           ? GST_BUFFER_PTS(buffer) : 0;
+        frame.width = width;
+        frame.height = height;
+        frame.stride = width * 3;
+        frame.bgr.resize(static_cast<std::size_t>(frame.stride) * height);
+        for (int row = 0; row < height; ++row) {
+            std::memcpy(frame.bgr.data() + static_cast<std::size_t>(row) * frame.stride,
+                        source_pixels + static_cast<std::size_t>(row) * source_stride,
+                        static_cast<std::size_t>(frame.stride));
+        }
+        recovery.frame(frame.timestamp);
+        {
+            std::lock_guard<std::mutex> lock(diagnostics_mutex_);
+            frame.sequence = ++diagnostics_.frames_received;
+            diagnostics_.width = width;
+            diagnostics_.height = height;
+            diagnostics_.fps_num = info.fps_n;
+            diagnostics_.fps_den = info.fps_d;
+            if (info.fps_n > 0 && info.fps_d > 0) {
+                diagnostics_.fps_in = static_cast<double>(info.fps_n) / info.fps_d;
+            } else if (prior_frame_time_ != std::chrono::steady_clock::time_point{}) {
+                const auto seconds = std::chrono::duration<double>(frame.timestamp - prior_frame_time_).count();
+                if (seconds > 0) diagnostics_.fps_in = 1.0 / seconds;
+            }
+            prior_frame_time_ = frame.timestamp;
+            last_frame_time_ = frame.timestamp;
+        }
+        frames_.push(std::move(frame));
+        publish_recovery(recovery);
+        captured = true;
+    }
+    gst_video_frame_unmap(&video_frame);
+    return captured;
+}
+
+void RtspSource::capture_loop() noexcept {
+    RtspRecovery recovery(std::chrono::milliseconds(config_.stall_timeout_ms),
+                          std::chrono::milliseconds(config_.reconnect_delay_ms),
+                          std::chrono::milliseconds(config_.max_reconnect_delay_ms));
+    recovery.begin(std::chrono::steady_clock::now());
+    bool initial_attempt = true;
+    while (running_) {
+        if (!initial_attempt) {
+            std::unique_lock<std::mutex> lock(backoff_mutex_);
+            backoff_changed_.wait_until(lock, recovery.next_retry(), [this] {
+                return !running_;
+            });
+            if (!running_) break;
+            recovery.retry(std::chrono::steady_clock::now());
+        }
+        initial_attempt = false;
+        {
+            std::lock_guard<std::mutex> lock(diagnostics_mutex_);
+            diagnostics_.codec.clear();
+            diagnostics_.decoder.clear();
+        }
+        publish_recovery(recovery);
+
+        std::string error;
+        if (!open_pipeline(error)) {
+            if (!running_) break;
+            set_error(error);
+            recovery.fail(std::chrono::steady_clock::now());
+            publish_recovery(recovery);
+            continue;
+        }
+        const auto attempt_started = std::chrono::steady_clock::now();
+        bool received_frame = false;
+        while (running_) {
+            if (diagnostics().health == SourceHealth::Error) {
+                error = diagnostics().last_error;
+                break;
+            }
+            const auto event = pipeline_->poll(std::chrono::milliseconds(sink_ ? 0 : 100));
+            if (event.type == gst::BusEventType::Error || event.type == gst::BusEventType::Eos) {
+                error = event.detail;
+                break;
+            }
+            GstElement* sink = sink_.load();
+            if (sink) {
+                GstSample* sample = gst_app_sink_try_pull_sample(GST_APP_SINK(sink),
+                                                                  100 * GST_MSECOND);
+                if (sample) {
+                    received_frame = capture_sample(sample, recovery) || received_frame;
+                    gst_sample_unref(sample);
+                }
+            }
+            const auto now = std::chrono::steady_clock::now();
+            read_jitter_stats(recovery);
+            if (!received_frame && now - attempt_started >=
+                                       std::chrono::milliseconds(config_.stall_timeout_ms)) {
+                error = "RTSP source did not receive a video frame before timeout";
+                break;
+            }
+            if (recovery.check_stall(now)) {
+                publish_recovery(recovery);
+                logger_.log(LogLevel::Warning, "video", "RTSP source stalled: no fresh frames");
+                std::unique_lock<std::mutex> lock(backoff_mutex_);
+                backoff_changed_.wait_for(lock, std::chrono::milliseconds(100), [this] {
+                    return !running_;
+                });
+                error = "RTSP source stalled: no fresh frames";
+                break;
+            }
+        }
+        close_pipeline();
+        if (!running_) break;
+        frames_.discard_all();
+        set_error(error);
+        recovery.fail(std::chrono::steady_clock::now());
+        publish_recovery(recovery);
+    }
+    close_pipeline();
+    recovery.stop();
+    publish_recovery(recovery);
     running_ = false;
 }
 

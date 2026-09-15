@@ -4,7 +4,8 @@ pkg_check_modules(GST_RTSP_TEST REQUIRED IMPORTED_TARGET
     gstreamer-rtsp-server-1.0 gstreamer-app-1.0)
 
 add_executable(skai-unit-tests unit/command_line_test.cpp unit/config_test.cpp
-    unit/logging_test.cpp unit/application_test.cpp unit/bounded_queue_test.cpp)
+    unit/logging_test.cpp unit/application_test.cpp unit/bounded_queue_test.cpp
+    unit/rtsp_recovery_test.cpp)
 target_link_libraries(skai-unit-tests PRIVATE skai-cli skai-config skai-logging
     skai-application skai-core GTest::gtest_main)
 target_compile_definitions(skai-unit-tests PRIVATE

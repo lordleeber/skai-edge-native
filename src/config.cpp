@@ -125,6 +125,10 @@ void validate_video(const VideoConfig& video) {
                 "video.latency_ms", "must be between 0 and 10000");
     check_range(video.reconnect_delay_ms >= 1 && video.reconnect_delay_ms <= 60000,
                 "video.reconnect_delay_ms", "must be between 1 and 60000");
+    check_range(video.max_reconnect_delay_ms >= video.reconnect_delay_ms &&
+                    video.max_reconnect_delay_ms <= 60000,
+                "video.max_reconnect_delay_ms",
+                "must be between video.reconnect_delay_ms and 60000");
     check_range(video.stall_timeout_ms >= 1 && video.stall_timeout_ms <= 60000,
                 "video.stall_timeout_ms", "must be between 1 and 60000");
 }
@@ -171,13 +175,16 @@ Config parse(const YAML::Node& root) {
     Config config;
     const auto video = root["video"];
     check_keys(video, "video", {"rtsp_url", "username", "password", "transport", "latency_ms",
-                                "reconnect_delay_ms", "stall_timeout_ms"});
+                                "reconnect_delay_ms", "max_reconnect_delay_ms",
+                                "stall_timeout_ms"});
     read_scalar(video, "rtsp_url", "video", config.video.rtsp_url);
     read_scalar(video, "username", "video", config.video.username);
     read_scalar(video, "password", "video", config.video.password);
     read_scalar(video, "transport", "video", config.video.transport);
     read_scalar(video, "latency_ms", "video", config.video.latency_ms);
     read_scalar(video, "reconnect_delay_ms", "video", config.video.reconnect_delay_ms);
+    read_scalar(video, "max_reconnect_delay_ms", "video",
+                config.video.max_reconnect_delay_ms);
     read_scalar(video, "stall_timeout_ms", "video", config.video.stall_timeout_ms);
 
     if (const auto section = root["detector"]) {

@@ -14,6 +14,7 @@ struct VideoConfig {
     std::string transport = "tcp";
     int latency_ms = 100;
     int reconnect_delay_ms = 1000;
+    int max_reconnect_delay_ms = 10000;
     int stall_timeout_ms = 3000;
 };
 

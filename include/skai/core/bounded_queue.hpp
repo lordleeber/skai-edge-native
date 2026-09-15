@@ -69,6 +69,16 @@ public:
         available_.notify_all();
     }
 
+    // Drop buffered input after a source disconnects; waiting consumers remain blocked
+    // until a fresh value arrives or the queue is shut down.
+    std::size_t discard_all() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        const auto count = queue_.size();
+        queue_.clear();
+        stats_.dropped += count;
+        return count;
+    }
+
     // Begin a fresh lifecycle after all producers and consumers have stopped.
     void reset() {
         std::lock_guard<std::mutex> lock(mutex_);

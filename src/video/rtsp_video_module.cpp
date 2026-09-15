@@ -21,14 +21,7 @@ bool RtspVideoModule::start() {
         logger_.log(LogLevel::Error, "video", error);
         return false;
     }
-    const auto info = source_->diagnostics();
-    const std::string fps = info.fps_num > 0
-                                ? std::to_string(info.fps_num) + "/" +
-                                      std::to_string(info.fps_den) + " fps"
-                                : "unknown fps";
-    logger_.log(LogLevel::Info, "video", "RTSP source connected: " + info.codec + " " +
-                                         std::to_string(info.width) + "x" +
-                                         std::to_string(info.height) + " " + fps);
+    logger_.log(LogLevel::Info, "video", "RTSP source started; connecting");
     return true;
 }
 

@@ -43,3 +43,15 @@ TEST(CommandLine, ConfigOptionRequiresPath) {
     EXPECT_NE(result.exit_code, 0);
     EXPECT_NE(result.message.find("--config"), std::string::npos);
 }
+
+TEST(CommandLine, RtspTestAcceptsConfigInEitherOrder) {
+    for (const auto& args : {std::vector<std::string>{"--rtsp-test", "--config", "config/site.yaml"},
+                             std::vector<std::string>{"--config", "config/site.yaml", "--rtsp-test"}}) {
+        const auto result = skai::parse_command_line(args);
+        EXPECT_EQ(result.action, skai::CliAction::Run);
+        EXPECT_TRUE(result.rtsp_test);
+        EXPECT_EQ(result.config_path, "config/site.yaml");
+    }
+    EXPECT_NE(skai::parse_command_line({"--help"}).message.find("--rtsp-test"),
+              std::string::npos);
+}

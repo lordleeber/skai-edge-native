@@ -13,6 +13,7 @@ struct CliResult {
     int exit_code;
     std::string message;
     std::string config_path;
+    bool rtsp_test = false;
 };
 
 CliResult parse_command_line(const std::vector<std::string>& arguments);

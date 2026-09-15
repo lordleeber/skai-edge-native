@@ -104,7 +104,8 @@ ProcessResult run_command(const std::vector<std::string>& arguments) {
 }
 
 SignalResult signal_and_wait(int signal_number,
-                             const std::vector<std::string>& arguments = {}) {
+                             const std::vector<std::string>& arguments = {},
+                             const std::string& ready_marker = "skai-edge ready") {
     int descriptors[2];
     if (pipe(descriptors) != 0) return {false, false, -1};
     const pid_t pid = launch(arguments, descriptors[1]);
@@ -116,7 +117,7 @@ SignalResult signal_and_wait(int signal_number,
 
     std::string startup_output;
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-    while (startup_output.find("skai-edge ready") == std::string::npos &&
+    while (startup_output.find(ready_marker) == std::string::npos &&
            std::chrono::steady_clock::now() < deadline) {
         pollfd ready_pipe{descriptors[0], POLLIN, 0};
         if (poll(&ready_pipe, 1, 100) <= 0) continue;
@@ -126,7 +127,7 @@ SignalResult signal_and_wait(int signal_number,
         if (count <= 0) break;
         startup_output.append(buffer, static_cast<std::size_t>(count));
     }
-    const bool ready = startup_output.find("skai-edge ready") != std::string::npos;
+    const bool ready = startup_output.find(ready_marker) != std::string::npos;
 
     if (!ready) {
         kill(pid, SIGKILL);
@@ -230,6 +231,40 @@ TEST(Process, SigtermExitsSuccessfullyWithinTimeout) {
     ASSERT_FALSE(config.path.empty());
     const auto result = signal_and_wait(SIGTERM, {"--config", config.path});
     ASSERT_TRUE(result.ready);
+    ASSERT_TRUE(result.exited_in_time);
+    ASSERT_TRUE(WIFEXITED(result.status));
+    EXPECT_EQ(WEXITSTATUS(result.status), 0);
+}
+
+TEST(Process, RtspTestReportsMetricsWithoutInferenceWhileOffline) {
+    std::string error;
+    ASSERT_TRUE(skai::gst::initialize_once(error)) << error;
+    skai::test::RtspTestServer server;
+    ASSERT_TRUE(server.start(error)) << error;
+    TemporaryConfig config(server.url());
+    ASSERT_FALSE(config.path.empty());
+    server.stop();
+    const auto result = signal_and_wait(SIGTERM,
+                                        {"--rtsp-test", "--config", config.path},
+                                        "\"url_configured\":true");
+    ASSERT_TRUE(result.ready) << result.startup_output;
+    ASSERT_TRUE(result.exited_in_time);
+    ASSERT_TRUE(WIFEXITED(result.status));
+    EXPECT_EQ(WEXITSTATUS(result.status), 0);
+    EXPECT_NE(result.startup_output.find("\"transport\":\"tcp\""), std::string::npos);
+    EXPECT_NE(result.startup_output.find("\"reconnect_count\""), std::string::npos);
+}
+
+TEST(Process, ServiceStartsAndStopsWhileRtspEndpointIsOffline) {
+    std::string error;
+    ASSERT_TRUE(skai::gst::initialize_once(error)) << error;
+    skai::test::RtspTestServer server;
+    ASSERT_TRUE(server.start(error)) << error;
+    TemporaryConfig config(server.url());
+    ASSERT_FALSE(config.path.empty());
+    server.stop();
+    const auto result = signal_and_wait(SIGTERM, {"--config", config.path});
+    ASSERT_TRUE(result.ready) << result.startup_output;
     ASSERT_TRUE(result.exited_in_time);
     ASSERT_TRUE(WIFEXITED(result.status));
     EXPECT_EQ(WEXITSTATUS(result.status), 0);

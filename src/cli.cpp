@@ -3,7 +3,7 @@
 namespace skai {
 namespace {
 
-constexpr const char* usage = "Usage: skai-edge [--help | --version | --config PATH]\n";
+constexpr const char* usage = "Usage: skai-edge [--help | --version | --rtsp-test] [--config PATH]\n";
 
 } // namespace
 
@@ -15,16 +15,23 @@ CliResult parse_command_line(const std::vector<std::string>& arguments) {
     if (arguments.size() == 1 && arguments[0] == "--version") {
         return {CliAction::Exit, 0, "skai-edge " SKAI_EDGE_VERSION "\n"};
     }
-    if (arguments.size() == 2 && arguments[0] == "--config" &&
-        !arguments[1].empty() && arguments[1][0] != '-') {
-        return {CliAction::Run, 0, {}, arguments[1]};
+    CliResult result{CliAction::Run, 0, {}};
+    for (std::size_t index = 0; index < arguments.size(); ++index) {
+        if (arguments[index] == "--rtsp-test" && !result.rtsp_test) {
+            result.rtsp_test = true;
+        } else if (arguments[index] == "--config" && result.config_path.empty()) {
+            if (++index == arguments.size() || arguments[index].empty() ||
+                arguments[index][0] == '-') {
+                return {CliAction::Exit, 2, "--config requires a file path\n" +
+                                            std::string(usage)};
+            }
+            result.config_path = arguments[index];
+        } else {
+            return {CliAction::Exit, 2, "Unknown option or arguments: " + arguments[index] +
+                                        "\n" + usage};
+        }
     }
-    if (arguments[0] == "--config") {
-        return {CliAction::Exit, 2, "--config requires a file path\n" +
-                                    std::string(usage)};
-    }
-    return {CliAction::Exit, 2, "Unknown option or arguments: " + arguments[0] +
-                                    "\n" + usage};
+    return result;
 }
 
 CliResult parse_command_line(std::initializer_list<std::string> arguments) {
