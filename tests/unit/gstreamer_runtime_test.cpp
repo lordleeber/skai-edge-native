@@ -6,6 +6,7 @@
 #include <chrono>
 #include <sstream>
 #include <string>
+#include <thread>
 
 namespace {
 
@@ -91,4 +92,24 @@ TEST(GStreamerRuntime, ReleasesPipelineAndBusOnShutdown) {
     }
     EXPECT_TRUE(element_finalized);
     EXPECT_TRUE(bus_finalized);
+}
+
+TEST(GStreamerRuntime, CancelsAnAsynchronousStartWithoutWaitingForTimeout) {
+    std::string error;
+    ASSERT_TRUE(skai::gst::initialize_once(error)) << error;
+    std::ostringstream output;
+    skai::Logger logger(output);
+    auto pipeline = skai::gst::Pipeline::from_launch(
+        "appsrc is-live=false ! fakesink sync=false", logger, error);
+    ASSERT_TRUE(pipeline) << error;
+    std::atomic<bool> cancel{false};
+    std::thread trigger([&] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(150));
+        cancel = true;
+    });
+    const auto started = std::chrono::steady_clock::now();
+    EXPECT_FALSE(pipeline->start(std::chrono::seconds(6), [&] { return cancel.load(); }));
+    EXPECT_LT(std::chrono::steady_clock::now() - started,
+              std::chrono::seconds(2));
+    trigger.join();
 }

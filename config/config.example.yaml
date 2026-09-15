@@ -6,7 +6,9 @@ video:
   transport: tcp
   latency_ms: 100
   reconnect_delay_ms: 1000
+  max_reconnect_delay_ms: 10000
   stall_timeout_ms: 3000
+  first_frame_timeout_ms: 15000
 
 detector:
   engine: models/yolo11s.engine

@@ -16,6 +16,7 @@ struct QueueStats {
     std::size_t pushed = 0;
     std::size_t popped = 0;
     std::size_t dropped = 0;
+    std::size_t discarded = 0;
     std::size_t high_water_mark = 0;
 };
 
@@ -67,6 +68,16 @@ public:
             shutdown_ = true;
         }
         available_.notify_all();
+    }
+
+    // Drop buffered input after a source disconnects; waiting consumers remain blocked
+    // until a fresh value arrives or the queue is shut down.
+    std::size_t discard_all() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        const auto count = queue_.size();
+        queue_.clear();
+        stats_.discarded += count;
+        return count;
     }
 
     // Begin a fresh lifecycle after all producers and consumers have stopped.

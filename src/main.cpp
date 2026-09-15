@@ -3,11 +3,14 @@
 #include "skai/logging.hpp"
 #include "skai/video/gstreamer_runtime.hpp"
 #include "skai/video/rtsp_video_module.hpp"
+#include "skai/video/rtsp_source.hpp"
 
 #include <csignal>
+#include <cerrno>
 #include <iostream>
 #include <memory>
 #include <string>
+#include <ctime>
 #include <utility>
 #include <vector>
 
@@ -19,7 +22,7 @@ int main(int argc, char* argv[]) {
         return cli.exit_code;
     }
 
-    skai::Logger logger(std::cout);
+    skai::Logger logger(cli.rtsp_test ? std::cerr : std::cout);
 
     sigset_t shutdown_signals;
     sigemptyset(&shutdown_signals);
@@ -35,6 +38,38 @@ int main(int argc, char* argv[]) {
         skai::Logger error_logger(std::cerr);
         error_logger.log(skai::LogLevel::Error, "gstreamer", gst_error);
         return 1;
+    }
+
+    if (cli.rtsp_test) {
+        const auto config = cli.config_path.empty()
+                                ? skai::ConfigResult{true, skai::Config{}, {}}
+                                : skai::load_config(cli.config_path);
+        if (!config.ok) {
+            logger.log(skai::LogLevel::Error, "config", config.error);
+            return 2;
+        }
+        skai::BoundedQueue<skai::Frame> diagnostic_frames(2);
+        skai::RtspSource source(diagnostic_frames, logger, skai::DecodeMode::Auto, false);
+        std::string error;
+        if (!source.start(config.config.video, error)) {
+            logger.log(skai::LogLevel::Error, "video", error);
+            return 2;
+        }
+        logger.log(skai::LogLevel::Info, "video", "rtsp-test ready");
+        for (;;) {
+            std::cout << skai::serialize_rtsp_metrics(source.diagnostics()) << std::endl;
+            timespec timeout{1, 0};
+            const int signal_number = sigtimedwait(&shutdown_signals, nullptr, &timeout);
+            if (signal_number == SIGINT || signal_number == SIGTERM) break;
+            if (signal_number < 0 && errno != EAGAIN && errno != EINTR) {
+                logger.log(skai::LogLevel::Error, "core", "failed to wait for shutdown signal");
+                source.stop();
+                return 1;
+            }
+        }
+        source.stop();
+        logger.log(skai::LogLevel::Info, "video", "rtsp-test stopped");
+        return 0;
     }
 
     skai::BoundedQueue<skai::Frame> inference_frames(2);

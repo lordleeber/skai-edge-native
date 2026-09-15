@@ -93,7 +93,8 @@ std::unique_ptr<Pipeline> Pipeline::from_launch(const std::string& launch,
     return std::unique_ptr<Pipeline>(new Pipeline(std::move(element), std::move(bus), logger));
 }
 
-bool Pipeline::start(std::chrono::milliseconds timeout) {
+bool Pipeline::start(std::chrono::milliseconds timeout,
+                     const std::function<bool()>& cancelled) {
     last_error_.clear();
     gst_bus_set_flushing(bus_.get(), FALSE);
     stopped_ = false;
@@ -103,15 +104,31 @@ bool Pipeline::start(std::chrono::milliseconds timeout) {
         logger_.log(LogLevel::Error, "gstreamer", last_error_);
         return false;
     }
-    GstState state = GST_STATE_VOID_PENDING;
-    GstState pending = GST_STATE_VOID_PENDING;
-    const auto result = gst_element_get_state(element_.get(), &state, &pending, clock_time(timeout));
-    if (result == GST_STATE_CHANGE_FAILURE || state != GST_STATE_PLAYING) {
-        last_error_ = result == GST_STATE_CHANGE_FAILURE
-                          ? "pipeline failed while entering PLAYING"
-                          : "pipeline did not enter PLAYING before timeout";
-        logger_.log(LogLevel::Error, "gstreamer", last_error_);
-        return false;
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (true) {
+        if (cancelled && cancelled()) {
+            last_error_ = "pipeline startup cancelled";
+            return false;
+        }
+        GstState state = GST_STATE_VOID_PENDING;
+        GstState pending = GST_STATE_VOID_PENDING;
+        const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+            deadline - std::chrono::steady_clock::now());
+        const auto slice = std::max(std::chrono::milliseconds(0),
+                                    std::min(std::chrono::milliseconds(50), remaining));
+        const auto result = gst_element_get_state(element_.get(), &state, &pending,
+                                                  clock_time(slice));
+        if (result == GST_STATE_CHANGE_FAILURE) {
+            last_error_ = "pipeline failed while entering PLAYING";
+            logger_.log(LogLevel::Error, "gstreamer", last_error_);
+            return false;
+        }
+        if (state == GST_STATE_PLAYING) break;
+        if (std::chrono::steady_clock::now() >= deadline) {
+            last_error_ = "pipeline did not enter PLAYING before timeout";
+            logger_.log(LogLevel::Error, "gstreamer", last_error_);
+            return false;
+        }
     }
     logger_.log(LogLevel::Info, "gstreamer", "pipeline entered PLAYING");
     return true;

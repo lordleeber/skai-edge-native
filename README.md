@@ -12,7 +12,8 @@ stops and joins them in reverse order. PR 4 adds a bounded producer/consumer
 queue for future real-time paths. PR 5 adds a GStreamer runtime wrapper and a
 test-only loopback RTSP server. PR 6 adds the single RTSP input module: it
 decodes H.264/H.265 into packed BGR frames in a bounded inference queue. Web,
-inference, and GPS modules are still future work.
+inference, and GPS modules are still future work. PR 7 adds automatic recovery,
+frame-freshness stall detection, and JSON RTSP diagnostics.
 
 ## Build and test
 
@@ -29,19 +30,26 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ./build/skai-edge --version
 ./build/skai-edge --config config/config.example.yaml
+./build/skai-edge --rtsp-test --config config/config.example.yaml
 ```
 
 Run `./build/skai-edge --help` for usage. With no arguments, the service tries
 the built-in RTSP URL `rtsp://127.0.0.1/stream`; provide `--config PATH` for a
 real stream. Copy `config/config.example.yaml` and set `video.rtsp_url` for
-deployment. Startup reports readiness only after the first decoded frame; an
-invalid URL or unavailable endpoint fails clearly before readiness. Set
+deployment. Startup validates the URL, then retries in the background if the
+endpoint is unavailable. Set
 `video.transport` to `tcp` or `udp` and `video.latency_ms` for the RTSP
 jitterbuffer. Credentials may be embedded in the URL or supplied as
 `video.username` and `video.password` in YAML. Keep credential-bearing files
 out of Git. Logs use UTC timestamps and `level`, `module`, and `message`
-fields. The service waits for SIGINT or SIGTERM and exits cleanly. PR 7 will
-add automatic RTSP reconnect and stall recovery.
+fields. The service waits for SIGINT or SIGTERM and exits cleanly. Set
+`video.reconnect_delay_ms`, `video.max_reconnect_delay_ms`, and
+`video.stall_timeout_ms` to tune recovery; `video.first_frame_timeout_ms`
+allows longer initial waits for a keyframe. `--rtsp-test` skips inference and
+prints one JSON metrics line per second to stdout with health, frame age,
+dropped frames, stale frames discarded on reconnect, reconnect count, and RTP
+jitter statistics when available;
+diagnostic logs go to stderr.
 
 ## GStreamer runtime and RTSP fixture
 

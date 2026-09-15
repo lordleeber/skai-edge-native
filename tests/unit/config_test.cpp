@@ -129,6 +129,25 @@ TEST(Config, RejectsOutOfRangeValues) {
     EXPECT_NE(result.error.find("web.port"), std::string::npos);
 }
 
+TEST(Config, ValidatesReconnectBackoffCeiling) {
+    const auto valid = skai::parse_config(
+        "video: {rtsp_url: 'rtsp://camera/stream', reconnect_delay_ms: 100, max_reconnect_delay_ms: 800}\n");
+    ASSERT_TRUE(valid.ok) << valid.error;
+    EXPECT_EQ(valid.config.video.max_reconnect_delay_ms, 800);
+    const auto invalid = skai::parse_config(
+        "video: {rtsp_url: 'rtsp://camera/stream', reconnect_delay_ms: 800, max_reconnect_delay_ms: 100}\n");
+    EXPECT_FALSE(invalid.ok);
+    EXPECT_NE(invalid.error.find("video.max_reconnect_delay_ms"), std::string::npos);
+}
+
+TEST(Config, SeparatesFirstFrameTimeoutFromStallTimeout) {
+    const auto result = skai::parse_config(
+        "video: {rtsp_url: 'rtsp://camera/stream', first_frame_timeout_ms: 12000, stall_timeout_ms: 500}\n");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.config.video.first_frame_timeout_ms, 12000);
+    EXPECT_EQ(result.config.video.stall_timeout_ms, 500);
+}
+
 TEST(Config, RejectsIncorrectTypes) {
     const auto result = skai::parse_config(
         "video: {rtsp_url: 'rtsp://camera/stream', latency_ms: nope}\n");

@@ -5,6 +5,7 @@
 #include <gst/gst.h>
 
 #include <chrono>
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -42,7 +43,8 @@ public:
     Pipeline(const Pipeline&) = delete;
     Pipeline& operator=(const Pipeline&) = delete;
 
-    bool start(std::chrono::milliseconds timeout);
+    bool start(std::chrono::milliseconds timeout,
+               const std::function<bool()>& cancelled = {});
     BusEvent poll(std::chrono::milliseconds timeout);
     void stop() noexcept;
     const std::string& last_error() const { return last_error_; }
