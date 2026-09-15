@@ -87,8 +87,13 @@ the loader test builds a small engine locally, so no model download is needed.
 named input and output tensors, and reports their names, shapes, types and byte
 sizes. It owns one GPU buffer per I/O tensor and a CUDA stream, and exposes the
 native engine for a later inference consumer. The caller selects the CUDA
-device before loading and keeps that device active through destruction. PR 8
-accepts fixed-shape, linear, device-resident tensors; dynamic profiles,
+device before loading and keeps that device active through destruction. For
+engines using NVIDIA standard plugins, the application must create one
+`TensorRtBootstrap` at process startup, call
+`initialize_standard_plugins()` once before engine loading, and keep the
+bootstrap alive until its engines are destroyed. Engine reloads do not
+re-register plugins. PR 8 accepts fixed-shape, linear, device-resident
+tensors; dynamic profiles,
 vectorized formats, host shape tensors and packed INT4 are rejected with a
 specific error until their sizing and address rules are implemented. The
 service does not load `detector.engine` at startup yet.

@@ -37,8 +37,10 @@ if(NOT SKAI_ENABLE_TENSORRT STREQUAL "OFF")
     endif()
     if(CUDAToolkit_FOUND AND TENSORRT_INCLUDE_DIR AND TENSORRT_LIBRARY AND
             TENSORRT_PLUGIN_LIBRARY AND TENSORRT_MAJOR GREATER_EQUAL 10)
-        add_library(skai-tensorrt src/inference/tensorrt_engine.cpp)
+        add_library(skai-tensorrt src/inference/tensorrt_engine.cpp
+            src/inference/tensorrt_logger.cpp)
         target_include_directories(skai-tensorrt PUBLIC include ${TENSORRT_INCLUDE_DIR})
+        target_include_directories(skai-tensorrt PRIVATE src)
         target_link_libraries(skai-tensorrt PUBLIC skai-tensor-layout skai-logging
             CUDA::cudart ${TENSORRT_LIBRARY} ${TENSORRT_PLUGIN_LIBRARY})
     elseif(SKAI_ENABLE_TENSORRT STREQUAL "ON")

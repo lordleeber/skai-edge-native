@@ -12,6 +12,23 @@
 
 namespace skai {
 
+// Process-level bootstrap for NVIDIA's shared plugin registry. For plans using
+// standard plugins, create one instance, initialize before loading any engine,
+// and keep it alive until all TensorRtEngine instances have been destroyed.
+class TensorRtBootstrap {
+public:
+    explicit TensorRtBootstrap(Logger& logger);
+    ~TensorRtBootstrap();
+    TensorRtBootstrap(const TensorRtBootstrap&) = delete;
+    TensorRtBootstrap& operator=(const TensorRtBootstrap&) = delete;
+
+    bool initialize_standard_plugins(std::string& error);
+
+private:
+    struct State;
+    std::unique_ptr<State> state_;
+};
+
 // Owns one deserialized engine, its I/O device allocations and a CUDA stream.
 // The caller selects the CUDA device before load() and keeps that device active
 // when releasing the object. Execution contexts belong to the inference stage.

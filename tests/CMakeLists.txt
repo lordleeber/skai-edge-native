@@ -26,6 +26,7 @@ gtest_discover_tests(skai-gstreamer-tests PROPERTIES TIMEOUT 15)
 
 if(TARGET skai-tensorrt)
     add_executable(skai-tensorrt-tests integration/tensorrt_engine_test.cpp)
+    target_include_directories(skai-tensorrt-tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
     target_link_libraries(skai-tensorrt-tests PRIVATE skai-tensorrt GTest::gtest_main)
     gtest_discover_tests(skai-tensorrt-tests PROPERTIES LABELS jetson TIMEOUT 120)
 endif()

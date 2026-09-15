@@ -1,42 +1,14 @@
 #include "skai/inference/tensorrt_engine.hpp"
+#include "inference/tensorrt_logger.hpp"
 
 #include <NvInferPlugin.h>
 
 #include <fstream>
 #include <limits>
-#include <sstream>
 #include <utility>
 
 namespace skai {
 namespace {
-
-class TensorRtLogger final : public nvinfer1::ILogger {
-public:
-    explicit TensorRtLogger(Logger& logger) : logger_(logger) {}
-
-    void log(Severity severity, const char* message) noexcept override {
-        try {
-            LogLevel level = LogLevel::Debug;
-            if (severity == Severity::kINTERNAL_ERROR || severity == Severity::kERROR) {
-                level = LogLevel::Error;
-                last_error_ = message ? message : "unknown TensorRT error";
-            } else if (severity == Severity::kWARNING) {
-                level = LogLevel::Warning;
-            } else if (severity == Severity::kINFO) {
-                level = LogLevel::Info;
-            }
-            logger_.log(level, "tensorrt", message ? message : "unknown TensorRT message");
-        } catch (...) {
-            // TensorRT's logger contract is noexcept.
-        }
-    }
-
-    const std::string& last_error() const noexcept { return last_error_; }
-
-private:
-    Logger& logger_;
-    std::string last_error_;
-};
 
 std::pair<const char*, std::size_t> tensor_type(nvinfer1::DataType type) {
     using Type = nvinfer1::DataType;
@@ -82,6 +54,29 @@ bool read_engine_file(const std::string& path, std::vector<char>& bytes,
 
 } // namespace
 
+struct TensorRtBootstrap::State {
+    explicit State(Logger& logger) : trt_logger(logger) {}
+    detail::TensorRtLogger trt_logger;
+    bool initialized = false;
+};
+
+TensorRtBootstrap::TensorRtBootstrap(Logger& logger)
+    : state_(std::make_unique<State>(logger)) {}
+TensorRtBootstrap::~TensorRtBootstrap() = default;
+
+bool TensorRtBootstrap::initialize_standard_plugins(std::string& error) {
+    error.clear();
+    if (state_->initialized) return true;
+    if (!initLibNvInferPlugins(&state_->trt_logger, "")) {
+        error = "failed to register NVIDIA plugins in the process TensorRT registry";
+        const auto detail = state_->trt_logger.last_error();
+        if (!detail.empty()) error += ": " + detail;
+        return false;
+    }
+    state_->initialized = true;
+    return true;
+}
+
 struct TensorRtEngine::State {
     explicit State(Logger& logger) : trt_logger(logger) {}
     ~State() {
@@ -90,7 +85,7 @@ struct TensorRtEngine::State {
         if (stream) cudaStreamDestroy(stream);
     }
 
-    TensorRtLogger trt_logger;
+    detail::TensorRtLogger trt_logger;
     std::unique_ptr<nvinfer1::IRuntime> runtime;
     std::unique_ptr<nvinfer1::ICudaEngine> engine;
     std::vector<TensorInfo> tensors;
@@ -109,10 +104,6 @@ bool TensorRtEngine::load(const std::string& path, std::string& error) {
     if (!read_engine_file(path, bytes, error)) return false;
 
     auto next = std::make_unique<State>(logger_);
-    if (!initLibNvInferPlugins(&next->trt_logger, "")) {
-        error = "failed to register TensorRT plugins";
-        return false;
-    }
     next->runtime.reset(nvinfer1::createInferRuntime(next->trt_logger));
     if (!next->runtime) {
         error = "failed to create TensorRT runtime";
@@ -122,9 +113,8 @@ bool TensorRtEngine::load(const std::string& path, std::string& error) {
     if (!next->engine) {
         error = "cannot deserialize TensorRT engine '" + path +
                 "'; it may be corrupt or incompatible with this TensorRT version, GPU, or plugins";
-        if (!next->trt_logger.last_error().empty()) {
-            error += ": " + next->trt_logger.last_error();
-        }
+        const auto detail = next->trt_logger.last_error();
+        if (!detail.empty()) error += ": " + detail;
         return false;
     }
 

@@ -1,14 +1,18 @@
 #include "skai/inference/tensorrt_engine.hpp"
+#include "inference/tensorrt_logger.hpp"
 
 #include <gtest/gtest.h>
 
 #include <cuda_runtime_api.h>
 
 #include <cstdio>
+#include <atomic>
 #include <fstream>
 #include <memory>
 #include <sstream>
 #include <string>
+#include <thread>
+#include <vector>
 #include <unistd.h>
 
 namespace {
@@ -41,6 +45,46 @@ private:
 
 } // namespace
 
+TEST(TensorRtEngine, LoggerAcceptsConcurrentErrorsAndDiagnosticReads) {
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    skai::detail::TensorRtLogger trt_logger(logger);
+    std::atomic<bool> writers_done{false};
+    std::atomic<bool> malformed{false};
+    std::thread reader([&] {
+        while (!writers_done.load()) {
+            const auto error = trt_logger.last_error();
+            if (!error.empty() && error != "engine incompatible" &&
+                error != "plugin unavailable") {
+                malformed.store(true);
+            }
+        }
+    });
+    std::vector<std::thread> writers;
+    for (int index = 0; index < 4; ++index) {
+        writers.emplace_back([&, index] {
+            for (int attempt = 0; attempt < 100; ++attempt) {
+                trt_logger.log(nvinfer1::ILogger::Severity::kERROR,
+                               index % 2 == 0 ? "engine incompatible" : "plugin unavailable");
+            }
+        });
+    }
+    for (auto& writer : writers) writer.join();
+    writers_done.store(true);
+    reader.join();
+    EXPECT_FALSE(malformed.load());
+    EXPECT_FALSE(trt_logger.last_error().empty());
+}
+
+TEST(TensorRtEngine, StandardPluginsRequireExplicitBootstrap) {
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    skai::TensorRtBootstrap bootstrap(logger);
+    std::string error;
+    EXPECT_TRUE(bootstrap.initialize_standard_plugins(error)) << error;
+    EXPECT_TRUE(bootstrap.initialize_standard_plugins(error)) << error;
+}
+
 TEST(TensorRtEngine, ReportsMissingEmptyAndIncompatibleFiles) {
     std::ostringstream logs;
     skai::Logger logger(logs);
@@ -67,6 +111,12 @@ TEST(TensorRtEngine, LoadsSerializedEngineAndOwnsBuffersAndStream) {
         GTEST_SKIP() << "CUDA device unavailable";
     }
 
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    skai::TensorRtBootstrap bootstrap(logger);
+    std::string error;
+    ASSERT_TRUE(bootstrap.initialize_standard_plugins(error)) << error;
+
     QuietLogger trt_logger;
     std::unique_ptr<nvinfer1::IBuilder> builder(nvinfer1::createInferBuilder(trt_logger));
     ASSERT_NE(builder, nullptr);
@@ -88,10 +138,7 @@ TEST(TensorRtEngine, LoadsSerializedEngineAndOwnsBuffersAndStream) {
     TemporaryEngine file;
     ASSERT_FALSE(file.path().empty());
     file.write(serialized->data(), serialized->size());
-    std::ostringstream logs;
-    skai::Logger logger(logs);
     skai::TensorRtEngine loader(logger);
-    std::string error;
     ASSERT_TRUE(loader.load(file.path(), error)) << error;
     EXPECT_TRUE(loader.loaded());
     EXPECT_NE(loader.native_engine(), nullptr);
