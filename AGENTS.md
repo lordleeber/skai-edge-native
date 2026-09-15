@@ -2,11 +2,11 @@
 
 ## Project Structure & Module Organization
 
-This repository currently builds a small C++17 Jetson edge-service skeleton. Public interfaces, including the bounded queue in `include/skai/core/`, live in `include/skai/`; implementations and the executable entry point live in `src/`. `Application` owns lifecycle hooks for web, detector, video, and GPS modules; those modules are not yet implemented. Unit tests are in `tests/unit/`, executable tests are in `tests/integration/`, and test-only YAML fixtures are in `tests/fixtures/`. `config/` contains the example configuration; `models/`, `web/`, `systemd/`, `scripts/`, `cmake/`, `docs/`, and `third_party/` are placeholders for later stages. Read `ROADMAP.md` before adding those features; the current service has no RTSP ingest or inference.
+This C++17 Jetson service keeps public APIs in `include/skai/` (`core/` queues, `video/` GStreamer) and implementations and `main.cpp` in `src/`. `Application` owns lifecycle hooks for web, detector, video, and GPS; those modules are not yet implemented. Unit tests are in `tests/unit/`, executable tests in `tests/integration/`, and the test-only RTSP server in `tests/fixtures/rtsp_test_server/`. `config/` contains example YAML; `models/`, `web/`, `systemd/`, `scripts/`, `cmake/`, `docs/`, and `third_party/` are placeholders. Read `ROADMAP.md` before adding those features; the service has no RTSP ingest or inference yet.
 
 ## Build, Test, and Development Commands
 
-Install CMake 3.22 or newer, a C++17 compiler, GoogleTest (`libgtest-dev`), and yaml-cpp (`libyaml-cpp-dev`). From the repository root:
+Install CMake 3.22+, a C++17 compiler, GoogleTest (`libgtest-dev`), yaml-cpp (`libyaml-cpp-dev`), and GStreamer development packages (`libgstreamer1.0-dev`, `libgstreamer-plugins-base1.0-dev`, `libgstrtspserver-1.0-dev`). Install H.264 test plugins. From the repository root:
 
 ```sh
 cmake -S . -B build
@@ -25,7 +25,7 @@ Use C++17 without compiler extensions, as configured in `CMakeLists.txt`. Follow
 
 ## Testing Guidelines
 
-Use GoogleTest assertions (`TEST`, `EXPECT_*`, `ASSERT_*`). Name test files `*_test.cpp` and cases by behavior, as in `TEST(CommandLine, HelpPrintsUsage)`. For each roadmap PR, write tests for new behavior first and confirm they fail; then implement until they pass and keep them passing while refactoring. Add unit tests for parsing or other isolated logic and integration tests when executable output, exit status, or signals matter. Run `ctest --test-dir build --output-on-failure` before submitting. There is no configured coverage threshold.
+Use GoogleTest assertions (`TEST`, `EXPECT_*`, `ASSERT_*`). Name test files `*_test.cpp` and cases by behavior, as in `TEST(CommandLine, HelpPrintsUsage)`. For each roadmap PR, write tests first and confirm they fail; implement until they pass, then keep them passing while refactoring. Add unit tests for isolated logic and integration tests for executable behavior. RTSP fixture tests carry the `rtsp` CTest label. Run `ctest --test-dir build --output-on-failure` before submitting. There is no configured coverage threshold.
 
 ## Commit & Pull Request Guidelines
 

@@ -6,6 +6,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(Threads REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(GSTREAMER REQUIRED IMPORTED_TARGET gstreamer-1.0)
 
 add_library(skai-core INTERFACE)
 target_include_directories(skai-core INTERFACE include)
@@ -27,8 +29,12 @@ add_library(skai-application src/application.cpp)
 target_include_directories(skai-application PUBLIC include)
 target_link_libraries(skai-application PUBLIC skai-config skai-logging Threads::Threads)
 
+add_library(skai-gstreamer src/video/gstreamer_runtime.cpp)
+target_include_directories(skai-gstreamer PUBLIC include)
+target_link_libraries(skai-gstreamer PUBLIC skai-logging PkgConfig::GSTREAMER)
+
 add_executable(skai-edge src/main.cpp)
-target_link_libraries(skai-edge PRIVATE skai-cli skai-application)
+target_link_libraries(skai-edge PRIVATE skai-cli skai-application skai-gstreamer)
 
 enable_testing()
 add_subdirectory(tests)
