@@ -1,6 +1,7 @@
 #include "skai/application.hpp"
 #include "skai/cli.hpp"
 #include "skai/logging.hpp"
+#include "skai/video/gstreamer_runtime.hpp"
 
 #include <csignal>
 #include <iostream>
@@ -23,6 +24,13 @@ int main(int argc, char* argv[]) {
     sigaddset(&shutdown_signals, SIGTERM);
     if (sigprocmask(SIG_BLOCK, &shutdown_signals, nullptr) != 0) {
         logger.log(skai::LogLevel::Error, "core", "failed to configure shutdown signals");
+        return 1;
+    }
+
+    std::string gst_error;
+    if (!skai::gst::initialize_once(gst_error)) {
+        skai::Logger error_logger(std::cerr);
+        error_logger.log(skai::LogLevel::Error, "gstreamer", gst_error);
         return 1;
     }
 
