@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This C++17 Jetson service keeps public APIs in `include/skai/` (`core/` queues, `video/` RTSP/GStreamer) and implementations and `main.cpp` in `src/`. `Application` owns the RTSP video module; web, detector, and GPS modules are future work. Unit tests are in `tests/unit/`, executable and source tests in `tests/integration/`, and the test-only RTSP server in `tests/fixtures/rtsp_test_server/`. `config/` contains example YAML; `models/`, `web/`, `systemd/`, `scripts/`, `cmake/`, `docs/`, and `third_party/` are placeholders. Read `ROADMAP.md` before adding features.
+This C++17 Jetson service keeps public APIs in `include/skai/` (`core/` queues, `video/` RTSP/GStreamer, `inference/` TensorRT loader) and implementations and `main.cpp` in `src/`. `Application` owns the RTSP video module; web, detector execution, and GPS modules are future work. Unit tests are in `tests/unit/`, executable and source tests in `tests/integration/`, and the test-only RTSP server in `tests/fixtures/rtsp_test_server/`. `config/` contains example YAML; `models/`, `web/`, `systemd/`, `scripts/`, `cmake/`, `docs/`, and `third_party/` are placeholders. Read `ROADMAP.md` before adding features.
 
 ## Build, Test, and Development Commands
 
@@ -26,7 +26,7 @@ Use C++17 without compiler extensions, as configured in `CMakeLists.txt`. Follow
 
 ## Testing Guidelines
 
-Use GoogleTest assertions (`TEST`, `EXPECT_*`, `ASSERT_*`). Name test files `*_test.cpp` and cases by behavior, as in `TEST(RtspSource, ReceivesH264OverUdp)`. For each roadmap PR, write tests first and confirm they fail; implement until they pass, then keep them passing while refactoring. Add unit tests for isolated logic and integration tests for executable behavior. RTSP tests carry the `rtsp` CTest label; hardware tests also carry `jetson`. Run `ctest --test-dir build --output-on-failure` before submitting. There is no configured coverage threshold.
+Use GoogleTest assertions (`TEST`, `EXPECT_*`, `ASSERT_*`). Name test files `*_test.cpp` and cases by behavior, as in `TEST(RtspSource, ReceivesH264OverUdp)`. For each roadmap PR, write tests first and confirm they fail; implement until they pass, then keep them passing while refactoring. Add unit tests for isolated logic and integration tests for executable behavior. RTSP tests carry the `rtsp` CTest label; hardware tests carry `jetson`. TensorRT is optional in CMake; use `-DSKAI_ENABLE_TENSORRT=ON` to require its CUDA and TensorRT development files. Run `ctest --test-dir build --output-on-failure` before submitting. There is no configured coverage threshold.
 
 ## Commit & Pull Request Guidelines
 

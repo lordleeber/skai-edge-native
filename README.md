@@ -13,7 +13,8 @@ queue for future real-time paths. PR 5 adds a GStreamer runtime wrapper and a
 test-only loopback RTSP server. PR 6 adds the single RTSP input module: it
 decodes H.264/H.265 into packed BGR frames in a bounded inference queue. Web,
 inference, and GPS modules are still future work. PR 7 adds automatic recovery,
-frame-freshness stall detection, and JSON RTSP diagnostics.
+frame-freshness stall detection, and JSON RTSP diagnostics. PR 8 adds an
+independent TensorRT engine loader; inference execution comes in PR 10.
 
 ## Build and test
 
@@ -73,6 +74,24 @@ require Basic authentication for source tests. On Jetson, the source selects
 used elsewhere. The `RtspSource` API exposes frame sequence, capture timestamp,
 codec, decoder, resolution, FPS, frame count, and health diagnostics. FPS is
 reported as unknown when the upstream stream does not advertise a frame rate.
+
+## TensorRT engine loader
+
+On a Jetson with CUDA Toolkit and TensorRT 10 development files, CMake builds
+the `skai-tensorrt` library automatically. Set `-DSKAI_ENABLE_TENSORRT=ON` to
+require those dependencies or `OFF` for a build without them. Run
+`ctest --test-dir build -L jetson --output-on-failure` for the hardware tests;
+the loader test builds a small engine locally, so no model download is needed.
+
+`skai::TensorRtEngine` loads a trusted serialized engine, checks that it has
+named input and output tensors, and reports their names, shapes, types and byte
+sizes. It owns one GPU buffer per I/O tensor and a CUDA stream, and exposes the
+native engine for a later inference consumer. The caller selects the CUDA
+device before loading and keeps that device active through destruction. PR 8
+accepts fixed-shape, linear, device-resident tensors; dynamic profiles,
+vectorized formats, host shape tensors and packed INT4 are rejected with a
+specific error until their sizing and address rules are implemented. The
+service does not load `detector.engine` at startup yet.
 
 ## Bounded queue
 
