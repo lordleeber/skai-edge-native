@@ -63,7 +63,8 @@ bool RtspTestServer::start(std::string& error) {
         return false;
     }
     gst_rtsp_server_set_address(server_, "127.0.0.1");
-    gst_rtsp_server_set_service(server_, "0");
+    const std::string service = port_ > 0 ? std::to_string(port_) : "0";
+    gst_rtsp_server_set_service(server_, service.c_str());
     GstRTSPMountPoints* mounts = gst_rtsp_server_get_mount_points(server_);
     GstRTSPMediaFactory* factory = gst_rtsp_media_factory_new();
     if (!mounts || !factory) {
@@ -99,12 +100,13 @@ bool RtspTestServer::start(std::string& error) {
         stop();
         return false;
     }
-    port_ = gst_rtsp_server_get_bound_port(server_);
-    if (port_ <= 0) {
-        error = "RTSP test server did not bind an ephemeral port";
+    const int bound_port = gst_rtsp_server_get_bound_port(server_);
+    if (bound_port <= 0 || (port_ > 0 && bound_port != port_)) {
+        error = "RTSP test server did not bind the requested port";
         stop();
         return false;
     }
+    port_ = bound_port;
     try {
         running_ = true;
         worker_ = std::thread([this] {
@@ -139,7 +141,6 @@ void RtspTestServer::stop() noexcept {
     source_ = nullptr;
     context_ = nullptr;
     server_ = nullptr;
-    port_ = 0;
 }
 
 bool RtspTestServer::set_stalled(bool stalled) {

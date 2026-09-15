@@ -54,15 +54,21 @@ TEST(RtspFixture, CanStopAndRestart) {
     std::string error;
     ASSERT_TRUE(skai::gst::initialize_once(error)) << error;
     skai::test::RtspTestServer server;
-    for (int cycle = 0; cycle < 10; ++cycle) {
-        ASSERT_TRUE(server.start(error)) << error;
-        server.stop();
-        EXPECT_EQ(server.port(), 0);
-    }
     ASSERT_TRUE(server.start(error)) << error;
+    const int original_port = server.port();
+    const std::string original_url = server.url();
+    ASSERT_GT(original_port, 0);
+    for (int cycle = 0; cycle < 10; ++cycle) {
+        server.stop();
+        EXPECT_EQ(server.port(), original_port);
+        EXPECT_EQ(server.url(), original_url);
+        ASSERT_TRUE(server.start(error)) << error;
+        EXPECT_EQ(server.port(), original_port);
+        EXPECT_EQ(server.url(), original_url);
+    }
     std::ostringstream output;
     skai::Logger logger(output);
-    EXPECT_TRUE(receives_sample(server.url(), "rtph264depay", logger)) << output.str();
+    EXPECT_TRUE(receives_sample(original_url, "rtph264depay", logger)) << output.str();
 }
 
 TEST(RtspFixture, CanRestartWhileClientWasPlaying) {
@@ -70,10 +76,12 @@ TEST(RtspFixture, CanRestartWhileClientWasPlaying) {
     ASSERT_TRUE(skai::gst::initialize_once(error)) << error;
     skai::test::RtspTestServer server;
     ASSERT_TRUE(server.start(error)) << error;
+    const int original_port = server.port();
+    const std::string original_url = server.url();
     std::ostringstream output;
     skai::Logger logger(output);
     auto client = skai::gst::Pipeline::from_launch(
-        "rtspsrc location=" + server.url() +
+        "rtspsrc location=" + original_url +
             " protocols=tcp latency=50 ! rtph264depay ! "
             "appsink name=sink sync=false max-buffers=1 drop=true",
         logger, error);
@@ -87,10 +95,13 @@ TEST(RtspFixture, CanRestartWhileClientWasPlaying) {
     gst_object_unref(sink);
 
     server.stop();
-    EXPECT_EQ(server.port(), 0);
+    EXPECT_EQ(server.port(), original_port);
+    EXPECT_EQ(server.url(), original_url);
     client->stop();
     ASSERT_TRUE(server.start(error)) << error;
-    EXPECT_TRUE(receives_sample(server.url(), "rtph264depay", logger)) << output.str();
+    EXPECT_EQ(server.port(), original_port);
+    EXPECT_EQ(server.url(), original_url);
+    EXPECT_TRUE(receives_sample(original_url, "rtph264depay", logger)) << output.str();
 }
 
 TEST(RtspFixture, CanStallAndResumeActiveStream) {

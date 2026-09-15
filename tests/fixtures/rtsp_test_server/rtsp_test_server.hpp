@@ -24,6 +24,7 @@ public:
     bool start(std::string& error);
     void stop() noexcept;
     bool set_stalled(bool stalled);
+    // The first bound endpoint remains available across stop/start cycles.
     int port() const { return port_; }
     std::string url() const;
 
