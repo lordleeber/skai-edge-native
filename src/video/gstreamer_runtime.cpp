@@ -43,9 +43,17 @@ Pipeline::Pipeline(ElementPtr element, BusPtr bus, Logger& logger)
     : element_(std::move(element)), bus_(std::move(bus)), logger_(logger) {}
 
 Pipeline::~Pipeline() {
-    stop();
+    if (!stop()) stop();
     bus_.reset();
-    element_.reset();
+    if (stopped_) {
+        element_.reset();
+    } else {
+        // Retain the Gst reference when a broken element cannot enter NULL.
+        // Releasing the last reference while it is active is unsafe.
+        logger_.log(LogLevel::Error, "gstreamer",
+                    "pipeline remains referenced after repeated NULL failure");
+        element_.release();
+    }
 }
 
 std::unique_ptr<Pipeline> Pipeline::create_empty(Logger& logger, std::string& error) {
@@ -167,21 +175,26 @@ BusEvent Pipeline::poll(std::chrono::milliseconds timeout) {
     return {BusEventType::StateChanged, "state changed", old_state, new_state};
 }
 
-void Pipeline::stop() noexcept {
-    if (stopped_ || !element_) return;
-    stopped_ = true;
+bool Pipeline::stop() noexcept {
+    if (stopped_ || !element_) return true;
     logger_.log(LogLevel::Info, "gstreamer", "pipeline state NULL requested");
     const auto requested = gst_element_set_state(element_.get(), GST_STATE_NULL);
     GstState state = GST_STATE_VOID_PENDING;
     const auto settled = gst_element_get_state(element_.get(), &state, nullptr, 2 * GST_SECOND);
-    if (requested == GST_STATE_CHANGE_FAILURE || settled == GST_STATE_CHANGE_FAILURE) {
-        logger_.log(LogLevel::Error, "gstreamer", "pipeline failed while entering NULL");
-    } else if (state == GST_STATE_NULL) {
-        logger_.log(LogLevel::Info, "gstreamer", "pipeline entered NULL");
-    } else {
-        logger_.log(LogLevel::Warning, "gstreamer", "pipeline did not enter NULL before timeout");
+    if (requested == GST_STATE_CHANGE_FAILURE || settled == GST_STATE_CHANGE_FAILURE ||
+        state != GST_STATE_NULL) {
+        last_error_ = requested == GST_STATE_CHANGE_FAILURE ||
+                              settled == GST_STATE_CHANGE_FAILURE
+                          ? "pipeline failed while entering NULL"
+                          : "pipeline did not enter NULL before timeout";
+        logger_.log(LogLevel::Error, "gstreamer", last_error_);
+        return false;
     }
+    stopped_ = true;
+    last_error_.clear();
+    logger_.log(LogLevel::Info, "gstreamer", "pipeline entered NULL");
     if (bus_) gst_bus_set_flushing(bus_.get(), TRUE);
+    return true;
 }
 
 } // namespace gst

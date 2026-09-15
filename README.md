@@ -17,12 +17,12 @@ frame-freshness stall detection, and JSON RTSP diagnostics.
 
 ## Build and test
 
-Install CMake 3.22+, a C++17 compiler, GoogleTest (`libgtest-dev` on Ubuntu),
-yaml-cpp (`libyaml-cpp-dev`), GStreamer development packages
-(`libgstreamer1.0-dev`, `libgstreamer-plugins-base1.0-dev`,
-`libgstrtspserver-1.0-dev`), and GStreamer plugins from the base, good, ugly
+Install CMake 3.22+, a C++17 compiler, yaml-cpp (`libyaml-cpp-dev`),
+GStreamer development packages (`libgstreamer1.0-dev`,
+`libgstreamer-plugins-base1.0-dev`), and GStreamer plugins from the base, good, ugly
 (H.264), libav (software H.264/H.265 decode), and bad (optional H.265) sets,
-then:
+then install GoogleTest (`libgtest-dev`) and the test-only RTSP server
+development package (`libgstrtspserver-1.0-dev`) to run tests:
 
 ```sh
 cmake -S . -B build
@@ -31,6 +31,13 @@ ctest --test-dir build --output-on-failure
 ./build/skai-edge --version
 ./build/skai-edge --config config/config.example.yaml
 ./build/skai-edge --rtsp-test --config config/config.example.yaml
+```
+
+For an executable-only build without GoogleTest or the RTSP-server fixture:
+
+```sh
+cmake -S . -B build/production -DBUILD_TESTING=OFF
+cmake --build build/production --target skai-edge
 ```
 
 Run `./build/skai-edge --help` for usage. With no arguments, the service tries
