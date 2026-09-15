@@ -5,19 +5,28 @@ input is one configured RTSP URL. See [ROADMAP.md](ROADMAP.md) for the staged
 implementation and architectural rules.
 
 PR 1 provides the native executable, command-line options, GoogleTest/CTest,
-and graceful SIGINT/SIGTERM shutdown. It does not yet ingest video.
+and graceful SIGINT/SIGTERM shutdown. PR 2 adds validated YAML configuration
+and structured logging. It does not yet ingest video.
 
 ## Build and test
 
-Install CMake, a C++17 compiler, and GoogleTest (`libgtest-dev` on Ubuntu), then:
+Install CMake 3.22+, a C++17 compiler, GoogleTest (`libgtest-dev` on Ubuntu),
+and yaml-cpp (`libyaml-cpp-dev`), then:
 
 ```sh
 cmake -S . -B build
 cmake --build build
 ctest --test-dir build --output-on-failure
 ./build/skai-edge --version
+./build/skai-edge --config config/config.example.yaml
 ```
 
-Run `./build/skai-edge --help` for usage. With no arguments, the service waits
-for SIGINT or SIGTERM and exits cleanly. Future PRs will add configuration,
-RTSP ingest, inference, and web APIs.
+Run `./build/skai-edge --help` for usage. With no arguments, the service uses
+built-in defaults; `--config PATH` loads and validates a YAML file before it
+reports readiness. Copy `config/config.example.yaml` and set one real RTSP URL
+for deployment. Invalid files produce an error with the field name and exit
+before readiness. Logs use UTC timestamps and `level`, `module`, and `message`
+fields; set `logging.level` to `trace`, `debug`, `info`, `warning`, or `error`.
+The service waits for SIGINT or SIGTERM and exits cleanly. Future PRs will add
+RTSP ingest, inference, and web APIs. The example URL uses the provided test
+endpoint; PR 2 validates its syntax without contacting the server.

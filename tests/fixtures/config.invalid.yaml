@@ -1,0 +1,4 @@
+video:
+  rtsp_url: rtsp://camera.local/stream
+web:
+  port: 70000

@@ -30,3 +30,16 @@ TEST(CommandLine, UnknownOptionFailsWithUsage) {
     EXPECT_NE(result.message.find("Usage:"), std::string::npos);
     EXPECT_NE(result.message.find("--unknown"), std::string::npos);
 }
+
+TEST(CommandLine, ConfigOptionStartsServiceWithPath) {
+    const auto result = skai::parse_command_line({"--config", "config/site.yaml"});
+    EXPECT_EQ(result.action, skai::CliAction::Run);
+    EXPECT_EQ(result.config_path, "config/site.yaml");
+}
+
+TEST(CommandLine, ConfigOptionRequiresPath) {
+    const auto result = skai::parse_command_line({"--config"});
+    EXPECT_EQ(result.action, skai::CliAction::Exit);
+    EXPECT_NE(result.exit_code, 0);
+    EXPECT_NE(result.message.find("--config"), std::string::npos);
+}

@@ -1,0 +1,37 @@
+# Copy this file and adjust the RTSP URL for your deployment.
+video:
+  rtsp_url: "rtsp://100.69.117.102:8554/test"
+  transport: tcp
+  latency_ms: 100
+  reconnect_delay_ms: 1000
+  stall_timeout_ms: 3000
+
+detector:
+  engine: models/yolo11s.engine
+  confidence: 0.35
+  nms: 0.45
+
+web:
+  bind: 0.0.0.0
+  port: 8080
+
+recording:
+  enabled: true
+  directory: recordings
+  segment_seconds: 300
+
+gps:
+  enabled: true
+  source: fixed
+  latitude: 25.033964
+  longitude: 121.564468
+  altitude_m: 10.0
+
+webrtc:
+  enabled: true
+  max_peers: 2
+  host_interfaces: [eth0, wlan0]
+  ice_log_verbosity: 1
+
+logging:
+  level: info
