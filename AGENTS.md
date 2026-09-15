@@ -25,7 +25,7 @@ Use C++17 without compiler extensions, as configured in `CMakeLists.txt`. Follow
 
 ## Testing Guidelines
 
-Use GoogleTest assertions (`TEST`, `EXPECT_*`, `ASSERT_*`). Name test files `*_test.cpp` and cases by behavior, as in `TEST(CommandLine, HelpPrintsUsage)`. Add unit tests for parsing or other isolated logic and integration tests when executable output, exit status, or signals matter. Run `ctest --test-dir build --output-on-failure` before submitting. There is no configured coverage threshold.
+Use GoogleTest assertions (`TEST`, `EXPECT_*`, `ASSERT_*`). Name test files `*_test.cpp` and cases by behavior, as in `TEST(CommandLine, HelpPrintsUsage)`. For each roadmap PR, write tests for new behavior first and confirm they fail; then implement until they pass and keep them passing while refactoring. Add unit tests for parsing or other isolated logic and integration tests when executable output, exit status, or signals matter. Run `ctest --test-dir build --output-on-failure` before submitting. There is no configured coverage threshold.
 
 ## Commit & Pull Request Guidelines
 
