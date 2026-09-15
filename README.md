@@ -16,7 +16,8 @@ inference, and GPS modules are still future work. Step 7 adds automatic recovery
 frame-freshness stall detection, and JSON RTSP diagnostics. Step 8 adds an
 independent TensorRT engine loader; inference execution comes in Step 10.
 Step 9-a adds the CPU reference letterbox and NCHW conversion used to verify
-the later CUDA path.
+the later CUDA path. Step 9-b adds the fused CUDA path and validates it against
+the local YOLO11s TensorRT engine.
 
 ## Build and test
 
@@ -109,6 +110,16 @@ and FP32 NCHW layout. The returned plan retains scale and padding for Step 10
 box-coordinate restoration. The planned local `yolo11s_fp16.engine` binding is
 FP32 `images` with shape `1×3×640×640`; model files stay outside Git under
 `/var/lib/skai-edge/models/`.
+
+When NVCC is available with TensorRT, CMake also builds
+`skai-preprocess-cuda` for Orin (CUDA architecture 8.7). A single inference
+worker can reuse `skai::CudaPreprocessor` to upload a BGR frame and write the
+loaded engine's FP32 `images` buffer. `run()` returns the letterbox plan,
+CUDA event time for upload plus conversion, and host wall time; the input
+buffer is ready on return. Hardware tests compare the full tensor against the
+CPU reference using `/var/lib/skai-edge/models/yolo11s_fp16.engine` and check
+that `yolo11s.onnx` is present. Run them with
+`ctest --test-dir build -R CudaPreprocess --output-on-failure`.
 
 ## Bounded queue
 

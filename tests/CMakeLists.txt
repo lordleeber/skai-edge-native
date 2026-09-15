@@ -33,6 +33,16 @@ if(TARGET skai-tensorrt)
     gtest_discover_tests(skai-tensorrt-tests PROPERTIES LABELS jetson TIMEOUT 120)
 endif()
 
+if(TARGET skai-preprocess-cuda)
+    add_executable(skai-preprocess-cuda-tests integration/preprocess_cuda_test.cpp)
+    target_link_libraries(skai-preprocess-cuda-tests PRIVATE skai-preprocess-cuda
+        GTest::gtest_main)
+    target_compile_definitions(skai-preprocess-cuda-tests PRIVATE
+        SKAI_YOLO_ENGINE="/var/lib/skai-edge/models/yolo11s_fp16.engine"
+        SKAI_YOLO_ONNX="/var/lib/skai-edge/models/yolo11s.onnx")
+    gtest_discover_tests(skai-preprocess-cuda-tests PROPERTIES LABELS jetson TIMEOUT 120)
+endif()
+
 add_library(skai-rtsp-test-fixture STATIC
     fixtures/rtsp_test_server/rtsp_test_server.cpp)
 target_include_directories(skai-rtsp-test-fixture PUBLIC fixtures/rtsp_test_server)

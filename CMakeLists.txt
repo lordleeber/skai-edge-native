@@ -53,6 +53,22 @@ if(NOT SKAI_ENABLE_TENSORRT STREQUAL "OFF")
     endif()
 endif()
 
+if(TARGET skai-tensorrt)
+    include(CheckLanguage)
+    check_language(CUDA)
+    if(CMAKE_CUDA_COMPILER)
+        enable_language(CUDA)
+        add_library(skai-preprocess-cuda src/inference/preprocess_cuda.cu)
+        set_target_properties(skai-preprocess-cuda PROPERTIES CUDA_STANDARD 17
+            CUDA_STANDARD_REQUIRED ON CUDA_ARCHITECTURES 87)
+        target_include_directories(skai-preprocess-cuda PUBLIC include)
+        target_link_libraries(skai-preprocess-cuda PUBLIC skai-tensorrt
+            skai-preprocess-reference CUDA::cudart)
+    else()
+        message(STATUS "CUDA compiler unavailable; skipping skai-preprocess-cuda")
+    endif()
+endif()
+
 add_library(skai-cli src/cli.cpp)
 target_include_directories(skai-cli PUBLIC include)
 target_compile_definitions(skai-cli PUBLIC SKAI_EDGE_VERSION="${PROJECT_VERSION}")
