@@ -7,6 +7,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(Threads REQUIRED)
 
+add_library(skai-core INTERFACE)
+target_include_directories(skai-core INTERFACE include)
+target_link_libraries(skai-core INTERFACE Threads::Threads)
+
 add_library(skai-cli src/cli.cpp)
 target_include_directories(skai-cli PUBLIC include)
 target_compile_definitions(skai-cli PUBLIC SKAI_EDGE_VERSION="${PROJECT_VERSION}")

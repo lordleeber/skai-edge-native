@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This repository currently builds a small C++17 Jetson edge-service skeleton. Public interfaces live in `include/skai/`; implementations and the executable entry point live in `src/`. `Application` owns lifecycle hooks for web, detector, video, and GPS modules; those modules are not yet implemented. Unit tests are in `tests/unit/`, executable tests are in `tests/integration/`, and test-only YAML fixtures are in `tests/fixtures/`. `config/` contains the example configuration; `models/`, `web/`, `systemd/`, `scripts/`, `cmake/`, `docs/`, and `third_party/` are placeholders for later stages. Read `ROADMAP.md` before adding those features; the current service has no RTSP ingest or inference.
+This repository currently builds a small C++17 Jetson edge-service skeleton. Public interfaces, including the bounded queue in `include/skai/core/`, live in `include/skai/`; implementations and the executable entry point live in `src/`. `Application` owns lifecycle hooks for web, detector, video, and GPS modules; those modules are not yet implemented. Unit tests are in `tests/unit/`, executable tests are in `tests/integration/`, and test-only YAML fixtures are in `tests/fixtures/`. `config/` contains the example configuration; `models/`, `web/`, `systemd/`, `scripts/`, `cmake/`, `docs/`, and `third_party/` are placeholders for later stages. Read `ROADMAP.md` before adding those features; the current service has no RTSP ingest or inference.
 
 ## Build, Test, and Development Commands
 
