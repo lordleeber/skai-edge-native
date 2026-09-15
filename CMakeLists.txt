@@ -10,8 +10,16 @@ add_library(skai-cli src/cli.cpp)
 target_include_directories(skai-cli PUBLIC include)
 target_compile_definitions(skai-cli PUBLIC SKAI_EDGE_VERSION="${PROJECT_VERSION}")
 
+find_package(yaml-cpp REQUIRED)
+add_library(skai-logging src/logging.cpp)
+target_include_directories(skai-logging PUBLIC include)
+
+add_library(skai-config src/config.cpp)
+target_include_directories(skai-config PUBLIC include)
+target_link_libraries(skai-config PUBLIC yaml-cpp skai-logging)
+
 add_executable(skai-edge src/main.cpp)
-target_link_libraries(skai-edge PRIVATE skai-cli)
+target_link_libraries(skai-edge PRIVATE skai-cli skai-config skai-logging)
 
 enable_testing()
 add_subdirectory(tests)

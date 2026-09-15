@@ -12,6 +12,7 @@ struct CliResult {
     CliAction action;
     int exit_code;
     std::string message;
+    std::string config_path;
 };
 
 CliResult parse_command_line(const std::vector<std::string>& arguments);

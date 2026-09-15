@@ -2,11 +2,11 @@
 
 ## Project Structure & Module Organization
 
-This repository currently builds a small C++17 Jetson edge-service skeleton. Public interfaces live in `include/skai/`; implementations and the executable entry point live in `src/`. Unit tests are in `tests/unit/`, and executable lifecycle tests are in `tests/integration/`. `config/`, `models/`, `web/`, `systemd/`, `scripts/`, `cmake/`, `docs/`, and `third_party/` are placeholders for later stages. Read `ROADMAP.md` before adding those features; the current service has no RTSP ingest or inference.
+This repository currently builds a small C++17 Jetson edge-service skeleton. Public interfaces live in `include/skai/`; implementations and the executable entry point live in `src/`. Unit tests are in `tests/unit/`, executable tests are in `tests/integration/`, and test-only YAML fixtures are in `tests/fixtures/`. `config/` contains the example configuration; `models/`, `web/`, `systemd/`, `scripts/`, `cmake/`, `docs/`, and `third_party/` are placeholders for later stages. Read `ROADMAP.md` before adding those features; the current service has no RTSP ingest or inference.
 
 ## Build, Test, and Development Commands
 
-Install CMake 3.22 or newer, a C++17 compiler, and GoogleTest (for example, Ubuntu's `libgtest-dev`). From the repository root:
+Install CMake 3.22 or newer, a C++17 compiler, GoogleTest (`libgtest-dev`), and yaml-cpp (`libyaml-cpp-dev`). From the repository root:
 
 ```sh
 cmake -S . -B build
@@ -14,9 +14,10 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ./build/skai-edge --help
 ./build/skai-edge --version
+./build/skai-edge --config config/config.example.yaml
 ```
 
-The first two commands configure and build the executable and tests; CTest runs the discovered GoogleTest cases. Running `./build/skai-edge` without options starts the service until SIGINT or SIGTERM. Keep generated files under the ignored `build/` directory.
+The first two commands configure and build the executable and tests; CTest runs the discovered GoogleTest cases. Running `./build/skai-edge` without options uses built-in defaults and waits for SIGINT or SIGTERM. `--config` validates a YAML file before readiness. Keep generated files under the ignored `build/` directory.
 
 ## Coding Style & Naming Conventions
 
