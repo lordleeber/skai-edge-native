@@ -44,6 +44,7 @@ private:
     std::atomic<bool> running_{false};
     std::mutex gate_mutex_;
     GstElement* gate_ = nullptr;
+    GstRTSPMedia* media_ = nullptr;
     bool stalled_ = false;
     int port_ = 0;
 };

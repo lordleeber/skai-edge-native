@@ -67,4 +67,6 @@ fresh video frames). `push()` drops the oldest queued value when full;
 `pop()` blocks and `pop_for(timeout)` can time out. Call `shutdown()` to reject
 new pushes and wake waiting consumers. Existing values can still be drained;
 an empty optional means the queue is drained after shutdown or a timed wait
-expired. `stats()` reports pushed, popped, dropped, and high-water counts.
+expired. After all producers and consumers have joined, `reset()` clears stale
+values and reopens the queue for another application lifecycle. `stats()`
+reports pushed, popped, dropped, and high-water counts for the current cycle.

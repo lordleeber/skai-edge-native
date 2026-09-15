@@ -74,6 +74,21 @@ TEST(BoundedQueue, ShutdownDrainsBufferedItemsAndRejectsNewPushes) {
     EXPECT_EQ(queue.stats().popped, 2U);
 }
 
+TEST(BoundedQueue, ResetStartsFreshLifecycleWithoutStaleValues) {
+    skai::BoundedQueue<int> queue(2);
+    ASSERT_TRUE(queue.push(7));
+    ASSERT_TRUE(queue.push(8));
+    queue.shutdown();
+    ASSERT_TRUE(queue.is_shutdown());
+    queue.reset();
+    EXPECT_FALSE(queue.is_shutdown());
+    EXPECT_EQ(queue.size(), 0U);
+    EXPECT_EQ(queue.stats().pushed, 0U);
+    EXPECT_FALSE(queue.pop_for(std::chrono::milliseconds(0)).has_value());
+    ASSERT_TRUE(queue.push(9));
+    EXPECT_EQ(queue.pop_for(std::chrono::milliseconds(1)), 9);
+}
+
 TEST(BoundedQueue, CarriesMoveOnlyValues) {
     skai::BoundedQueue<std::unique_ptr<int>> queue(1);
     ASSERT_TRUE(queue.push(std::make_unique<int>(7)));

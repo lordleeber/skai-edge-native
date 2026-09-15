@@ -69,6 +69,14 @@ public:
         available_.notify_all();
     }
 
+    // Begin a fresh lifecycle after all producers and consumers have stopped.
+    void reset() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        queue_.clear();
+        stats_ = {};
+        shutdown_ = false;
+    }
+
     bool is_shutdown() const {
         std::lock_guard<std::mutex> lock(mutex_);
         return shutdown_;

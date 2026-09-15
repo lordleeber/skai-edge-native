@@ -148,6 +148,16 @@ void RtspTestServer::stop() noexcept {
     if (context_) g_main_context_wakeup(context_);
     if (worker_.joinable()) worker_.join();
     if (server_) gst_rtsp_server_client_filter(server_, close_client, nullptr);
+    GstRTSPMedia* media = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(gate_mutex_);
+        media = media_;
+        media_ = nullptr;
+    }
+    if (media) {
+        gst_rtsp_media_unprepare(media);
+        gst_object_unref(media);
+    }
     {
         std::lock_guard<std::mutex> lock(gate_mutex_);
         if (gate_) gst_object_unref(gate_);
@@ -185,6 +195,8 @@ void RtspTestServer::on_media_configure(GstRTSPMediaFactory*, GstRTSPMedia* medi
     gst_object_unref(element);
     if (!gate) return;
     std::lock_guard<std::mutex> lock(self->gate_mutex_);
+    if (self->media_) gst_object_unref(self->media_);
+    self->media_ = GST_RTSP_MEDIA(gst_object_ref(media));
     if (self->gate_) gst_object_unref(self->gate_);
     self->gate_ = gate; // full reference
     g_object_set(gate, "drop-probability", self->stalled_ ? 1.0 : 0.0, nullptr);

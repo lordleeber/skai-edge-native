@@ -205,7 +205,7 @@ TEST(RtspSource, ReportsUnhealthySourceAfterDisconnect) {
     EXPECT_FALSE(source.diagnostics().last_error.empty());
 }
 
-TEST(RtspVideoModule, PublishesToSharedInferenceQueue) {
+TEST(RtspVideoModule, PublishesToSharedInferenceQueueAfterRestart) {
     std::string error;
     ASSERT_TRUE(skai::gst::initialize_once(error)) << error;
     skai::test::RtspTestServer server;
@@ -216,10 +216,16 @@ TEST(RtspVideoModule, PublishesToSharedInferenceQueue) {
     skai::RtspVideoModule module(frames, logger);
     skai::Config config;
     config.video.rtsp_url = server.url();
-    ASSERT_TRUE(module.initialize(config));
-    ASSERT_TRUE(module.start()) << output.str();
-    EXPECT_TRUE(frames.pop_for(std::chrono::seconds(3)).has_value());
-    module.stop();
-    module.wait();
-    EXPECT_TRUE(frames.is_shutdown());
+    for (int cycle = 0; cycle < 2; ++cycle) {
+        ASSERT_TRUE(module.initialize(config));
+        ASSERT_TRUE(module.start()) << output.str();
+        EXPECT_FALSE(frames.is_shutdown());
+        auto frame = frames.pop_for(std::chrono::seconds(3));
+        ASSERT_TRUE(frame.has_value()) << output.str();
+        EXPECT_EQ(frame->sequence, 1U);
+        module.stop();
+        module.wait();
+        EXPECT_TRUE(frames.is_shutdown());
+        while (frames.pop_for(std::chrono::milliseconds(0)).has_value()) {}
+    }
 }

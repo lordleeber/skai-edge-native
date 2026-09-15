@@ -9,6 +9,7 @@ bool RtspVideoModule::initialize(const Config& config) {
     if (source_) return false;
     auto source = std::make_unique<RtspSource>(frames_, logger_);
     config_ = config.video;
+    frames_.reset();
     source_ = std::move(source);
     return true;
 }
