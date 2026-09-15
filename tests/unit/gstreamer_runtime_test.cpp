@@ -10,6 +10,28 @@
 
 namespace {
 
+struct FailNullElement { GstElement parent; bool fail_once; };
+struct FailNullElementClass { GstElementClass parent_class; };
+
+G_DEFINE_TYPE(FailNullElement, fail_null_element, GST_TYPE_ELEMENT)
+
+GstStateChangeReturn fail_null_change_state(GstElement* element,
+                                            GstStateChange transition) {
+    auto* self = reinterpret_cast<FailNullElement*>(element);
+    if (transition == GST_STATE_CHANGE_READY_TO_NULL && self->fail_once) {
+        self->fail_once = false;
+        return GST_STATE_CHANGE_FAILURE;
+    }
+    return GST_ELEMENT_CLASS(fail_null_element_parent_class)->change_state(element,
+                                                                           transition);
+}
+
+void fail_null_element_class_init(FailNullElementClass* klass) {
+    GST_ELEMENT_CLASS(klass)->change_state = fail_null_change_state;
+}
+
+void fail_null_element_init(FailNullElement* element) { element->fail_once = true; }
+
 void mark_finalized(gpointer data, GObject*) {
     static_cast<std::atomic<bool>*>(data)->store(true);
 }
@@ -112,4 +134,43 @@ TEST(GStreamerRuntime, CancelsAnAsynchronousStartWithoutWaitingForTimeout) {
     EXPECT_LT(std::chrono::steady_clock::now() - started,
               std::chrono::seconds(2));
     trigger.join();
+}
+
+TEST(GStreamerRuntime, FailedNullTransitionCanBeRetried) {
+    std::string error;
+    ASSERT_TRUE(skai::gst::initialize_once(error)) << error;
+    std::ostringstream output;
+    skai::Logger logger(output);
+    auto pipeline = skai::gst::Pipeline::from_launch(
+        "videotestsrc is-live=true ! fakesink sync=false", logger, error);
+    ASSERT_TRUE(pipeline) << error;
+    auto* child = GST_ELEMENT(g_object_new(fail_null_element_get_type(), nullptr));
+    ASSERT_TRUE(gst_bin_add(GST_BIN(pipeline->element()), child));
+    ASSERT_TRUE(pipeline->start(std::chrono::seconds(2))) << pipeline->last_error();
+    EXPECT_FALSE(pipeline->stop());
+    EXPECT_NE(pipeline->last_error().find("NULL"), std::string::npos);
+    EXPECT_TRUE(pipeline->stop());
+    GstState state = GST_STATE_VOID_PENDING;
+    gst_element_get_state(pipeline->element(), &state, nullptr, 0);
+    EXPECT_EQ(state, GST_STATE_NULL);
+}
+
+TEST(GStreamerRuntime, DestructorRetriesAFailedNullTransition) {
+    std::string error;
+    ASSERT_TRUE(skai::gst::initialize_once(error)) << error;
+    std::ostringstream output;
+    skai::Logger logger(output);
+    auto pipeline = skai::gst::Pipeline::from_launch(
+        "videotestsrc is-live=true ! fakesink sync=false", logger, error);
+    ASSERT_TRUE(pipeline) << error;
+    auto* child = GST_ELEMENT(g_object_new(fail_null_element_get_type(), nullptr));
+    ASSERT_TRUE(gst_bin_add(GST_BIN(pipeline->element()), child));
+    gst_object_ref(child);
+    EXPECT_TRUE(pipeline->start(std::chrono::seconds(2))) << pipeline->last_error();
+    EXPECT_FALSE(pipeline->stop());
+    pipeline.reset();
+    GstState state = GST_STATE_VOID_PENDING;
+    gst_element_get_state(child, &state, nullptr, 0);
+    EXPECT_EQ(state, GST_STATE_NULL);
+    gst_object_unref(child);
 }

@@ -46,7 +46,8 @@ public:
     bool start(std::chrono::milliseconds timeout,
                const std::function<bool()>& cancelled = {});
     BusEvent poll(std::chrono::milliseconds timeout);
-    void stop() noexcept;
+    // False means NULL was not reached; the caller can retry and inspect last_error().
+    bool stop() noexcept;
     const std::string& last_error() const { return last_error_; }
     GstElement* element() const { return element_.get(); } // borrowed
     GstBus* bus() const { return bus_.get(); } // borrowed
