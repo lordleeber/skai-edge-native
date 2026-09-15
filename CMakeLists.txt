@@ -20,6 +20,9 @@ target_link_libraries(skai-core INTERFACE Threads::Threads)
 add_library(skai-tensor-layout src/inference/tensor_layout.cpp)
 target_include_directories(skai-tensor-layout PUBLIC include)
 
+add_library(skai-preprocess-reference src/inference/preprocess.cpp)
+target_include_directories(skai-preprocess-reference PUBLIC include)
+
 set(SKAI_ENABLE_TENSORRT "AUTO" CACHE STRING "Build TensorRT loader: AUTO, ON, or OFF")
 set_property(CACHE SKAI_ENABLE_TENSORRT PROPERTY STRINGS AUTO ON OFF)
 if(NOT SKAI_ENABLE_TENSORRT MATCHES "^(AUTO|ON|OFF)$")

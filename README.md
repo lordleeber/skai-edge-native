@@ -15,6 +15,8 @@ decodes H.264/H.265 into packed BGR frames in a bounded inference queue. Web,
 inference, and GPS modules are still future work. Step 7 adds automatic recovery,
 frame-freshness stall detection, and JSON RTSP diagnostics. Step 8 adds an
 independent TensorRT engine loader; inference execution comes in Step 10.
+Step 9-a adds the CPU reference letterbox and NCHW conversion used to verify
+the later CUDA path.
 
 ## Build and test
 
@@ -97,6 +99,16 @@ tensors; dynamic profiles,
 vectorized formats, host shape tensors and packed INT4 are rejected with a
 specific error until their sizing and address rules are implemented. The
 service does not load `detector.engine` at startup yet.
+
+## Preprocessing reference
+
+`skai::make_preprocess_plan()` computes centered letterbox geometry from a
+borrowed packed BGR frame and target dimensions. `preprocess_cpu()` uses
+bilinear resize, padding value 114, RGB channel order, `1/255` normalization,
+and FP32 NCHW layout. The returned plan retains scale and padding for Step 10
+box-coordinate restoration. The planned local `yolo11s_fp16.engine` binding is
+FP32 `images` with shape `1×3×640×640`; model files stay outside Git under
+`/var/lib/skai-edge/models/`.
 
 ## Bounded queue
 
