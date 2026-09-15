@@ -15,9 +15,8 @@ decodes H.264/H.265 into packed BGR frames in a bounded inference queue. Web,
 inference, and GPS modules are still future work. Step 7 adds automatic recovery,
 frame-freshness stall detection, and JSON RTSP diagnostics. Step 8 adds an
 independent TensorRT engine loader; inference execution comes in Step 10.
-Step 9-a adds the CPU reference letterbox and NCHW conversion used to verify
-the later CUDA path. Step 9-b adds the fused CUDA path and validates it against
-the local YOLO11s TensorRT engine.
+Step 9 adds CPU reference letterbox/NCHW conversion and a fused CUDA path
+validated against the local YOLO11s TensorRT engine.
 
 ## Build and test
 
