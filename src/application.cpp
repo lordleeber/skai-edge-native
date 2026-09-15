@@ -55,8 +55,10 @@ bool Application::initialize() {
         {"video", modules_.video.get()}, {"gps", modules_.gps.get()}};
     for (const auto& item : ordered) {
         if (!item.module) continue;
-        active_.push_back(item);
-        if (try_action([&] { return item.module->initialize(config_); })) continue;
+        if (try_action([&] { return item.module->initialize(config_); })) {
+            active_.push_back(item);
+            continue;
+        }
         last_error_ = std::string(item.name) + ".initialize failed";
         last_error_module_ = item.name;
         for (auto it = active_.rbegin(); it != active_.rend(); ++it) it->module->stop();

@@ -11,9 +11,10 @@
 
 namespace skai {
 
-// A module initializes resources before start launches workers. stop requests
-// shutdown without blocking; wait joins every worker and releases resources.
-// stop and wait must also be safe after initialize succeeds but start does not.
+// A module initializes resources before start launches workers. If initialize
+// fails or throws, the module cleans up its own partial state. Once initialize
+// succeeds, stop requests shutdown without blocking and wait joins workers and
+// releases resources. Both must be safe even if start later fails.
 class LifecycleModule {
 public:
     virtual ~LifecycleModule() = default;

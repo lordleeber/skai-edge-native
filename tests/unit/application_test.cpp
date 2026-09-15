@@ -136,8 +136,8 @@ TEST(Application, FailedInitializationCleansUpInitializedModules) {
     EXPECT_EQ(app.last_error_module(), "video");
     EXPECT_EQ(events, (std::vector<std::string>{
         "web.initialize", "detector.initialize", "video.initialize",
-        "video.stop", "detector.stop", "web.stop",
-        "video.wait", "detector.wait", "web.wait"}));
+        "detector.stop", "web.stop",
+        "detector.wait", "web.wait"}));
     EXPECT_EQ(joins, 0);
 }
 
