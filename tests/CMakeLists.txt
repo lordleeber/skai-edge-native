@@ -5,9 +5,9 @@ pkg_check_modules(GST_RTSP_TEST REQUIRED IMPORTED_TARGET
 
 add_executable(skai-unit-tests unit/command_line_test.cpp unit/config_test.cpp
     unit/logging_test.cpp unit/application_test.cpp unit/bounded_queue_test.cpp
-    unit/rtsp_recovery_test.cpp)
+    unit/rtsp_recovery_test.cpp unit/tensor_layout_test.cpp)
 target_link_libraries(skai-unit-tests PRIVATE skai-cli skai-config skai-logging
-    skai-application skai-core GTest::gtest_main)
+    skai-application skai-core skai-tensor-layout GTest::gtest_main)
 target_compile_definitions(skai-unit-tests PRIVATE
     SKAI_INVALID_CONFIG="${PROJECT_SOURCE_DIR}/tests/fixtures/config.invalid.yaml")
 gtest_discover_tests(skai-unit-tests PROPERTIES TIMEOUT 15)
@@ -23,6 +23,13 @@ gtest_discover_tests(skai-integration-tests)
 add_executable(skai-gstreamer-tests unit/gstreamer_runtime_test.cpp)
 target_link_libraries(skai-gstreamer-tests PRIVATE skai-gstreamer GTest::gtest_main)
 gtest_discover_tests(skai-gstreamer-tests PROPERTIES TIMEOUT 15)
+
+if(TARGET skai-tensorrt)
+    add_executable(skai-tensorrt-tests integration/tensorrt_engine_test.cpp)
+    target_include_directories(skai-tensorrt-tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
+    target_link_libraries(skai-tensorrt-tests PRIVATE skai-tensorrt GTest::gtest_main)
+    gtest_discover_tests(skai-tensorrt-tests PROPERTIES LABELS jetson TIMEOUT 120)
+endif()
 
 add_library(skai-rtsp-test-fixture STATIC
     fixtures/rtsp_test_server/rtsp_test_server.cpp)
