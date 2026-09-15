@@ -19,7 +19,7 @@ Build a lightweight Jetson edge application whose only video input is an RTSP UR
 - TensorRT-based object detection
 - annotated video output
 - local recording
-- GPS ingestion
+- GPS position (fixed at Taipei 101 in the first version; no GPS hardware)
 - alert/event generation
 - REST-style HTTP APIs
 - WebSocket event/status updates
@@ -66,6 +66,7 @@ The initial implementation will NOT use:
 - MIPI CSI / Argus camera input
 - local video file input
 - generic pluggable video-source abstraction
+- real GPS hardware (serial UBX/NMEA, MAVLink) in the first version
 
 The first version should prefer one native process with clear internal modules.
 
@@ -97,19 +98,20 @@ Do not recreate ROS 2 inside the application by building an unnecessarily compli
 |  | Vanilla Web UI       |                      |                               |
 |  +----------------------+                      |                               |
 |                                                                                |
-|  RTSP URL                                                          |
+|  RTSP URL                                                                      |
 |          |                                                                     |
 |          v                                                                     |
 |  +----------------------+                                                      |
-|  | GStreamer RTSP Ingest    |                                                      |
+|  | RtspSource           |                                                      |
+|  | GStreamer ingest     |                                                      |
 |  +----------+-----------+                                                      |
 |             | raw frames                                                       |
-|             v                                                                   |
+|             v                                                                  |
 |  +----------------------+                                                      |
 |  | Bounded Frame Queue  |                                                      |
 |  +----------+-----------+                                                      |
-|             |                                                                   |
-|             v                                                                   |
+|             |                                                                  |
+|             v                                                                  |
 |  +----------------------+                                                      |
 |  | TensorRT Detector    |                                                      |
 |  | CUDA preprocessing   |                                                      |
@@ -135,20 +137,20 @@ Do not recreate ROS 2 inside the application by building an unnecessarily compli
 |        |                     +---------+---------+                             |
 |        |                               |                                       |
 |        |                               v                                       |
-|        |                          +----------+                                  |
-|        |                          | skai-ice |                                  |
-|        |                          | STUN/ICE |                                  |
-|        |                          +-----+----+                                  |
-|        |                                |                                       |
-|        |                                +-----------> Browser WebRTC            |
-|        |                                                                        |
-|        +----> SQLite metadata + JPG snapshot                                    |
+|        |                          +----------+                                 |
+|        |                          | skai-ice |                                 |
+|        |                          | STUN/ICE |                                 |
+|        |                          +-----+----+                                 |
+|        |                                |                                      |
+|        |                                +-----------> Browser WebRTC           |
+|        |                                                                       |
+|        +----> SQLite metadata + JPG snapshot                                   |
 |                                                                                |
 |  +----------------------+                                                      |
 |  | GPS Source           |                                                      |
-|  | serial / MAVLink UDP |                                                      |
+|  | fixed: Taipei 101    |                                                      |
 |  +----------+-----------+                                                      |
-|             |                                                                   |
+|             |                                                                  |
 |             +---------------------> Application State                          |
 +--------------------------------------------------------------------------------+
 ```
@@ -370,6 +372,27 @@ Rules:
 - first release is host-candidate/LAN-only
 - NAT traversal improvements belong in `skai-ice`, not in a parallel implementation here
 
+### 4.8 Test-first development
+
+This project is developed test-first. Every PR follows:
+
+```text
+write failing tests for the new behavior (red)
+   ↓
+implement until the tests pass (green)
+   ↓
+refactor with the tests still passing
+```
+
+Rules:
+
+- The test framework exists from PR 1; no PR is allowed to postpone its tests to a later "testing phase".
+- Each PR's Acceptance list is turned into automated tests wherever it can be automated. Items that cannot (for example "Chrome on another LAN machine receives video") are written as a manual verification checklist in the PR description.
+- Framework: GoogleTest driven by CTest (`find_package(GTest REQUIRED)`, `gtest_discover_tests`). Ubuntu 22.04 / JetPack 6 provides it as `libgtest-dev`.
+- Tests that need Jetson hardware (NVDEC, TensorRT, CUDA) or a live network fixture carry CTest labels (`jetson`, `rtsp`, `webrtc`) so x86 Linux can run the rest with `ctest -LE jetson`.
+- Keep hardware-bound code thin and pure logic separate, so that the logic is testable on x86 without a GPU. Examples: RTSP reconnect/stall state machine, YOLO postprocessing/NMS, alert rules, GPS config validation, WHEP/SDP validation, JSON DTOs.
+- Test fixtures (for example the local RTSP test server) live under `tests/` and are never linked into `skai-edge`. They must not create a back door for non-RTSP input into the application.
+
 ---
 
 # Phase 0 — Clean Repository Foundation
@@ -407,15 +430,22 @@ Requirements:
 
 - CMake build works on x86 Linux
 - CMake build works on Jetson
+- GoogleTest + CTest wired up (`enable_testing()`, `tests/unit/`, `tests/integration/`)
 - `--help`
 - `--version`
 - clean shutdown on SIGINT / SIGTERM
+
+Tests written first:
+
+- command-line parsing: `--help`, `--version`, unknown option → non-zero exit with usage message
+- integration test: launch `skai-edge`, send SIGINT and SIGTERM, assert exit code 0 within a timeout
 
 Acceptance:
 
 ```bash
 cmake -S . -B build
 cmake --build build
+ctest --test-dir build --output-on-failure
 ./build/skai-edge --version
 ```
 
@@ -450,7 +480,11 @@ recording:
   segment_seconds: 300
 
 gps:
-  enabled: false
+  enabled: true
+  source: fixed            # first version: fixed position, no GPS hardware
+  latitude: 25.033964      # Taipei 101
+  longitude: 121.564468
+  altitude_m: 10.0
 
 webrtc:
   enabled: true
@@ -547,6 +581,7 @@ Acceptance:
 
 - unit tests for concurrent producer/consumer behavior
 - clean shutdown while consumer is blocked
+- concurrency tests pass under ThreadSanitizer (`-fsanitize=thread` build)
 
 ---
 
@@ -585,6 +620,17 @@ Create minimal RAII wrappers for:
 - error reporting
 
 Initialize GStreamer once from `main()`.
+
+Add the RTSP test fixture here, because PR 6 and PR 7 are tested against it:
+
+```text
+tests/fixtures/rtsp_test_server
+  gst-rtsp-server (libgstrtspserver-1.0-dev)
+  videotestsrc → H.264 (and H.265) → rtsp://127.0.0.1:<ephemeral-port>/test
+  can be stopped/restarted/stalled on demand by the test
+```
+
+The fixture is test-only and is not linked into `skai-edge`.
 
 Acceptance:
 
@@ -756,6 +802,7 @@ Acceptance:
 - a stalled stream is detected even when no immediate GStreamer ERROR is emitted
 - reconnect attempts do not leak pipelines, threads, or file descriptors
 - the application can be stopped cleanly while reconnecting
+- each item above is an automated test driving the PR 5 RTSP test fixture (offline at start, restart, stall); the CONNECTED/STALLED/RECONNECTING state machine is also unit-tested without GStreamer
 
 ---
 
@@ -900,10 +947,14 @@ Requirements:
 
 - asynchronous I/O
 - graceful shutdown
-- request size limit
-- request timeout
+- request size limit (baseline: fixed safe default for header and body)
+- request timeout (baseline: fixed read/write timeout)
 - clear routing layer
 - no framework above Beast
+
+Scope split with PR 40: this PR sets baseline limits so the server is never unbounded
+from day one. PR 40 audits every entry point added later (WebSocket, WHEP, static
+files), makes limits configurable, and adds the remaining hardening.
 
 Suggested structure:
 
@@ -1032,6 +1083,24 @@ Do NOT use:
 
 The frontend should be editable and runnable without npm.
 
+The static file handler is confined to the web root from its first version, not
+deferred to PR 40.
+
+Tests written first:
+
+- `GET /` serves `index.html`; `GET /app.js` and `GET /style.css` return the correct `Content-Type`
+- unknown file → 404
+- path traversal is rejected and never escapes the web root:
+  - `GET /../config/config.example.yaml`
+  - percent-encoded `GET /%2e%2e/%2e%2e/etc/passwd`
+  - `GET /..%2f..%2fetc/passwd`
+- a symlink inside the web root that points outside it is not followed
+- requests for directories do not produce a directory listing
+
+Implementation note: decode the target first, then resolve it with
+`std::filesystem::weakly_canonical` and verify that the result is still inside the
+canonical web root. Do not rely on string matching for `..`.
+
 ---
 
 ## PR 16 — Live status UI
@@ -1056,42 +1125,60 @@ Requirements:
 
 Goal: provide GPS data without ROS messages.
 
-## PR 17 — GPS abstraction
+**First version: fixed position at Taipei 101. No GPS hardware is read.**
 
-Interface:
+## PR 17 — Fixed-position GpsSource
+
+Implement a concrete class (no virtual interface yet — see rule 24):
 
 ```cpp
 class GpsSource {
 public:
-    virtual bool start() = 0;
-    virtual void stop() = 0;
-    virtual std::optional<GpsFix> latest() const = 0;
+    explicit GpsSource(const GpsConfig& config);
+    std::optional<GpsFix> latest() const;
 };
 ```
 
-Implement initially:
+`latest()` returns the configured fixed position. Default configuration is
+Taipei 101:
+
+```yaml
+gps:
+  enabled: true
+  source: fixed            # only supported value in the first version
+  latitude: 25.033964
+  longitude: 121.564468
+  altitude_m: 10.0         # approximate ground elevation
+```
+
+The fixed fix reports `valid = true`, a nominal `hdop`, and nominal satellite
+counts. There is no GPS thread, no serial port, and no network socket.
+
+Every place GPS is shown or stored must say it is fixed, so simulated coordinates
+are never mistaken for a real position:
+
+- `GET /api/v1/gps` and the WebSocket `gps` event include `"source": "fixed"`
+- the UI labels the position as fixed/simulated
+- the `alerts` table records `gps_source` (see PR 18)
+
+Tests written first:
+
+- default config yields Taipei 101 coordinates
+- configured latitude/longitude/altitude are returned unchanged
+- out-of-range latitude (outside ±90) or longitude (outside ±180) fails config validation
+- `gps.enabled: false` makes `latest()` return `std::nullopt`
+- `source` values other than `fixed` are rejected with a clear error
+
+Deferred until a real device exists:
 
 ```text
 Serial UBX/NMEA
+MAVLink UDP GPS input (never MAVROS)
+GPS receive thread, fix timeout, fix-age tracking
 ```
 
-Then:
-
-```text
-MAVLink UDP GPS input
-```
-
-Do not use MAVROS.
-
-Acceptance:
-
-- latitude
-- longitude
-- altitude
-- fix validity
-- HDOP
-- used satellites
-- visible satellites
+When the first real receiver is added, extract a `GpsSource` interface at that
+point, with the fixed source kept as the second implementation for tests.
 
 Expose via:
 
@@ -1155,6 +1242,7 @@ CREATE TABLE alerts (
     longitude REAL,
     altitude_m REAL,
     gps_valid INTEGER NOT NULL DEFAULT 0,
+    gps_source TEXT NOT NULL DEFAULT 'none',  -- 'fixed' | 'none' (real sources later)
     snapshot_path TEXT NOT NULL,
     frame_sequence INTEGER NOT NULL,
     model_version TEXT
@@ -1273,7 +1361,7 @@ SQLite stores:
 
 - alert ID
 - timestamp
-- GPS fields
+- GPS fields, including `gps_source`
 - snapshot path
 - frame sequence
 - model version
@@ -1730,7 +1818,7 @@ WebSocket clients
 WebRTC clients
 WebRTC peer state
 ICE state
-GPS age
+GPS source (fixed) / GPS age once real hardware exists
 alert count
 memory usage
 CPU usage
@@ -1757,7 +1845,7 @@ Add a simple `/diagnostics` page showing:
 - queue depth
 - TensorRT timing
 - recording state
-- GPS freshness
+- GPS source and position (freshness once real hardware exists)
 - active WebSocket sessions
 - active WebRTC peers
 - ICE state
@@ -1782,7 +1870,7 @@ Test and handle:
 - TensorRT failure
 - encoder failure
 - disk full
-- GPS timeout
+- GPS timeout (deferred until real GPS hardware; the fixed source cannot time out)
 - browser disconnect
 - WebSocket slow client
 - malformed WHEP offer
@@ -1833,15 +1921,26 @@ A single failed browser peer should not mark the whole service failed.
 
 ---
 
-# Phase 14 — Testing
+# Phase 14 — Test Hardening
 
-## PR 32 — Unit test foundation
+## PR 32 — Test coverage audit and sanitizer builds
 
-Add tests for:
+The test framework has existed since PR 1 and every PR shipped its own tests (see 4.8).
+This PR does not introduce testing; it audits and closes gaps.
+
+Add:
+
+- coverage report (`--coverage` + gcovr or lcov) and a minimum threshold for pure-logic modules
+- AddressSanitizer / UndefinedBehaviorSanitizer build preset running the full x86 suite
+- ThreadSanitizer build preset for queue, lifecycle, WebSocket, and WebRTC session code
+- a single command that runs the x86-safe suite: `ctest -LE jetson`
+
+Verify each of these areas already has tests; add any that are missing:
 
 - configuration
 - bounded queue
 - routing
+- static-file root confinement / path traversal
 - JSON serialization
 - WHEP route validation
 - WebRTC session registry
@@ -1849,7 +1948,7 @@ Add tests for:
 - SQLite migrations
 - AlertRepository CRUD/query behavior
 - transaction rollback
-- GPS parsing
+- GPS fixed-source config validation
 - YOLO postprocessing
 - state model
 
@@ -1862,11 +1961,12 @@ boundary instead.
 
 ## PR 33 — Integration tests
 
-Add repeatable tests for the main pipeline.
+Compose the per-module integration tests written since PR 5 into end-to-end
+tests of the main pipeline.
 
 The application must still receive video through RTSP. For deterministic CI,
-a test fixture may generate a known stream and publish it through a local RTSP
-server, but the application itself must not gain a file-input code path.
+the PR 5 RTSP test fixture publishes a known stream through a local RTSP server;
+the application itself must not gain a file-input code path.
 
 ```text
 fixed test clip / generated frames
@@ -2068,19 +2168,22 @@ Do not optimize blindly.
 
 ## PR 40 — Web server and WHEP hardening
 
-Add:
+Starting from the PR 12 baseline, audit every entry point and add:
 
-- request size limits
+- configurable request size limits (extends PR 12 baseline)
 - SDP body size limit
-- path traversal protection
-- static-file root confinement
+- path traversal protection (re-verifies PR 15 tests against all static routes, including `/diagnostics`)
+- static-file root confinement (re-verifies PR 15)
 - WebSocket message size limits
-- timeouts
+- per-endpoint timeouts (extends PR 12 baseline)
 - connection limits
-- WebRTC peer limits
+- WebRTC peer limits (verifies PR 26 enforcement)
 - safe JSON parsing
 - no shell-command API
 - predictable cleanup of abandoned WHEP sessions
+
+Each item has a negative test (oversized body, `../` path, slow client, peer flood)
+written before its fix.
 
 For LAN-only development, authentication may initially be disabled.
 
@@ -2115,7 +2218,7 @@ Thread D
  └─ GStreamer encode / recording coordination
 
 Thread E
- └─ GPS receive/parser
+ └─ (reserved) GPS receive/parser — not needed while GPS is a fixed position
 
 Library/internal workers
  └─ libdatachannel / skai-ice callbacks as required
@@ -2372,7 +2475,7 @@ SQLite persistence, and LAN WebRTC
 Recommended implementation order:
 
 ```text
-1. build/lifecycle
+1. build/lifecycle + test framework
 2. queue/runtime primitives
 3. RTSP/GStreamer ingest
 4. TensorRT
@@ -2380,7 +2483,7 @@ Recommended implementation order:
 6. Boost.Beast HTTP
 7. application WebSocket
 8. vanilla web UI
-9. GPS
+9. GPS (fixed position: Taipei 101)
 10. SQLite persistence
 11. alerts
 12. recording
@@ -2391,11 +2494,15 @@ Recommended implementation order:
 17. optional RTSP
 18. observability
 19. recovery
-20. testing
+20. test coverage audit + end-to-end tests
 21. packaging
 22. optimization
 23. security
 ```
+
+Every step above is test-first (see 4.8): tests are written with, and before,
+the implementation in the same PR. Step 20 audits coverage; it is not where
+testing starts.
 
 The key rule is:
 
@@ -2450,6 +2557,8 @@ WebRTC path.
 24. Add abstractions only when at least two real implementations require them.
 25. Profile before optimizing.
 26. Prefer explicit, readable C++ over framework-like internal infrastructure.
+27. Test-first: write failing tests for new behavior before implementing it; a PR without tests for its new behavior is incomplete.
+28. Test fixtures stay under `tests/` and never add a non-RTSP input path to the application.
 
 ---
 
@@ -2463,7 +2572,7 @@ The final system should conceptually be:
 |                                                                  |
 | RTSP URL                                                         |
 |   ↓                                                              |
-| GStreamer RTSP ingest                                                |
+| GStreamer RTSP ingest                                            |
 |   ↓                                                              |
 | TensorRT / CUDA                                                  |
 |   ↓                                                              |
