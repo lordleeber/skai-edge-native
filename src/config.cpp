@@ -2,7 +2,11 @@
 
 #include <yaml-cpp/yaml.h>
 
+#include <arpa/inet.h>
+
+#include <charconv>
 #include <cmath>
+#include <cctype>
 #include <fstream>
 #include <initializer_list>
 #include <iterator>
@@ -47,6 +51,60 @@ void check_range(bool valid, const std::string& field, const std::string& requir
     if (!valid) throw std::invalid_argument(field + " " + requirement);
 }
 
+bool valid_port(const std::string& text) {
+    if (text.empty()) return false;
+    unsigned int port = 0;
+    const auto parsed = std::from_chars(text.data(), text.data() + text.size(), port);
+    return parsed.ec == std::errc{} && parsed.ptr == text.data() + text.size() &&
+           port >= 1 && port <= 65535;
+}
+
+bool valid_hostname(const std::string& host) {
+    if (host.empty() || host.size() > 253) return false;
+    if (host.find('.') != std::string::npos &&
+        host.find_first_not_of("0123456789.") == std::string::npos) {
+        in_addr address{};
+        return inet_pton(AF_INET, host.c_str(), &address) == 1;
+    }
+    std::size_t start = 0;
+    while (start < host.size()) {
+        const auto end = host.find('.', start);
+        const auto length = (end == std::string::npos ? host.size() : end) - start;
+        if (length == 0 || length > 63 ||
+            !std::isalnum(static_cast<unsigned char>(host[start])) ||
+            !std::isalnum(static_cast<unsigned char>(host[start + length - 1]))) return false;
+        for (std::size_t index = start; index < start + length; ++index) {
+            const auto c = static_cast<unsigned char>(host[index]);
+            if (!std::isalnum(c) && c != '-') return false;
+        }
+        if (end == std::string::npos) return true;
+        start = end + 1;
+    }
+    return false;
+}
+
+bool valid_rtsp_authority(const std::string& authority) {
+    const auto at = authority.rfind('@');
+    if (at != std::string::npos && (at == 0 || authority.find('@') != at)) return false;
+    const auto host_port = authority.substr(at == std::string::npos ? 0 : at + 1);
+    if (host_port.empty()) return false;
+
+    if (host_port.front() == '[') {
+        const auto close = host_port.find(']');
+        if (close == std::string::npos) return false;
+        const auto address_text = host_port.substr(1, close - 1);
+        in6_addr address{};
+        if (inet_pton(AF_INET6, address_text.c_str(), &address) != 1) return false;
+        if (close + 1 == host_port.size()) return true;
+        return host_port[close + 1] == ':' && valid_port(host_port.substr(close + 2));
+    }
+
+    const auto colon = host_port.find(':');
+    const auto host = host_port.substr(0, colon);
+    return valid_hostname(host) &&
+           (colon == std::string::npos || valid_port(host_port.substr(colon + 1)));
+}
+
 void validate(const Config& config) {
     const auto& video = config.video;
     const auto& url = video.rtsp_url;
@@ -57,12 +115,9 @@ void validate(const Config& config) {
     const auto authority = url.size() >= authority_start
                                ? url.substr(authority_start, authority_end - authority_start)
                                : std::string{};
-    const auto host = authority.substr(authority.find('@') == std::string::npos
-                                           ? 0 : authority.rfind('@') + 1);
-    check_range(url.rfind("rtsp://", 0) == 0 && !host.empty() &&
-                    host.find_first_of(" \t\r\n") == std::string::npos &&
+    check_range(url.rfind("rtsp://", 0) == 0 && valid_rtsp_authority(authority) &&
                     url.find_first_of(" \t\r\n") == std::string::npos,
-                "video.rtsp_url", "must be a single rtsp:// URL with a host");
+                "video.rtsp_url", "must be a rtsp:// URL with a valid host and optional port");
     check_range(video.transport == "tcp" || video.transport == "udp",
                 "video.transport", "must be tcp or udp");
     check_range(video.latency_ms >= 0 && video.latency_ms <= 10000,
@@ -96,6 +151,8 @@ void validate(const Config& config) {
                 "webrtc.max_peers", "must be between 1 and 100");
     check_range(config.webrtc.ice_log_verbosity >= 0 && config.webrtc.ice_log_verbosity <= 5,
                 "webrtc.ice_log_verbosity", "must be between 0 and 5");
+    check_range(!config.webrtc.enabled || !config.webrtc.host_interfaces.empty(),
+                "webrtc.host_interfaces", "must not be empty when webrtc.enabled is true");
     for (const auto& interface : config.webrtc.host_interfaces) {
         check_range(!interface.empty() && interface.find_first_of(" /\t\r\n") == std::string::npos,
                     "webrtc.host_interfaces", "must contain interface names without spaces or slashes");

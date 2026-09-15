@@ -55,6 +55,44 @@ TEST(Config, RejectsEmptyRtspUrlWithFieldName) {
     EXPECT_NE(result.error.find("video.rtsp_url"), std::string::npos);
 }
 
+TEST(Config, RejectsMalformedRtspAuthorities) {
+    for (const auto* url : {"rtsp://:8554/test", "rtsp://camera:/test",
+                            "rtsp://camera:not-a-port/test", "rtsp://camera:0/test",
+                            "rtsp://camera:65536/test"}) {
+        const auto result = skai::parse_config(
+            "video: {rtsp_url: '" + std::string(url) + "'}\n");
+        EXPECT_FALSE(result.ok) << url;
+        EXPECT_NE(result.error.find("video.rtsp_url"), std::string::npos) << url;
+    }
+}
+
+TEST(Config, AcceptsRtspUrlWithIpv6HostAndPort) {
+    const auto result = skai::parse_config(
+        "video: {rtsp_url: 'rtsp://[::1]:8554/test'}\n");
+    EXPECT_TRUE(result.ok) << result.error;
+}
+
+TEST(Config, AcceptsRtspUrlWithEmbeddedCredentials) {
+    const auto result = skai::parse_config(
+        "video: {rtsp_url: 'rtsp://viewer:password@camera.local:8554/live'}\n");
+    EXPECT_TRUE(result.ok) << result.error;
+}
+
+TEST(Config, RejectsEmptyEnabledWebrtcInterfaceWhitelist) {
+    const auto result = skai::parse_config(
+        "video: {rtsp_url: 'rtsp://camera/stream'}\n"
+        "webrtc: {enabled: true, host_interfaces: []}\n");
+    EXPECT_FALSE(result.ok);
+    EXPECT_NE(result.error.find("webrtc.host_interfaces"), std::string::npos);
+}
+
+TEST(Config, AllowsEmptyDisabledWebrtcInterfaceWhitelist) {
+    const auto result = skai::parse_config(
+        "video: {rtsp_url: 'rtsp://camera/stream'}\n"
+        "webrtc: {enabled: false, host_interfaces: []}\n");
+    EXPECT_TRUE(result.ok) << result.error;
+}
+
 TEST(Config, RejectsInvalidGpsCoordinate) {
     const auto result = skai::parse_config(
         "video: {rtsp_url: 'rtsp://camera/stream'}\ngps: {latitude: 91}\n");
