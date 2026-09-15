@@ -1,7 +1,11 @@
+#include "rtsp_test_server.hpp"
+#include "skai/video/gstreamer_runtime.hpp"
+
 #include <gtest/gtest.h>
 
 #include <chrono>
 #include <csignal>
+#include <cstdlib>
 #include <string>
 #include <thread>
 #include <vector>
@@ -22,6 +26,27 @@ struct SignalResult {
     bool exited_in_time;
     int status;
     std::string startup_output;
+};
+
+struct TemporaryConfig {
+    std::string path;
+
+    explicit TemporaryConfig(const std::string& url) {
+        char pattern[] = "/tmp/skai-pr6-config-XXXXXX";
+        const int fd = mkstemp(pattern);
+        if (fd < 0) return;
+        path = pattern;
+        const std::string yaml = "video: {rtsp_url: '" + url + "', transport: tcp, latency_ms: 50}\n";
+        if (write(fd, yaml.data(), yaml.size()) != static_cast<ssize_t>(yaml.size())) {
+            path.clear();
+            unlink(pattern);
+        }
+        close(fd);
+    }
+
+    ~TemporaryConfig() {
+        if (!path.empty()) unlink(path.c_str());
+    }
 };
 
 pid_t launch(const std::vector<std::string>& arguments, int output_fd) {
@@ -147,7 +172,13 @@ TEST(Process, UnknownOptionFailsWithUsage) {
 }
 
 TEST(Process, ValidConfigStartsAndStops) {
-    const auto result = signal_and_wait(SIGTERM, {"--config", SKAI_EXAMPLE_CONFIG});
+    std::string error;
+    ASSERT_TRUE(skai::gst::initialize_once(error)) << error;
+    skai::test::RtspTestServer server;
+    ASSERT_TRUE(server.start(error)) << error;
+    TemporaryConfig config(server.url());
+    ASSERT_FALSE(config.path.empty());
+    const auto result = signal_and_wait(SIGTERM, {"--config", config.path});
     ASSERT_TRUE(result.ready);
     ASSERT_TRUE(result.exited_in_time);
     ASSERT_TRUE(WIFEXITED(result.status));
@@ -155,6 +186,7 @@ TEST(Process, ValidConfigStartsAndStops) {
     EXPECT_NE(result.startup_output.find("timestamp=\""), std::string::npos);
     EXPECT_NE(result.startup_output.find("module=config"), std::string::npos);
     EXPECT_NE(result.startup_output.find("module=core"), std::string::npos);
+    EXPECT_NE(result.startup_output.find("module=video"), std::string::npos);
 }
 
 TEST(Process, InvalidConfigExitsBeforeReady) {
@@ -165,8 +197,24 @@ TEST(Process, InvalidConfigExitsBeforeReady) {
     EXPECT_EQ(result.output.find("skai-edge ready"), std::string::npos);
 }
 
+TEST(Process, InvalidRtspUrlExitsBeforeReadyWithFieldName) {
+    TemporaryConfig config("file:///tmp/video.mp4");
+    ASSERT_FALSE(config.path.empty());
+    const auto result = run_command({"--config", config.path});
+    ASSERT_TRUE(WIFEXITED(result.status));
+    EXPECT_NE(WEXITSTATUS(result.status), 0);
+    EXPECT_NE(result.output.find("video.rtsp_url"), std::string::npos);
+    EXPECT_EQ(result.output.find("skai-edge ready"), std::string::npos);
+}
+
 TEST(Process, SigintExitsSuccessfullyWithinTimeout) {
-    const auto result = signal_and_wait(SIGINT);
+    std::string error;
+    ASSERT_TRUE(skai::gst::initialize_once(error)) << error;
+    skai::test::RtspTestServer server;
+    ASSERT_TRUE(server.start(error)) << error;
+    TemporaryConfig config(server.url());
+    ASSERT_FALSE(config.path.empty());
+    const auto result = signal_and_wait(SIGINT, {"--config", config.path});
     ASSERT_TRUE(result.ready);
     ASSERT_TRUE(result.exited_in_time);
     ASSERT_TRUE(WIFEXITED(result.status));
@@ -174,7 +222,13 @@ TEST(Process, SigintExitsSuccessfullyWithinTimeout) {
 }
 
 TEST(Process, SigtermExitsSuccessfullyWithinTimeout) {
-    const auto result = signal_and_wait(SIGTERM);
+    std::string error;
+    ASSERT_TRUE(skai::gst::initialize_once(error)) << error;
+    skai::test::RtspTestServer server;
+    ASSERT_TRUE(server.start(error)) << error;
+    TemporaryConfig config(server.url());
+    ASSERT_FALSE(config.path.empty());
+    const auto result = signal_and_wait(SIGTERM, {"--config", config.path});
     ASSERT_TRUE(result.ready);
     ASSERT_TRUE(result.exited_in_time);
     ASSERT_TRUE(WIFEXITED(result.status));

@@ -34,6 +34,7 @@ struct BusEvent {
 
 class Pipeline {
 public:
+    static std::unique_ptr<Pipeline> create_empty(Logger& logger, std::string& error);
     static std::unique_ptr<Pipeline> from_launch(const std::string& launch,
                                                   Logger& logger, std::string& error);
     ~Pipeline();

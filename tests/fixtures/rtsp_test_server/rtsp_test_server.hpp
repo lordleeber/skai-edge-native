@@ -6,6 +6,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 
 namespace skai {
 namespace test {
@@ -15,7 +16,9 @@ class RtspTestServer {
 public:
     enum class Codec { H264, H265 };
 
-    explicit RtspTestServer(Codec codec = Codec::H264) : codec_(codec) {}
+    explicit RtspTestServer(Codec codec = Codec::H264, std::string username = {},
+                            std::string password = {})
+        : codec_(codec), username_(std::move(username)), password_(std::move(password)) {}
     ~RtspTestServer();
 
     RtspTestServer(const RtspTestServer&) = delete;
@@ -32,6 +35,8 @@ private:
     static void on_media_configure(GstRTSPMediaFactory*, GstRTSPMedia*, gpointer data);
 
     Codec codec_;
+    std::string username_;
+    std::string password_;
     GstRTSPServer* server_ = nullptr;
     GMainContext* context_ = nullptr;
     GSource* source_ = nullptr;
@@ -39,6 +44,7 @@ private:
     std::atomic<bool> running_{false};
     std::mutex gate_mutex_;
     GstElement* gate_ = nullptr;
+    GstRTSPMedia* media_ = nullptr;
     bool stalled_ = false;
     int port_ = 0;
 };

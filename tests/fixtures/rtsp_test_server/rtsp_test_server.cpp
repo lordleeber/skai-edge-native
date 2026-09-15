@@ -76,6 +76,25 @@ bool RtspTestServer::start(std::string& error) {
     }
     gst_rtsp_media_factory_set_launch(factory, launch_for(codec_));
     gst_rtsp_media_factory_set_shared(factory, TRUE);
+    if (!username_.empty()) {
+        GstRTSPAuth* auth = gst_rtsp_auth_new();
+        GstRTSPToken* token = gst_rtsp_token_new(GST_RTSP_TOKEN_MEDIA_FACTORY_ROLE,
+                                                G_TYPE_STRING, "viewer", nullptr);
+        gchar* basic = gst_rtsp_auth_make_basic(username_.c_str(), password_.c_str());
+        gst_rtsp_auth_add_basic(auth, basic, token);
+        gst_rtsp_token_unref(token);
+        g_free(basic);
+        gst_rtsp_server_set_auth(server_, auth);
+        gst_object_unref(auth);
+
+        GstRTSPPermissions* permissions = gst_rtsp_permissions_new();
+        gst_rtsp_permissions_add_role(permissions, "viewer",
+                                      GST_RTSP_PERM_MEDIA_FACTORY_ACCESS, G_TYPE_BOOLEAN, TRUE,
+                                      GST_RTSP_PERM_MEDIA_FACTORY_CONSTRUCT, G_TYPE_BOOLEAN, TRUE,
+                                      nullptr);
+        gst_rtsp_media_factory_set_permissions(factory, permissions);
+        gst_rtsp_permissions_unref(permissions);
+    }
     g_signal_connect(factory, "media-configure", G_CALLBACK(on_media_configure), this);
     gst_rtsp_mount_points_add_factory(mounts, "/test", factory); // transfers factory
     gst_object_unref(mounts);
@@ -129,6 +148,16 @@ void RtspTestServer::stop() noexcept {
     if (context_) g_main_context_wakeup(context_);
     if (worker_.joinable()) worker_.join();
     if (server_) gst_rtsp_server_client_filter(server_, close_client, nullptr);
+    GstRTSPMedia* media = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(gate_mutex_);
+        media = media_;
+        media_ = nullptr;
+    }
+    if (media) {
+        gst_rtsp_media_unprepare(media);
+        gst_object_unref(media);
+    }
     {
         std::lock_guard<std::mutex> lock(gate_mutex_);
         if (gate_) gst_object_unref(gate_);
@@ -166,6 +195,8 @@ void RtspTestServer::on_media_configure(GstRTSPMediaFactory*, GstRTSPMedia* medi
     gst_object_unref(element);
     if (!gate) return;
     std::lock_guard<std::mutex> lock(self->gate_mutex_);
+    if (self->media_) gst_object_unref(self->media_);
+    self->media_ = GST_RTSP_MEDIA(gst_object_ref(media));
     if (self->gate_) gst_object_unref(self->gate_);
     self->gate_ = gate; // full reference
     g_object_set(gate, "drop-probability", self->stalled_ ? 1.0 : 0.0, nullptr);

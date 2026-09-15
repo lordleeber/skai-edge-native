@@ -48,6 +48,25 @@ Pipeline::~Pipeline() {
     element_.reset();
 }
 
+std::unique_ptr<Pipeline> Pipeline::create_empty(Logger& logger, std::string& error) {
+    if (!gst_is_initialized()) {
+        error = "GStreamer must be initialized before creating a pipeline";
+        return nullptr;
+    }
+    ElementPtr element(gst_pipeline_new(nullptr));
+    if (!element) {
+        error = "could not create GstPipeline";
+        return nullptr;
+    }
+    BusPtr bus(gst_element_get_bus(element.get()));
+    if (!bus) {
+        error = "pipeline has no GstBus";
+        return nullptr;
+    }
+    error.clear();
+    return std::unique_ptr<Pipeline>(new Pipeline(std::move(element), std::move(bus), logger));
+}
+
 std::unique_ptr<Pipeline> Pipeline::from_launch(const std::string& launch,
                                                 Logger& logger, std::string& error) {
     if (!gst_is_initialized()) {

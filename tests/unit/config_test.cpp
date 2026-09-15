@@ -78,6 +78,21 @@ TEST(Config, AcceptsRtspUrlWithEmbeddedCredentials) {
     EXPECT_TRUE(result.ok) << result.error;
 }
 
+TEST(Config, AcceptsConfiguredRtspCredentials) {
+    const auto result = skai::parse_config(
+        "video: {rtsp_url: 'rtsp://camera.local/live', username: viewer, password: secret}\n");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.config.video.username, "viewer");
+    EXPECT_EQ(result.config.video.password, "secret");
+}
+
+TEST(Config, RejectsPasswordWithoutRtspUsername) {
+    const auto result = skai::parse_config(
+        "video: {rtsp_url: 'rtsp://camera.local/live', password: secret}\n");
+    EXPECT_FALSE(result.ok);
+    EXPECT_NE(result.error.find("video.username"), std::string::npos);
+}
+
 TEST(Config, RejectsEmptyEnabledWebrtcInterfaceWhitelist) {
     const auto result = skai::parse_config(
         "video: {rtsp_url: 'rtsp://camera/stream'}\n"

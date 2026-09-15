@@ -2,10 +2,13 @@
 #include "skai/cli.hpp"
 #include "skai/logging.hpp"
 #include "skai/video/gstreamer_runtime.hpp"
+#include "skai/video/rtsp_video_module.hpp"
 
 #include <csignal>
 #include <iostream>
+#include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 int main(int argc, char* argv[]) {
@@ -34,7 +37,10 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    skai::Application app(cli.config_path, logger);
+    skai::BoundedQueue<skai::Frame> inference_frames(2);
+    skai::Application::Modules modules;
+    modules.video = std::make_unique<skai::RtspVideoModule>(inference_frames, logger);
+    skai::Application app(cli.config_path, logger, std::move(modules));
     if (!app.initialize()) {
         skai::Logger error_logger(std::cerr);
         error_logger.log(skai::LogLevel::Error, app.last_error_module(), app.last_error());
