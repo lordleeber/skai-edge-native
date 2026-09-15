@@ -6,7 +6,10 @@ implementation and architectural rules.
 
 PR 1 provides the native executable, command-line options, GoogleTest/CTest,
 and graceful SIGINT/SIGTERM shutdown. PR 2 adds validated YAML configuration
-and structured logging. It does not yet ingest video.
+and structured logging. PR 3 adds an Application lifecycle that loads config,
+initializes modules in web/detector/video/GPS order, starts their workers, and
+stops and joins them in reverse order. The modules are lifecycle hooks for
+later PRs; this service does not yet ingest video.
 
 ## Build and test
 

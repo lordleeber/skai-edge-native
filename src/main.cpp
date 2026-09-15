@@ -1,5 +1,5 @@
+#include "skai/application.hpp"
 #include "skai/cli.hpp"
-#include "skai/config.hpp"
 #include "skai/logging.hpp"
 
 #include <csignal>
@@ -15,19 +15,7 @@ int main(int argc, char* argv[]) {
         return cli.exit_code;
     }
 
-    skai::Config config;
-    if (!cli.config_path.empty()) {
-        const auto loaded = skai::load_config(cli.config_path);
-        if (!loaded.ok) {
-            skai::Logger error_logger(std::cerr);
-            error_logger.log(skai::LogLevel::Error, "config", loaded.error);
-            return 2;
-        }
-        config = loaded.config;
-    }
-    skai::Logger logger(std::cout, config.logging.level);
-    logger.log(skai::LogLevel::Info, "config",
-               cli.config_path.empty() ? "using built-in defaults" : "configuration validated");
+    skai::Logger logger(std::cout);
 
     sigset_t shutdown_signals;
     sigemptyset(&shutdown_signals);
@@ -38,12 +26,27 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+    skai::Application app(cli.config_path, logger);
+    if (!app.initialize()) {
+        skai::Logger error_logger(std::cerr);
+        error_logger.log(skai::LogLevel::Error, app.last_error_module(), app.last_error());
+        return 2;
+    }
+    if (!app.start()) {
+        skai::Logger error_logger(std::cerr);
+        error_logger.log(skai::LogLevel::Error, app.last_error_module(), app.last_error());
+        return 1;
+    }
     logger.log(skai::LogLevel::Info, "core", "skai-edge ready");
     int signal_number = 0;
     if (sigwait(&shutdown_signals, &signal_number) != 0) {
         logger.log(skai::LogLevel::Error, "core", "failed to wait for shutdown signal");
+        app.stop();
+        app.wait();
         return 1;
     }
+    app.stop();
+    app.wait();
     logger.log(skai::LogLevel::Info, "core", "skai-edge stopped");
     return 0;
 }

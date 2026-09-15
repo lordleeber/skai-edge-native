@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This repository currently builds a small C++17 Jetson edge-service skeleton. Public interfaces live in `include/skai/`; implementations and the executable entry point live in `src/`. Unit tests are in `tests/unit/`, executable tests are in `tests/integration/`, and test-only YAML fixtures are in `tests/fixtures/`. `config/` contains the example configuration; `models/`, `web/`, `systemd/`, `scripts/`, `cmake/`, `docs/`, and `third_party/` are placeholders for later stages. Read `ROADMAP.md` before adding those features; the current service has no RTSP ingest or inference.
+This repository currently builds a small C++17 Jetson edge-service skeleton. Public interfaces live in `include/skai/`; implementations and the executable entry point live in `src/`. `Application` owns lifecycle hooks for web, detector, video, and GPS modules; those modules are not yet implemented. Unit tests are in `tests/unit/`, executable tests are in `tests/integration/`, and test-only YAML fixtures are in `tests/fixtures/`. `config/` contains the example configuration; `models/`, `web/`, `systemd/`, `scripts/`, `cmake/`, `docs/`, and `third_party/` are placeholders for later stages. Read `ROADMAP.md` before adding those features; the current service has no RTSP ingest or inference.
 
 ## Build, Test, and Development Commands
 
@@ -25,7 +25,7 @@ Use C++17 without compiler extensions, as configured in `CMakeLists.txt`. Follow
 
 ## Testing Guidelines
 
-Use GoogleTest assertions (`TEST`, `EXPECT_*`, `ASSERT_*`). Name test files `*_test.cpp` and cases by behavior, as in `TEST(CommandLine, HelpPrintsUsage)`. Add unit tests for parsing or other isolated logic and integration tests when executable output, exit status, or signals matter. Run `ctest --test-dir build --output-on-failure` before submitting. There is no configured coverage threshold.
+Use GoogleTest assertions (`TEST`, `EXPECT_*`, `ASSERT_*`). Name test files `*_test.cpp` and cases by behavior, as in `TEST(CommandLine, HelpPrintsUsage)`. For each roadmap PR, write tests for new behavior first and confirm they fail; then implement until they pass and keep them passing while refactoring. Add unit tests for parsing or other isolated logic and integration tests when executable output, exit status, or signals matter. Run `ctest --test-dir build --output-on-failure` before submitting. There is no configured coverage threshold.
 
 ## Commit & Pull Request Guidelines
 
