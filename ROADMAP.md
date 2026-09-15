@@ -395,9 +395,11 @@ Rules:
 
 ### 4.9 Step size and splitting
 
-Each numbered step is a deliverable, not a fixed-size change. If its planned or
-actual implementation and test code exceeds 800 changed lines, split it before
-submission into consecutive substeps: `step-N-a`, `step-N-b`, `step-N-c`, and so
+Each numbered step is a deliverable, not a fixed-size change. During
+implementation, count the actual changed code lines. Do not split solely on
+an estimate. If implementation and test code exceeds 800 changed lines, split
+it before submission into consecutive substeps: `step-N-a`, `step-N-b`,
+`step-N-c`, and so
 on; title them `Step N-a`, `Step N-b`, etc. Keep each substep at or below 800
 changed code lines. Count code under `include/`, `src/`, `tests/`, and `cmake/` (including
 `CMakeLists.txt`); exclude documentation, assets, and generated files. Give each
