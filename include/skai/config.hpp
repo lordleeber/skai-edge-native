@@ -9,6 +9,8 @@ namespace skai {
 
 struct VideoConfig {
     std::string rtsp_url = "rtsp://127.0.0.1/stream";
+    std::string username;
+    std::string password;
     std::string transport = "tcp";
     int latency_ms = 100;
     int reconnect_delay_ms = 1000;
@@ -69,5 +71,6 @@ struct ConfigResult {
 
 ConfigResult parse_config(const std::string& text);
 ConfigResult load_config(const std::string& path);
+bool validate_video_config(const VideoConfig& video, std::string& error);
 
 } // namespace skai

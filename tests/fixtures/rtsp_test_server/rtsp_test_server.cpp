@@ -76,6 +76,25 @@ bool RtspTestServer::start(std::string& error) {
     }
     gst_rtsp_media_factory_set_launch(factory, launch_for(codec_));
     gst_rtsp_media_factory_set_shared(factory, TRUE);
+    if (!username_.empty()) {
+        GstRTSPAuth* auth = gst_rtsp_auth_new();
+        GstRTSPToken* token = gst_rtsp_token_new(GST_RTSP_TOKEN_MEDIA_FACTORY_ROLE,
+                                                G_TYPE_STRING, "viewer", nullptr);
+        gchar* basic = gst_rtsp_auth_make_basic(username_.c_str(), password_.c_str());
+        gst_rtsp_auth_add_basic(auth, basic, token);
+        gst_rtsp_token_unref(token);
+        g_free(basic);
+        gst_rtsp_server_set_auth(server_, auth);
+        gst_object_unref(auth);
+
+        GstRTSPPermissions* permissions = gst_rtsp_permissions_new();
+        gst_rtsp_permissions_add_role(permissions, "viewer",
+                                      GST_RTSP_PERM_MEDIA_FACTORY_ACCESS, G_TYPE_BOOLEAN, TRUE,
+                                      GST_RTSP_PERM_MEDIA_FACTORY_CONSTRUCT, G_TYPE_BOOLEAN, TRUE,
+                                      nullptr);
+        gst_rtsp_media_factory_set_permissions(factory, permissions);
+        gst_rtsp_permissions_unref(permissions);
+    }
     g_signal_connect(factory, "media-configure", G_CALLBACK(on_media_configure), this);
     gst_rtsp_mount_points_add_factory(mounts, "/test", factory); // transfers factory
     gst_object_unref(mounts);

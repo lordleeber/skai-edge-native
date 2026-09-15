@@ -8,6 +8,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(Threads REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GSTREAMER REQUIRED IMPORTED_TARGET gstreamer-1.0)
+pkg_check_modules(GST_VIDEO_APP REQUIRED IMPORTED_TARGET
+    gstreamer-app-1.0 gstreamer-video-1.0 gstreamer-rtsp-1.0)
 
 add_library(skai-core INTERFACE)
 target_include_directories(skai-core INTERFACE include)
@@ -33,8 +35,14 @@ add_library(skai-gstreamer src/video/gstreamer_runtime.cpp)
 target_include_directories(skai-gstreamer PUBLIC include)
 target_link_libraries(skai-gstreamer PUBLIC skai-logging PkgConfig::GSTREAMER)
 
+add_library(skai-rtsp-source src/video/rtsp_source.cpp src/video/rtsp_video_module.cpp)
+target_include_directories(skai-rtsp-source PUBLIC include)
+target_link_libraries(skai-rtsp-source PUBLIC skai-gstreamer skai-config skai-core
+    skai-application PkgConfig::GST_VIDEO_APP)
+
 add_executable(skai-edge src/main.cpp)
-target_link_libraries(skai-edge PRIVATE skai-cli skai-application skai-gstreamer)
+target_link_libraries(skai-edge PRIVATE skai-cli skai-application skai-gstreamer
+    skai-rtsp-source)
 
 enable_testing()
 add_subdirectory(tests)

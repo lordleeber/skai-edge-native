@@ -2,11 +2,11 @@
 
 ## Project Structure & Module Organization
 
-This C++17 Jetson service keeps public APIs in `include/skai/` (`core/` queues, `video/` GStreamer) and implementations and `main.cpp` in `src/`. `Application` owns lifecycle hooks for web, detector, video, and GPS; those modules are not yet implemented. Unit tests are in `tests/unit/`, executable tests in `tests/integration/`, and the test-only RTSP server in `tests/fixtures/rtsp_test_server/`. `config/` contains example YAML; `models/`, `web/`, `systemd/`, `scripts/`, `cmake/`, `docs/`, and `third_party/` are placeholders. Read `ROADMAP.md` before adding those features; the service has no RTSP ingest or inference yet.
+This C++17 Jetson service keeps public APIs in `include/skai/` (`core/` queues, `video/` RTSP/GStreamer) and implementations and `main.cpp` in `src/`. `Application` owns the RTSP video module; web, detector, and GPS modules are future work. Unit tests are in `tests/unit/`, executable and source tests in `tests/integration/`, and the test-only RTSP server in `tests/fixtures/rtsp_test_server/`. `config/` contains example YAML; `models/`, `web/`, `systemd/`, `scripts/`, `cmake/`, `docs/`, and `third_party/` are placeholders. Read `ROADMAP.md` before adding those features; inference is not implemented yet.
 
 ## Build, Test, and Development Commands
 
-Install CMake 3.22+, a C++17 compiler, GoogleTest (`libgtest-dev`), yaml-cpp (`libyaml-cpp-dev`), and GStreamer development packages (`libgstreamer1.0-dev`, `libgstreamer-plugins-base1.0-dev`, `libgstrtspserver-1.0-dev`). Install H.264 test plugins. From the repository root:
+Install CMake 3.22+, a C++17 compiler, GoogleTest (`libgtest-dev`), yaml-cpp (`libyaml-cpp-dev`), and GStreamer development packages (`libgstreamer1.0-dev`, `libgstreamer-plugins-base1.0-dev`, `libgstrtspserver-1.0-dev`). Install H.264 encoder plugins and `gstreamer1.0-libav` for software decode; H.265 test plugins are optional. From the repository root:
 
 ```sh
 cmake -S . -B build
@@ -17,7 +17,7 @@ ctest --test-dir build --output-on-failure
 ./build/skai-edge --config config/config.example.yaml
 ```
 
-The first two commands configure and build the executable and tests; CTest runs the discovered GoogleTest cases. Running `./build/skai-edge` without options uses built-in defaults and waits for SIGINT or SIGTERM. `--config` validates a YAML file before readiness. Keep generated files under the ignored `build/` directory.
+The first two commands configure and build the executable and tests; CTest runs the discovered GoogleTest cases. Running `./build/skai-edge` without options tries the built-in loopback RTSP URL. `--config` validates YAML and connects to its RTSP URL before readiness. Keep generated files under the ignored `build/` directory.
 
 ## Coding Style & Naming Conventions
 
@@ -25,7 +25,7 @@ Use C++17 without compiler extensions, as configured in `CMakeLists.txt`. Follow
 
 ## Testing Guidelines
 
-Use GoogleTest assertions (`TEST`, `EXPECT_*`, `ASSERT_*`). Name test files `*_test.cpp` and cases by behavior, as in `TEST(CommandLine, HelpPrintsUsage)`. For each roadmap PR, write tests first and confirm they fail; implement until they pass, then keep them passing while refactoring. Add unit tests for isolated logic and integration tests for executable behavior. RTSP fixture tests carry the `rtsp` CTest label. Run `ctest --test-dir build --output-on-failure` before submitting. There is no configured coverage threshold.
+Use GoogleTest assertions (`TEST`, `EXPECT_*`, `ASSERT_*`). Name test files `*_test.cpp` and cases by behavior, as in `TEST(RtspSource, ReceivesH264OverUdp)`. For each roadmap PR, write tests first and confirm they fail; implement until they pass, then keep them passing while refactoring. Add unit tests for isolated logic and integration tests for executable behavior. RTSP tests carry the `rtsp` CTest label; hardware tests also carry `jetson`. Run `ctest --test-dir build --output-on-failure` before submitting. There is no configured coverage threshold.
 
 ## Commit & Pull Request Guidelines
 

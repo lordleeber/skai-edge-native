@@ -1,6 +1,8 @@
 # Copy this file and adjust the RTSP URL for your deployment.
 video:
   rtsp_url: "rtsp://100.69.117.102:8554/test"
+  # For cameras that require credentials, set username and password here,
+  # or embed them in rtsp_url. Keep your deployment config out of Git.
   transport: tcp
   latency_ms: 100
   reconnect_delay_ms: 1000

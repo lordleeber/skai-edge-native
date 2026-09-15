@@ -105,8 +105,7 @@ bool valid_rtsp_authority(const std::string& authority) {
            (colon == std::string::npos || valid_port(host_port.substr(colon + 1)));
 }
 
-void validate(const Config& config) {
-    const auto& video = config.video;
+void validate_video(const VideoConfig& video) {
     const auto& url = video.rtsp_url;
     const auto authority_start = std::string("rtsp://").size();
     const auto authority_end = url.size() >= authority_start
@@ -120,13 +119,18 @@ void validate(const Config& config) {
                 "video.rtsp_url", "must be a rtsp:// URL with a valid host and optional port");
     check_range(video.transport == "tcp" || video.transport == "udp",
                 "video.transport", "must be tcp or udp");
+    check_range(video.password.empty() || !video.username.empty(),
+                "video.username", "must be set when video.password is set");
     check_range(video.latency_ms >= 0 && video.latency_ms <= 10000,
                 "video.latency_ms", "must be between 0 and 10000");
     check_range(video.reconnect_delay_ms >= 1 && video.reconnect_delay_ms <= 60000,
                 "video.reconnect_delay_ms", "must be between 1 and 60000");
     check_range(video.stall_timeout_ms >= 1 && video.stall_timeout_ms <= 60000,
                 "video.stall_timeout_ms", "must be between 1 and 60000");
+}
 
+void validate(const Config& config) {
+    validate_video(config.video);
     check_range(!config.detector.engine.empty(), "detector.engine", "must not be empty");
     check_range(std::isfinite(config.detector.confidence) &&
                     config.detector.confidence >= 0 && config.detector.confidence <= 1,
@@ -166,9 +170,11 @@ Config parse(const YAML::Node& root) {
     }
     Config config;
     const auto video = root["video"];
-    check_keys(video, "video", {"rtsp_url", "transport", "latency_ms", "reconnect_delay_ms",
-                                "stall_timeout_ms"});
+    check_keys(video, "video", {"rtsp_url", "username", "password", "transport", "latency_ms",
+                                "reconnect_delay_ms", "stall_timeout_ms"});
     read_scalar(video, "rtsp_url", "video", config.video.rtsp_url);
+    read_scalar(video, "username", "video", config.video.username);
+    read_scalar(video, "password", "video", config.video.password);
     read_scalar(video, "transport", "video", config.video.transport);
     read_scalar(video, "latency_ms", "video", config.video.latency_ms);
     read_scalar(video, "reconnect_delay_ms", "video", config.video.reconnect_delay_ms);
@@ -251,6 +257,17 @@ ConfigResult load_config(const std::string& path) {
     auto result = parse_config(text);
     if (!result.ok) result.error = path + ": " + result.error;
     return result;
+}
+
+bool validate_video_config(const VideoConfig& video, std::string& error) {
+    try {
+        validate_video(video);
+        error.clear();
+        return true;
+    } catch (const std::exception& failure) {
+        error = failure.what();
+        return false;
+    }
 }
 
 } // namespace skai

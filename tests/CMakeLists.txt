@@ -12,10 +12,9 @@ target_compile_definitions(skai-unit-tests PRIVATE
 gtest_discover_tests(skai-unit-tests PROPERTIES TIMEOUT 15)
 
 add_executable(skai-integration-tests integration/process_test.cpp)
-target_link_libraries(skai-integration-tests PRIVATE GTest::gtest_main)
+target_link_libraries(skai-integration-tests PRIVATE skai-rtsp-test-fixture GTest::gtest_main)
 target_compile_definitions(skai-integration-tests PRIVATE
     SKAI_EDGE_EXECUTABLE="$<TARGET_FILE:skai-edge>"
-    SKAI_EXAMPLE_CONFIG="${PROJECT_SOURCE_DIR}/config/config.example.yaml"
     SKAI_INVALID_CONFIG="${PROJECT_SOURCE_DIR}/tests/fixtures/config.invalid.yaml")
 add_dependencies(skai-integration-tests skai-edge)
 gtest_discover_tests(skai-integration-tests)
@@ -34,3 +33,13 @@ add_executable(skai-rtsp-fixture-tests integration/rtsp_fixture_test.cpp)
 target_link_libraries(skai-rtsp-fixture-tests PRIVATE skai-rtsp-test-fixture
     GTest::gtest_main)
 gtest_discover_tests(skai-rtsp-fixture-tests PROPERTIES LABELS rtsp TIMEOUT 30)
+
+add_executable(skai-rtsp-source-tests integration/rtsp_source_test.cpp)
+target_link_libraries(skai-rtsp-source-tests PRIVATE skai-rtsp-source
+    skai-rtsp-test-fixture GTest::gtest_main)
+gtest_discover_tests(skai-rtsp-source-tests PROPERTIES LABELS rtsp TIMEOUT 30)
+
+add_executable(skai-rtsp-jetson-tests integration/rtsp_jetson_test.cpp)
+target_link_libraries(skai-rtsp-jetson-tests PRIVATE skai-rtsp-source
+    skai-rtsp-test-fixture GTest::gtest_main)
+gtest_discover_tests(skai-rtsp-jetson-tests PROPERTIES LABELS "rtsp;jetson" TIMEOUT 30)
