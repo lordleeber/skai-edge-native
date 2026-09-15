@@ -16,6 +16,7 @@ struct QueueStats {
     std::size_t pushed = 0;
     std::size_t popped = 0;
     std::size_t dropped = 0;
+    std::size_t discarded = 0;
     std::size_t high_water_mark = 0;
 };
 
@@ -75,7 +76,7 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);
         const auto count = queue_.size();
         queue_.clear();
-        stats_.dropped += count;
+        stats_.discarded += count;
         return count;
     }
 

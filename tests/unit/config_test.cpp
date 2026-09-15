@@ -140,6 +140,14 @@ TEST(Config, ValidatesReconnectBackoffCeiling) {
     EXPECT_NE(invalid.error.find("video.max_reconnect_delay_ms"), std::string::npos);
 }
 
+TEST(Config, SeparatesFirstFrameTimeoutFromStallTimeout) {
+    const auto result = skai::parse_config(
+        "video: {rtsp_url: 'rtsp://camera/stream', first_frame_timeout_ms: 12000, stall_timeout_ms: 500}\n");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.config.video.first_frame_timeout_ms, 12000);
+    EXPECT_EQ(result.config.video.stall_timeout_ms, 500);
+}
+
 TEST(Config, RejectsIncorrectTypes) {
     const auto result = skai::parse_config(
         "video: {rtsp_url: 'rtsp://camera/stream', latency_ms: nope}\n");

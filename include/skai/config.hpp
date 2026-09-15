@@ -16,6 +16,7 @@ struct VideoConfig {
     int reconnect_delay_ms = 1000;
     int max_reconnect_delay_ms = 10000;
     int stall_timeout_ms = 3000;
+    int first_frame_timeout_ms = 15000;
 };
 
 struct DetectorConfig {

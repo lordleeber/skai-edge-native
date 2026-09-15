@@ -95,7 +95,8 @@ TEST(BoundedQueue, DiscardAllRemovesStaleFramesAndCountsDrops) {
     ASSERT_TRUE(queue.push(2));
     EXPECT_EQ(queue.discard_all(), 2U);
     EXPECT_EQ(queue.size(), 0U);
-    EXPECT_EQ(queue.stats().dropped, 2U);
+    EXPECT_EQ(queue.stats().dropped, 0U);
+    EXPECT_EQ(queue.stats().discarded, 2U);
     ASSERT_TRUE(queue.push(3));
     EXPECT_EQ(queue.pop_for(std::chrono::milliseconds(1)), 3);
 }

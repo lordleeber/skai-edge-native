@@ -1,4 +1,5 @@
 #include "skai/video/rtsp_recovery.hpp"
+#include "skai/video/rtsp_metrics.hpp"
 
 #include <gtest/gtest.h>
 
@@ -35,14 +36,29 @@ TEST(RtspRecovery, DetectsPacketLossAndFrameStallWithoutSocketError) {
     skai::RtspRecovery recovery(500ms, 100ms, 400ms);
     recovery.begin(start);
     recovery.frame(start + 100ms);
-    recovery.packet_loss();
+    recovery.packet_loss(start + 200ms);
     EXPECT_EQ(recovery.health(), skai::SourceHealth::Degraded);
-    EXPECT_FALSE(recovery.check_stall(start + 599ms));
-    EXPECT_TRUE(recovery.check_stall(start + 600ms));
-    EXPECT_EQ(recovery.health(), skai::SourceHealth::Stalled);
-    recovery.fail(start + 600ms);
-    EXPECT_EQ(recovery.health(), skai::SourceHealth::Reconnecting);
-    recovery.retry(start + 700ms);
-    recovery.frame(start + 800ms);
+    recovery.frame(start + 300ms);
+    EXPECT_EQ(recovery.health(), skai::SourceHealth::Degraded);
+    recovery.frame(start + 1200ms);
     EXPECT_EQ(recovery.health(), skai::SourceHealth::Connected);
+    recovery.packet_loss(start + 1300ms);
+    EXPECT_FALSE(recovery.check_stall(start + 1699ms));
+    EXPECT_TRUE(recovery.check_stall(start + 1700ms));
+    EXPECT_EQ(recovery.health(), skai::SourceHealth::Stalled);
+    recovery.fail(start + 1700ms);
+    EXPECT_EQ(recovery.health(), skai::SourceHealth::Reconnecting);
+    recovery.retry(start + 1800ms);
+    recovery.frame(start + 1900ms);
+    EXPECT_EQ(recovery.health(), skai::SourceHealth::Connected);
+}
+
+TEST(RtspMetrics, BackwardsJitterStatDoesNotDoubleCountPacketLoss) {
+    skai::MonotonicCounter counter;
+    EXPECT_EQ(counter.observe(3), 3U);
+    EXPECT_EQ(counter.observe(2), 0U);
+    EXPECT_EQ(counter.observe(3), 0U);
+    EXPECT_EQ(counter.observe(5), 2U);
+    counter.reset();
+    EXPECT_EQ(counter.observe(1), 1U);
 }

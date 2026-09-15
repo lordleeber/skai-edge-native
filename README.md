@@ -44,9 +44,11 @@ jitterbuffer. Credentials may be embedded in the URL or supplied as
 out of Git. Logs use UTC timestamps and `level`, `module`, and `message`
 fields. The service waits for SIGINT or SIGTERM and exits cleanly. Set
 `video.reconnect_delay_ms`, `video.max_reconnect_delay_ms`, and
-`video.stall_timeout_ms` to tune recovery. `--rtsp-test` skips inference and
+`video.stall_timeout_ms` to tune recovery; `video.first_frame_timeout_ms`
+allows longer initial waits for a keyframe. `--rtsp-test` skips inference and
 prints one JSON metrics line per second to stdout with health, frame age,
-dropped frames, reconnect count, and RTP jitter statistics when available;
+dropped frames, stale frames discarded on reconnect, reconnect count, and RTP
+jitter statistics when available;
 diagnostic logs go to stderr.
 
 ## GStreamer runtime and RTSP fixture

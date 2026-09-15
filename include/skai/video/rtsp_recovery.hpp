@@ -25,18 +25,23 @@ public:
     void begin(TimePoint) {
         health_ = SourceHealth::Connecting;
         last_frame_.reset();
+        degraded_until_.reset();
         failure_streak_ = 0;
         reconnect_count_ = 0;
     }
 
     void frame(TimePoint now) {
-        health_ = SourceHealth::Connected;
+        health_ = degraded_until_ && now < *degraded_until_
+                      ? SourceHealth::Degraded : SourceHealth::Connected;
         last_frame_ = now;
         failure_streak_ = 0;
     }
 
-    void packet_loss() {
-        if (health_ == SourceHealth::Connected) health_ = SourceHealth::Degraded;
+    void packet_loss(TimePoint now) {
+        if (health_ == SourceHealth::Connected || health_ == SourceHealth::Degraded) {
+            health_ = SourceHealth::Degraded;
+            degraded_until_ = now + std::chrono::seconds(1);
+        }
     }
 
     bool check_stall(TimePoint now) {
@@ -50,6 +55,7 @@ public:
 
     void fail(TimePoint now) {
         health_ = SourceHealth::Reconnecting;
+        degraded_until_.reset();
         ++failure_streak_;
         auto delay = reconnect_delay_;
         for (std::uint32_t attempt = 1; attempt < failure_streak_; ++attempt) {
@@ -82,6 +88,7 @@ private:
     std::chrono::milliseconds max_reconnect_delay_;
     SourceHealth health_ = SourceHealth::Stopped;
     std::optional<TimePoint> last_frame_;
+    std::optional<TimePoint> degraded_until_;
     TimePoint next_retry_{};
     std::uint32_t failure_streak_ = 0;
     std::uint64_t reconnect_count_ = 0;

@@ -49,7 +49,7 @@ int main(int argc, char* argv[]) {
             return 2;
         }
         skai::BoundedQueue<skai::Frame> diagnostic_frames(2);
-        skai::RtspSource source(diagnostic_frames, logger);
+        skai::RtspSource source(diagnostic_frames, logger, skai::DecodeMode::Auto, false);
         std::string error;
         if (!source.start(config.config.video, error)) {
             logger.log(skai::LogLevel::Error, "video", error);

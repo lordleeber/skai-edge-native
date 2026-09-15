@@ -246,12 +246,14 @@ TEST(Process, RtspTestReportsMetricsWithoutInferenceWhileOffline) {
     server.stop();
     const auto result = signal_and_wait(SIGTERM,
                                         {"--rtsp-test", "--config", config.path},
-                                        "\"url_configured\":true");
+                                        "\"reconnect_count\"");
     ASSERT_TRUE(result.ready) << result.startup_output;
     ASSERT_TRUE(result.exited_in_time);
     ASSERT_TRUE(WIFEXITED(result.status));
     EXPECT_EQ(WEXITSTATUS(result.status), 0);
+    EXPECT_NE(result.startup_output.find("rtsp-test ready"), std::string::npos);
     EXPECT_NE(result.startup_output.find("\"transport\":\"tcp\""), std::string::npos);
+    EXPECT_NE(result.startup_output.find("\"url_configured\":true"), std::string::npos);
     EXPECT_NE(result.startup_output.find("\"reconnect_count\""), std::string::npos);
 }
 

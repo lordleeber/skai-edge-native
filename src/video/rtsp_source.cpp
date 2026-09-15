@@ -61,6 +61,7 @@ std::string serialize_rtsp_metrics(const RtspDiagnostics& d) {
          << ",\"fps_in\":" << d.fps_in
          << ",\"frames_received\":" << d.frames_received
          << ",\"frames_dropped\":" << d.frames_dropped
+         << ",\"frames_discarded\":" << d.frames_discarded
          << ",\"last_frame_age_ms\":" << d.last_frame_age_ms
          << ",\"reconnect_count\":" << d.reconnect_count
          << ",\"packets_lost\":" << d.packets_lost
@@ -69,8 +70,10 @@ std::string serialize_rtsp_metrics(const RtspDiagnostics& d) {
     return json.str();
 }
 
-RtspSource::RtspSource(BoundedQueue<Frame>& frames, Logger& logger, DecodeMode decode_mode)
-    : frames_(frames), logger_(logger), decode_mode_(decode_mode) {}
+RtspSource::RtspSource(BoundedQueue<Frame>& frames, Logger& logger, DecodeMode decode_mode,
+                       bool enqueue_frames)
+    : frames_(frames), logger_(logger), decode_mode_(decode_mode),
+      enqueue_frames_(enqueue_frames) {}
 
 RtspSource::~RtspSource() { stop(); }
 
@@ -132,9 +135,14 @@ bool RtspSource::open_pipeline(std::string& error) {
         close_pipeline();
         return false;
     }
+    rtsp_element_ = source;
+    {
+        std::lock_guard<std::mutex> lock(callback_mutex_);
+        accepting_callbacks_ = true;
+    }
     g_signal_connect(source, "pad-added", G_CALLBACK(on_rtp_pad), this);
     g_signal_connect(source, "new-manager", G_CALLBACK(on_new_manager), this);
-    if (!pipeline_->start(std::chrono::seconds(6))) {
+    if (!pipeline_->start(std::chrono::seconds(6), [this] { return !running_; })) {
         const auto detail = diagnostics().last_error;
         error = !detail.empty() ? detail : pipeline_->last_error();
         close_pipeline();
@@ -157,22 +165,43 @@ void RtspSource::request_stop() noexcept {
 }
 
 void RtspSource::close_pipeline() noexcept {
+    {
+        std::lock_guard<std::mutex> lock(callback_mutex_);
+        accepting_callbacks_ = false;
+    }
+    if (rtsp_element_) g_signal_handlers_disconnect_by_data(rtsp_element_, this);
+    {
+        std::unique_lock<std::mutex> lock(callback_mutex_);
+        callback_changed_.wait(lock, [this] { return callbacks_in_flight_ == 0; });
+    }
+    std::vector<GstElement*> managers;
+    {
+        std::lock_guard<std::mutex> lock(jitter_mutex_);
+        managers.swap(managers_);
+    }
+    for (auto* manager : managers) {
+        g_signal_handlers_disconnect_by_data(manager, this);
+        gst_object_unref(manager);
+    }
     if (pipeline_) pipeline_->stop();
     {
         std::lock_guard<std::mutex> lock(jitter_mutex_);
         if (jitterbuffer_) gst_object_unref(jitterbuffer_);
         jitterbuffer_ = nullptr;
-        pipeline_packets_lost_ = 0;
-        pipeline_packets_late_ = 0;
+        pipeline_packets_lost_.reset();
+        pipeline_packets_late_.reset();
     }
     sink_ = nullptr;
+    rtsp_element_ = nullptr;
     pipeline_.reset();
 }
 
 RtspDiagnostics RtspSource::diagnostics() const {
     std::lock_guard<std::mutex> lock(diagnostics_mutex_);
     auto snapshot = diagnostics_;
-    snapshot.frames_dropped = frames_.stats().dropped;
+    const auto queue_stats = frames_.stats();
+    snapshot.frames_dropped = queue_stats.dropped;
+    snapshot.frames_discarded = queue_stats.discarded;
     if (last_frame_time_ != std::chrono::steady_clock::time_point{}) {
         snapshot.last_frame_age_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - last_frame_time_).count();
@@ -191,21 +220,45 @@ void RtspSource::set_error(const std::string& error) {
 }
 
 void RtspSource::on_rtp_pad(GstElement*, GstPad* pad, gpointer user_data) {
-    static_cast<RtspSource*>(user_data)->connect_rtp_pad(pad);
+    auto* self = static_cast<RtspSource*>(user_data);
+    if (!self->begin_callback()) return;
+    self->connect_rtp_pad(pad);
+    self->end_callback();
 }
 
 void RtspSource::on_new_manager(GstElement*, GstElement* manager, gpointer user_data) {
+    auto* self = static_cast<RtspSource*>(user_data);
+    if (!self->begin_callback()) return;
+    {
+        std::lock_guard<std::mutex> lock(self->jitter_mutex_);
+        self->managers_.push_back(GST_ELEMENT(gst_object_ref(manager)));
+    }
     g_signal_connect(manager, "new-jitterbuffer", G_CALLBACK(on_new_jitterbuffer), user_data);
+    self->end_callback();
 }
 
 void RtspSource::on_new_jitterbuffer(GstElement*, GstElement* jitterbuffer,
                                      unsigned int, unsigned int, gpointer user_data) {
     auto* self = static_cast<RtspSource*>(user_data);
+    if (!self->begin_callback()) return;
     std::lock_guard<std::mutex> lock(self->jitter_mutex_);
     if (self->jitterbuffer_) gst_object_unref(self->jitterbuffer_);
     self->jitterbuffer_ = GST_ELEMENT(gst_object_ref(jitterbuffer));
-    self->pipeline_packets_lost_ = 0;
-    self->pipeline_packets_late_ = 0;
+    self->pipeline_packets_lost_.reset();
+    self->pipeline_packets_late_.reset();
+    self->end_callback();
+}
+
+bool RtspSource::begin_callback() {
+    std::lock_guard<std::mutex> lock(callback_mutex_);
+    if (!accepting_callbacks_) return false;
+    ++callbacks_in_flight_;
+    return true;
+}
+
+void RtspSource::end_callback() {
+    std::lock_guard<std::mutex> lock(callback_mutex_);
+    if (--callbacks_in_flight_ == 0) callback_changed_.notify_all();
 }
 
 void RtspSource::read_jitter_stats(RtspRecovery& recovery) {
@@ -218,17 +271,15 @@ void RtspSource::read_jitter_stats(RtspRecovery& recovery) {
     gst_structure_get_uint64(stats, "num-late", &late);
     gst_structure_get_uint64(stats, "avg-jitter", &jitter);
     gst_structure_free(stats);
-    if (lost > pipeline_packets_lost_) recovery.packet_loss();
+    const auto added_lost = pipeline_packets_lost_.observe(lost);
+    const auto added_late = pipeline_packets_late_.observe(late);
+    if (added_lost > 0) recovery.packet_loss(std::chrono::steady_clock::now());
     {
         std::lock_guard<std::mutex> lock(diagnostics_mutex_);
-        diagnostics_.packets_lost += lost >= pipeline_packets_lost_
-                                         ? lost - pipeline_packets_lost_ : lost;
-        diagnostics_.packets_late += late >= pipeline_packets_late_
-                                         ? late - pipeline_packets_late_ : late;
+        diagnostics_.packets_lost += added_lost;
+        diagnostics_.packets_late += added_late;
         diagnostics_.avg_jitter_ns = jitter;
     }
-    pipeline_packets_lost_ = lost;
-    pipeline_packets_late_ = late;
     if (recovery.health() == SourceHealth::Degraded) publish_recovery(recovery);
 }
 
@@ -331,11 +382,13 @@ bool RtspSource::capture_sample(GstSample* sample, RtspRecovery& recovery) {
         frame.width = width;
         frame.height = height;
         frame.stride = width * 3;
-        frame.bgr.resize(static_cast<std::size_t>(frame.stride) * height);
-        for (int row = 0; row < height; ++row) {
-            std::memcpy(frame.bgr.data() + static_cast<std::size_t>(row) * frame.stride,
-                        source_pixels + static_cast<std::size_t>(row) * source_stride,
-                        static_cast<std::size_t>(frame.stride));
+        if (enqueue_frames_) {
+            frame.bgr.resize(static_cast<std::size_t>(frame.stride) * height);
+            for (int row = 0; row < height; ++row) {
+                std::memcpy(frame.bgr.data() + static_cast<std::size_t>(row) * frame.stride,
+                            source_pixels + static_cast<std::size_t>(row) * source_stride,
+                            static_cast<std::size_t>(frame.stride));
+            }
         }
         recovery.frame(frame.timestamp);
         {
@@ -354,7 +407,7 @@ bool RtspSource::capture_sample(GstSample* sample, RtspRecovery& recovery) {
             prior_frame_time_ = frame.timestamp;
             last_frame_time_ = frame.timestamp;
         }
-        frames_.push(std::move(frame));
+        if (enqueue_frames_) frames_.push(std::move(frame));
         publish_recovery(recovery);
         captured = true;
     }
@@ -417,7 +470,7 @@ void RtspSource::capture_loop() noexcept {
             const auto now = std::chrono::steady_clock::now();
             read_jitter_stats(recovery);
             if (!received_frame && now - attempt_started >=
-                                       std::chrono::milliseconds(config_.stall_timeout_ms)) {
+                                       std::chrono::milliseconds(config_.first_frame_timeout_ms)) {
                 error = "RTSP source did not receive a video frame before timeout";
                 break;
             }
