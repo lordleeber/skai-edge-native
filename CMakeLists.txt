@@ -12,6 +12,7 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(GSTREAMER REQUIRED IMPORTED_TARGET gstreamer-1.0)
 pkg_check_modules(GST_VIDEO_APP REQUIRED IMPORTED_TARGET
     gstreamer-app-1.0 gstreamer-video-1.0 gstreamer-rtsp-1.0)
+find_package(OpenCV REQUIRED COMPONENTS core imgproc)
 
 add_library(skai-core INTERFACE)
 target_include_directories(skai-core INTERFACE include)
@@ -26,6 +27,10 @@ target_include_directories(skai-preprocess-reference PUBLIC include)
 add_library(skai-yolo-postprocess src/inference/yolo_postprocess.cpp)
 target_include_directories(skai-yolo-postprocess PUBLIC include)
 target_link_libraries(skai-yolo-postprocess PUBLIC skai-preprocess-reference)
+
+add_library(skai-annotator src/video/annotator.cpp)
+target_include_directories(skai-annotator PUBLIC include PRIVATE ${OpenCV_INCLUDE_DIRS})
+target_link_libraries(skai-annotator PUBLIC skai-yolo-postprocess PRIVATE ${OpenCV_LIBS})
 
 set(SKAI_ENABLE_TENSORRT "AUTO" CACHE STRING "Build TensorRT loader: AUTO, ON, or OFF")
 set_property(CACHE SKAI_ENABLE_TENSORRT PROPERTY STRINGS AUTO ON OFF)
@@ -72,6 +77,10 @@ if(TARGET skai-tensorrt)
         target_include_directories(skai-yolo-detector PUBLIC include)
         target_link_libraries(skai-yolo-detector PUBLIC skai-preprocess-cuda
             skai-yolo-postprocess)
+        add_library(skai-inference-module src/inference/yolo_inference_module.cpp)
+        target_include_directories(skai-inference-module PUBLIC include)
+        target_link_libraries(skai-inference-module PUBLIC skai-yolo-detector
+            skai-annotator skai-application skai-core)
     else()
         message(STATUS "CUDA compiler unavailable; skipping skai-preprocess-cuda")
     endif()
@@ -105,6 +114,10 @@ target_link_libraries(skai-rtsp-source PUBLIC skai-gstreamer skai-config skai-co
 add_executable(skai-edge src/main.cpp)
 target_link_libraries(skai-edge PRIVATE skai-cli skai-application skai-gstreamer
     skai-rtsp-source)
+if(TARGET skai-inference-module)
+    target_link_libraries(skai-edge PRIVATE skai-inference-module)
+    target_compile_definitions(skai-edge PRIVATE SKAI_HAS_YOLO_PIPELINE=1)
+endif()
 
 if(BUILD_TESTING)
     add_subdirectory(tests)

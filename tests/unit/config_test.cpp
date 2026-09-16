@@ -37,6 +37,14 @@ TEST(Config, ParsesValidSettings) {
     EXPECT_EQ(result.config.logging.level, skai::LogLevel::Debug);
 }
 
+TEST(Config, CanDisableDetectorAnnotation) {
+    const auto result = skai::parse_config(
+        "video: {rtsp_url: 'rtsp://camera/stream'}\n"
+        "detector: {annotate: false}\n");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_FALSE(result.config.detector.annotate);
+}
+
 TEST(Config, RejectsMissingRtspUrl) {
     const auto result = skai::parse_config("video: {transport: tcp}\n");
     EXPECT_FALSE(result.ok);

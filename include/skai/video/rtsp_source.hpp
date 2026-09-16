@@ -2,6 +2,7 @@
 
 #include "skai/config.hpp"
 #include "skai/core/bounded_queue.hpp"
+#include "skai/video/frame.hpp"
 #include "skai/video/gstreamer_runtime.hpp"
 #include "skai/video/rtsp_recovery.hpp"
 #include "skai/video/rtsp_metrics.hpp"
@@ -19,17 +20,6 @@
 #include <vector>
 
 namespace skai {
-
-// Packed, CPU-addressable BGR pixels for the future inference consumer.
-struct Frame {
-    std::uint64_t sequence = 0;
-    std::chrono::steady_clock::time_point timestamp;
-    std::uint64_t pts_ns = 0;
-    int width = 0;
-    int height = 0;
-    int stride = 0;
-    std::vector<std::uint8_t> bgr;
-};
 
 enum class DecodeMode { Auto, Software };
 
