@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -83,7 +84,8 @@ TEST(Annotator, FormatsClassNameAndConfidence) {
 
 TEST(Annotator, CanBeDisabledWithoutChangingPixelsOrMetadata) {
     const auto source = make_frame();
-    const auto detections = make_detection();
+    skai::DetectionResult detections;
+    detections.frame_sequence = source.sequence + 1;
     skai::AnnotationOptions options;
     options.enabled = false;
     skai::Frame output;
@@ -94,6 +96,24 @@ TEST(Annotator, CanBeDisabledWithoutChangingPixelsOrMetadata) {
     EXPECT_EQ(output.sequence, source.sequence);
     EXPECT_EQ(output.timestamp, source.timestamp);
     EXPECT_EQ(output.pts_ns, source.pts_ns);
+}
+
+TEST(Annotator, ReportsOpenCvDrawingErrorsWithoutThrowing) {
+    const auto source = make_frame();
+    const auto detections = make_detection();
+    skai::AnnotationOptions options;
+    options.box_thickness = 32768;
+    skai::Frame output;
+    std::string error;
+    EXPECT_NO_THROW(EXPECT_FALSE(skai::annotate_frame(
+        source, detections, {"person"}, options, output, error)));
+    EXPECT_FALSE(error.empty());
+
+    options.box_thickness = 1;
+    options.font_scale = std::numeric_limits<double>::max();
+    EXPECT_NO_THROW(EXPECT_FALSE(skai::annotate_frame(
+        source, detections, {"person"}, options, output, error)));
+    EXPECT_FALSE(error.empty());
 }
 
 TEST(Annotator, DrawsOptionalFpsAndInferenceTime) {

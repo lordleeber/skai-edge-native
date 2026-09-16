@@ -36,8 +36,12 @@ bool valid_frame(const Frame& frame, std::string& error) {
 }
 
 bool valid_options(const AnnotationOptions& options, std::string& error) {
-    if (options.box_thickness <= 0 || !std::isfinite(options.font_scale) ||
-        options.font_scale <= 0.0 ||
+    constexpr int max_opencv_thickness = 32767;
+    constexpr double max_font_scale = 1000.0;
+    if (options.box_thickness <= 0 ||
+        options.box_thickness > max_opencv_thickness ||
+        !std::isfinite(options.font_scale) || options.font_scale <= 0.0 ||
+        options.font_scale > max_font_scale ||
         (options.show_metrics && (!std::isfinite(options.fps) ||
                                   !std::isfinite(options.inference_ms) ||
                                   options.fps < 0.0 || options.inference_ms < 0.0))) {
@@ -118,46 +122,56 @@ bool annotate_frame(const Frame& source, const DetectionResult& detections,
     }
     output = {};
     if (!valid_frame(source, error)) return false;
-    if (source.sequence != detections.frame_sequence) {
-        error = "annotation frame and detection sequence do not match";
-        return false;
-    }
-    if (options.enabled && !valid_options(options, error)) return false;
     output = source;
     if (!options.enabled) return true;
-
-    cv::Mat canvas(output.height, output.width, CV_8UC3, output.bgr.data(),
-                   static_cast<std::size_t>(output.stride));
-    const cv::Scalar color(0, 255, 0); // BGR green
-    for (const auto& detection : detections.detections) {
-        if (detection.class_id < 0 || !std::isfinite(detection.confidence) ||
-            !std::isfinite(detection.x1) || !std::isfinite(detection.y1) ||
-            !std::isfinite(detection.x2) || !std::isfinite(detection.y2) ||
-            detection.x2 <= detection.x1 || detection.y2 <= detection.y1 ||
-            detection.x2 <= 0 || detection.y2 <= 0 ||
-            detection.x1 >= output.width || detection.y1 >= output.height) {
-            continue;
-        }
-        const int left = static_cast<int>(std::clamp(
-            std::floor(static_cast<double>(detection.x1)), 0.0,
-            static_cast<double>(output.width - 1)));
-        const int top = static_cast<int>(std::clamp(
-            std::floor(static_cast<double>(detection.y1)), 0.0,
-            static_cast<double>(output.height - 1)));
-        const int right = static_cast<int>(std::clamp(
-            std::ceil(static_cast<double>(detection.x2)) - 1.0, 0.0,
-            static_cast<double>(output.width - 1)));
-        const int bottom = static_cast<int>(std::clamp(
-            std::ceil(static_cast<double>(detection.y2)) - 1.0, 0.0,
-            static_cast<double>(output.height - 1)));
-        if (right < left || bottom < top) continue;
-        cv::rectangle(canvas, cv::Point(left, top), cv::Point(right, bottom),
-                      color, options.box_thickness, cv::LINE_8);
-        draw_label(canvas, left, top, bottom,
-                   detection_label(detection, class_names), options.font_scale,
-                   color);
+    if (source.sequence != detections.frame_sequence) {
+        error = "annotation frame and detection sequence do not match";
+        output = {};
+        return false;
     }
-    if (options.show_metrics) draw_metrics(canvas, options);
+    if (!valid_options(options, error)) {
+        output = {};
+        return false;
+    }
+
+    try {
+        cv::Mat canvas(output.height, output.width, CV_8UC3, output.bgr.data(),
+                       static_cast<std::size_t>(output.stride));
+        const cv::Scalar color(0, 255, 0); // BGR green
+        for (const auto& detection : detections.detections) {
+            if (detection.class_id < 0 || !std::isfinite(detection.confidence) ||
+                !std::isfinite(detection.x1) || !std::isfinite(detection.y1) ||
+                !std::isfinite(detection.x2) || !std::isfinite(detection.y2) ||
+                detection.x2 <= detection.x1 || detection.y2 <= detection.y1 ||
+                detection.x2 <= 0 || detection.y2 <= 0 ||
+                detection.x1 >= output.width || detection.y1 >= output.height) {
+                continue;
+            }
+            const int left = static_cast<int>(std::clamp(
+                std::floor(static_cast<double>(detection.x1)), 0.0,
+                static_cast<double>(output.width - 1)));
+            const int top = static_cast<int>(std::clamp(
+                std::floor(static_cast<double>(detection.y1)), 0.0,
+                static_cast<double>(output.height - 1)));
+            const int right = static_cast<int>(std::clamp(
+                std::ceil(static_cast<double>(detection.x2)) - 1.0, 0.0,
+                static_cast<double>(output.width - 1)));
+            const int bottom = static_cast<int>(std::clamp(
+                std::ceil(static_cast<double>(detection.y2)) - 1.0, 0.0,
+                static_cast<double>(output.height - 1)));
+            if (right < left || bottom < top) continue;
+            cv::rectangle(canvas, cv::Point(left, top), cv::Point(right, bottom),
+                          color, options.box_thickness, cv::LINE_8);
+            draw_label(canvas, left, top, bottom,
+                       detection_label(detection, class_names), options.font_scale,
+                       color);
+        }
+        if (options.show_metrics) draw_metrics(canvas, options);
+    } catch (const cv::Exception& exception) {
+        error = std::string("OpenCV annotation failed: ") + exception.what();
+        output = {};
+        return false;
+    }
     return true;
 }
 

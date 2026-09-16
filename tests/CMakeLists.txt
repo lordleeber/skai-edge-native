@@ -49,7 +49,8 @@ if(TARGET skai-yolo-detector)
     add_executable(skai-yolo-detector-tests integration/yolo_detector_test.cpp
         integration/annotation_detector_test.cpp)
     target_link_libraries(skai-yolo-detector-tests PRIVATE skai-yolo-detector
-        skai-annotator
+        skai-annotator skai-inference-module skai-rtsp-source
+        skai-rtsp-test-fixture
         GTest::gtest_main)
     target_compile_definitions(skai-yolo-detector-tests PRIVATE
         SKAI_YOLO_ENGINE="/var/lib/skai-edge/models/yolo11s_fp16.engine")

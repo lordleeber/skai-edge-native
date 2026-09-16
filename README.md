@@ -17,10 +17,9 @@ frame-freshness stall detection, and JSON RTSP diagnostics. Step 8 adds an
 independent TensorRT engine loader.
 Step 9 adds CPU reference letterbox/NCHW conversion and a fused CUDA path
 validated against the local YOLO11s TensorRT engine.
-Step 10 adds a standalone YOLO11 inference and postprocessing path; connecting
-it to the service inference worker remains a later integration step.
-Step 11 adds a standalone CPU/OpenCV frame annotator for detections and
-optional timing; the service output path remains a later integration step.
+Step 10 adds YOLO11 inference and postprocessing. Step 11 connects the RTSP
+frame queue to a TensorRT worker and adds CPU/OpenCV annotation for detections
+and optional timing. Encoding and external media transport remain later steps.
 
 ## Build and test
 
@@ -103,7 +102,8 @@ re-register plugins. Step 8 accepts fixed-shape, linear, device-resident
 tensors; dynamic profiles,
 vectorized formats, host shape tensors and packed INT4 are rejected with a
 specific error until their sizing and address rules are implemented. The
-service does not load `detector.engine` at startup yet.
+When TensorRT/CUDA support is available, the service loads `detector.engine`
+through its inference module during startup.
 
 ## Preprocessing reference
 
@@ -151,8 +151,11 @@ frame before OpenCV draws bounding boxes, class/confidence labels, and optional
 FPS/inference timing, so the input pixels and inference result remain unchanged.
 Class IDs without supplied names render as `class_<id>`. Set
 `options.enabled = false` for a pixel-identical copy; the YAML
-`detector.annotate` flag defaults to true and can be passed into this option by
-a future service inference worker. The annotator does not publish video yet.
+`detector.annotate` flag defaults to true. `YoloInferenceModule` consumes the
+RTSP inference queue, runs TensorRT YOLO, applies that setting, and publishes
+the resulting frame to a bounded queue for the next media stage. The standard
+YOLO11 COCO class names are used by this service path. Encoding and external
+video delivery are not implemented yet.
 
 ## Bounded queue
 

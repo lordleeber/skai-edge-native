@@ -36,7 +36,10 @@ struct TemporaryConfig {
         const int fd = mkstemp(pattern);
         if (fd < 0) return;
         path = pattern;
-        const std::string yaml = "video: {rtsp_url: '" + url + "', transport: tcp, latency_ms: 50}\n";
+        const std::string yaml =
+            "video: {rtsp_url: '" + url +
+            "', transport: tcp, latency_ms: 50}\n"
+            "detector: {engine: '/var/lib/skai-edge/models/yolo11s_fp16.engine'}\n";
         if (write(fd, yaml.data(), yaml.size()) != static_cast<ssize_t>(yaml.size())) {
             path.clear();
             unlink(pattern);

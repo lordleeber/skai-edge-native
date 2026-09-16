@@ -4,6 +4,9 @@
 #include "skai/video/gstreamer_runtime.hpp"
 #include "skai/video/rtsp_video_module.hpp"
 #include "skai/video/rtsp_source.hpp"
+#if SKAI_HAS_YOLO_PIPELINE
+#include "skai/inference/yolo_inference_module.hpp"
+#endif
 
 #include <csignal>
 #include <cerrno>
@@ -73,7 +76,15 @@ int main(int argc, char* argv[]) {
     }
 
     skai::BoundedQueue<skai::Frame> inference_frames(2);
+    skai::BoundedQueue<skai::Frame> annotated_frames(2);
     skai::Application::Modules modules;
+#if SKAI_HAS_YOLO_PIPELINE
+    modules.detector = std::make_unique<skai::YoloInferenceModule>(
+        inference_frames, annotated_frames, logger);
+#else
+    logger.log(skai::LogLevel::Warning, "detector",
+               "service built without TensorRT/CUDA inference support");
+#endif
     modules.video = std::make_unique<skai::RtspVideoModule>(inference_frames, logger);
     skai::Application app(cli.config_path, logger, std::move(modules));
     if (!app.initialize()) {

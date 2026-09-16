@@ -1,10 +1,15 @@
+#include "rtsp_test_server.hpp"
 #include "skai/inference/yolo_detector.hpp"
+#include "skai/inference/yolo_inference_module.hpp"
 #include "skai/video/annotator.hpp"
+#include "skai/video/gstreamer_runtime.hpp"
+#include "skai/video/rtsp_source.hpp"
 
 #include <gtest/gtest.h>
 
 #include <cuda_runtime_api.h>
 
+#include <chrono>
 #include <cstdint>
 #include <sstream>
 #include <string>
@@ -74,4 +79,50 @@ TEST(AnnotationDetector, ProducesAnnotatedFrameWithoutChangingInferenceResult) {
         EXPECT_FLOAT_EQ(after.x2, before.x2);
         EXPECT_FLOAT_EQ(after.y2, before.y2);
     }
+}
+
+TEST(AnnotationDetector, RtspPipelinePublishesAnnotationsAndHonorsDisableFlag) {
+    int devices = 0;
+    if (cudaGetDeviceCount(&devices) != cudaSuccess || devices == 0) {
+        GTEST_SKIP() << "CUDA device unavailable";
+    }
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    skai::BoundedQueue<skai::Frame> input(2);
+    skai::BoundedQueue<skai::Frame> output(2);
+    skai::YoloInferenceModule module(input, output, logger);
+    std::string error;
+    ASSERT_TRUE(skai::gst::initialize_once(error)) << error;
+    skai::test::RtspTestServer server;
+    ASSERT_TRUE(server.start(error)) << error;
+    skai::Config config;
+    config.detector.engine = SKAI_YOLO_ENGINE;
+    config.detector.confidence = 0.1;
+    config.detector.annotate = true;
+    ASSERT_TRUE(module.initialize(config));
+    ASSERT_TRUE(module.start());
+    skai::RtspSource source(input, logger);
+    skai::VideoConfig video;
+    video.rtsp_url = server.url();
+    video.latency_ms = 50;
+    ASSERT_TRUE(source.start(video, error)) << error;
+    const auto annotated = output.pop_for(std::chrono::seconds(3));
+    source.stop();
+    module.stop();
+    module.wait();
+    ASSERT_TRUE(annotated.has_value()) << logs.str();
+    EXPECT_GT(annotated->sequence, 0U);
+    EXPECT_FALSE(annotated->bgr.empty());
+
+    const auto frame = reference_frame();
+    const auto original_pixels = frame.bgr;
+    config.detector.annotate = false;
+    ASSERT_TRUE(module.initialize(config));
+    ASSERT_TRUE(module.start());
+    ASSERT_TRUE(input.push(frame));
+    const auto passthrough = output.pop_for(std::chrono::seconds(2));
+    module.stop();
+    module.wait();
+    ASSERT_TRUE(passthrough.has_value()) << logs.str();
+    EXPECT_EQ(passthrough->bgr, original_pixels);
 }
