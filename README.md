@@ -22,6 +22,8 @@ frame queue to a TensorRT worker and adds CPU/OpenCV annotation for detections
 and optional timing. Step 12 adds the asynchronous Boost.Beast HTTP foundation.
 Step 13 adds the versioned REST routing surface and explicit API DTO state.
 Step 14 adds a multi-client WebSocket event channel at `GET /ws`.
+Step 15 adds the framework-free operations console, and Step 16 keeps its
+runtime state synchronized through REST snapshots and WebSocket events.
 Encoding and external media transport remain later steps.
 
 ## Build and test
@@ -33,7 +35,9 @@ GStreamer development packages (`libgstreamer1.0-dev`,
 (H.264), libav (software H.264/H.265 decode), and bad (optional H.265) sets,
 OpenCV development files (`libopencv-dev`), then install GoogleTest
 (`libgtest-dev`) and the test-only RTSP server
-development package (`libgstrtspserver-1.0-dev`) to run tests:
+development package (`libgstrtspserver-1.0-dev`) to run tests. Node.js 18+ is
+used only for dependency-free browser-state tests; no npm packages or frontend
+build step are required:
 
 ```sh
 cmake -S . -B build

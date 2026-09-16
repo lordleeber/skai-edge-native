@@ -172,39 +172,6 @@ TEST(HttpServer, ConfinesStaticRequestsToConfiguredRoot) {
     server.wait();
 }
 
-TEST(HttpServer, FrontendBootstrapsRestBeforeRecoveringWebSocket) {
-    std::ostringstream logs;
-    skai::Logger logger(logs);
-    skai::web::HttpServer server(logger);
-    skai::Config config;
-    config.web.bind = "127.0.0.1";
-    config.web.port = 0;
-    ASSERT_TRUE(server.initialize(config)) << logs.str();
-    ASSERT_TRUE(server.start());
-
-    const auto index = request(server.port(), {http::verb::get, "/", 11});
-    ASSERT_EQ(index.result(), http::status::ok);
-    EXPECT_NE(index.body().find("role=\"status\""), std::string::npos);
-    EXPECT_NE(index.body().find("aria-live=\"polite\""), std::string::npos);
-
-    const auto script = request(server.port(), {http::verb::get, "/app.js", 11});
-    ASSERT_EQ(script.result(), http::status::ok);
-    for (const auto* endpoint : {"/api/v1/status", "/api/v1/gps",
-                                 "/api/v1/detections/latest", "/ws"}) {
-        EXPECT_NE(script.body().find(endpoint), std::string::npos) << endpoint;
-    }
-    EXPECT_NE(script.body().find("await initialLoad()"), std::string::npos);
-    EXPECT_NE(script.body().find("setConnection(\"Disconnected\""),
-              std::string::npos);
-    EXPECT_NE(script.body().find("maximumRetryDelayMs"), std::string::npos);
-    EXPECT_NE(script.body().find("addEventListener(\"message\""),
-              std::string::npos);
-    EXPECT_EQ(script.body().find("location.reload"), std::string::npos);
-
-    server.stop();
-    server.wait();
-}
-
 TEST(HttpServer, ServesRoutesAsynchronouslyAndRejectsOversizedBodies) {
     std::ostringstream logs;
     skai::Logger logger(logs);
@@ -353,6 +320,14 @@ TEST(HttpServer, WebSocketBroadcastsEventsToMultipleClients) {
         EXPECT_NE(json.find("\"module\":\"detector\""), std::string::npos);
         EXPECT_NE(json.find("\"message\":\"inference failed\""),
                   std::string::npos);
+    }
+    const auto disable = request(
+        server.port(), {http::verb::post, "/api/v1/detector/disable", 11});
+    ASSERT_EQ(disable.result(), http::status::ok);
+    for (auto* client : {&first, &second}) {
+        const auto json = read_websocket(*client);
+        EXPECT_NE(json.find("\"type\":\"status\""), std::string::npos);
+        EXPECT_NE(json.find("\"detector_enabled\":false"), std::string::npos);
     }
     for (int update = 0; update < 6; ++update) {
         for (auto* client : {&first, &second}) {

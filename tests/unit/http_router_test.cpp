@@ -42,6 +42,8 @@ TEST(HttpRouter, ServesHealthAndRuntimeStatusJson) {
     EXPECT_NE(response.body().find("\"status\":\"running\""), std::string::npos);
     EXPECT_NE(response.body().find("\"uptime_s\":812"), std::string::npos);
     EXPECT_NE(response.body().find("\"fps\":29.9"), std::string::npos);
+    EXPECT_NE(response.body().find("\"detector\":{\"enabled\":true"),
+              std::string::npos);
     EXPECT_NE(response.body().find("\"last_inference_ms\":43.1"),
               std::string::npos);
 }

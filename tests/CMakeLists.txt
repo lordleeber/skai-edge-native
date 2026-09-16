@@ -1,5 +1,6 @@
 find_package(GTest REQUIRED)
 include(GoogleTest)
+find_program(SKAI_NODE_EXECUTABLE NAMES node nodejs REQUIRED)
 pkg_check_modules(GST_RTSP_TEST REQUIRED IMPORTED_TARGET
     gstreamer-rtsp-server-1.0 gstreamer-app-1.0)
 
@@ -28,6 +29,11 @@ gtest_discover_tests(skai-integration-tests)
 add_executable(skai-http-server-tests integration/http_server_test.cpp)
 target_link_libraries(skai-http-server-tests PRIVATE skai-web GTest::gtest_main)
 gtest_discover_tests(skai-http-server-tests PROPERTIES TIMEOUT 15)
+
+add_test(NAME Frontend.LiveStatusStateMachine
+    COMMAND ${SKAI_NODE_EXECUTABLE} --test
+            ${CMAKE_CURRENT_SOURCE_DIR}/frontend/live_status_ui_test.js)
+set_tests_properties(Frontend.LiveStatusStateMachine PROPERTIES TIMEOUT 15)
 
 add_executable(skai-gstreamer-tests unit/gstreamer_runtime_test.cpp)
 target_link_libraries(skai-gstreamer-tests PRIVATE skai-gstreamer GTest::gtest_main)
