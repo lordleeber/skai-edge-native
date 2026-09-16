@@ -26,6 +26,7 @@ struct PreprocessPlan {
     int resized_height = 0;
     int pad_left = 0;
     int pad_top = 0;
+    // Nominal letterbox ratio; effective x/y resize ratios come from the integer dimensions.
     float scale = 0.0f;
 };
 

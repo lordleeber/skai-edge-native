@@ -53,6 +53,54 @@ TEST(PreprocessReference, ConvertsBgrToNormalizedRgbNchwWithBilinearResize) {
     }
 }
 
+TEST(PreprocessReference, SamplesRoundedResizeUsingItsActualHeight) {
+    std::vector<std::uint8_t> bytes(5 * 3 * 3);
+    for (int y = 0; y < 3; ++y) {
+        for (int x = 0; x < 5; ++x) {
+            for (int channel = 0; channel < 3; ++channel) {
+                bytes[(y * 5 + x) * 3 + channel] =
+                    static_cast<std::uint8_t>(y * 100);
+            }
+        }
+    }
+    const auto image = view(bytes, 5, 3, 15);
+    skai::PreprocessPlan plan;
+    std::string error;
+    ASSERT_TRUE(skai::make_preprocess_plan(image, 4, 4, plan, error)) << error;
+    ASSERT_EQ(plan.resized_width, 4);
+    ASSERT_EQ(plan.resized_height, 2);
+    ASSERT_EQ(plan.pad_top, 1);
+
+    std::vector<float> output;
+    ASSERT_TRUE(skai::preprocess_cpu(image, plan, output, error)) << error;
+    // The second of two output rows maps to source y = (1.5 * 3 / 2) - 0.5 = 1.75.
+    EXPECT_NEAR(output[2 * plan.width], 175.0f / 255.0f, 1e-6f);
+}
+
+TEST(PreprocessReference, SamplesRoundedResizeUsingItsActualWidth) {
+    std::vector<std::uint8_t> bytes(3 * 5 * 3);
+    for (int y = 0; y < 5; ++y) {
+        for (int x = 0; x < 3; ++x) {
+            for (int channel = 0; channel < 3; ++channel) {
+                bytes[(y * 3 + x) * 3 + channel] =
+                    static_cast<std::uint8_t>(x * 100);
+            }
+        }
+    }
+    const auto image = view(bytes, 3, 5, 9);
+    skai::PreprocessPlan plan;
+    std::string error;
+    ASSERT_TRUE(skai::make_preprocess_plan(image, 4, 4, plan, error)) << error;
+    ASSERT_EQ(plan.resized_width, 2);
+    ASSERT_EQ(plan.resized_height, 4);
+    ASSERT_EQ(plan.pad_left, 1);
+
+    std::vector<float> output;
+    ASSERT_TRUE(skai::preprocess_cpu(image, plan, output, error)) << error;
+    // The second of two output columns maps to source x = (1.5 * 3 / 2) - 0.5 = 1.75.
+    EXPECT_NEAR(output[2], 175.0f / 255.0f, 1e-6f);
+}
+
 TEST(PreprocessReference, HonorsRowStrideAndRejectsTruncatedInput) {
     const std::vector<std::uint8_t> bytes = {
         1, 2, 3, 4, 5, 6, 250, 251,

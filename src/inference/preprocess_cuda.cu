@@ -47,10 +47,10 @@ __global__ void preprocess_kernel(const unsigned char* source, int stride,
         output[2 * plane + offset] = pad;
         return;
     }
-    const float sx = (static_cast<float>(x - plan.pad_left) + 0.5f) /
-                         plan.scale - 0.5f;
-    const float sy = (static_cast<float>(y - plan.pad_top) + 0.5f) /
-                         plan.scale - 0.5f;
+    const float sx = (static_cast<float>(x - plan.pad_left) + 0.5f) *
+                         plan.source_width / plan.resized_width - 0.5f;
+    const float sy = (static_cast<float>(y - plan.pad_top) + 0.5f) *
+                         plan.source_height / plan.resized_height - 0.5f;
     output[offset] = bilinear_channel(source, stride, plan.source_width,
                                       plan.source_height, sx, sy, 2) / 255.0f;
     output[plane + offset] = bilinear_channel(source, stride, plan.source_width,

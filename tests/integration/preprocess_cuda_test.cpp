@@ -78,6 +78,14 @@ TEST(CudaPreprocess, MatchesCpuReferenceForRealYoloEngineAndMeasuresLatency) {
                                       std::abs(reference[index] - device_result[index]));
         }
         EXPECT_LT(max_difference, 1e-4f) << "source=" << shape.first << "x" << shape.second;
+        if (shape.first == 641) {
+            ASSERT_EQ(plan.resized_height, 358);
+            const auto last_row = static_cast<std::size_t>(plan.pad_top +
+                                                           plan.resized_height - 1);
+            const auto offset = last_row * plan.width + plan.pad_left;
+            // At the last output row, source y is nearly 358; red at (0, 358) is 98.
+            EXPECT_NEAR(device_result[offset], 98.0f / 255.0f, 1e-4f);
+        }
     }
 }
 

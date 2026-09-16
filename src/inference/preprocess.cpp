@@ -103,11 +103,11 @@ bool preprocess_cpu(const BgrImageView& image, const PreprocessPlan& plan,
     const auto plane = width * height;
     output.assign(plane * 3, 114.0f / 255.0f);
     for (int y = plan.pad_top; y < plan.pad_top + plan.resized_height; ++y) {
-        const float source_y = (static_cast<float>(y - plan.pad_top) + 0.5f) /
-                                   plan.scale - 0.5f;
+        const float source_y = (static_cast<float>(y - plan.pad_top) + 0.5f) *
+                                   plan.source_height / plan.resized_height - 0.5f;
         for (int x = plan.pad_left; x < plan.pad_left + plan.resized_width; ++x) {
-            const float source_x = (static_cast<float>(x - plan.pad_left) + 0.5f) /
-                                       plan.scale - 0.5f;
+            const float source_x = (static_cast<float>(x - plan.pad_left) + 0.5f) *
+                                       plan.source_width / plan.resized_width - 0.5f;
             const auto offset = static_cast<std::size_t>(y) * width + x;
             output[offset] = sample_channel(image, source_x, source_y, 2) / 255.0f;
             output[plane + offset] = sample_channel(image, source_x, source_y, 1) / 255.0f;
