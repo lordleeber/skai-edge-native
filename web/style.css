@@ -21,6 +21,7 @@ h2 { font-size: 1.05rem; }
 .connection { display: flex; gap: 9px; align-items: center; color: var(--muted); font-size: .84rem; }
 #connection-dot { width: 8px; height: 8px; border-radius: 50%; background: #efb366; box-shadow: 0 0 12px currentColor; }
 #connection-dot.online { background: var(--accent); }
+#connection-dot.offline { background: #ff7272; }
 .panel { border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--panel) 94%, transparent); box-shadow: 0 18px 45px #0004; }
 .hero { padding: 18px; }
 .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }

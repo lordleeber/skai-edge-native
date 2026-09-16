@@ -22,6 +22,8 @@ frame queue to a TensorRT worker and adds CPU/OpenCV annotation for detections
 and optional timing. Step 12 adds the asynchronous Boost.Beast HTTP foundation.
 Step 13 adds the versioned REST routing surface and explicit API DTO state.
 Step 14 adds a multi-client WebSocket event channel at `GET /ws`.
+Step 15 adds the framework-free operations console, and Step 16 keeps its
+runtime state synchronized through REST snapshots and WebSocket events.
 Encoding and external media transport remain later steps.
 
 ## Build and test
@@ -33,7 +35,9 @@ GStreamer development packages (`libgstreamer1.0-dev`,
 (H.264), libav (software H.264/H.265 decode), and bad (optional H.265) sets,
 OpenCV development files (`libopencv-dev`), then install GoogleTest
 (`libgtest-dev`) and the test-only RTSP server
-development package (`libgstrtspserver-1.0-dev`) to run tests:
+development package (`libgstrtspserver-1.0-dev`) to run tests. Node.js 18+ is
+used only for dependency-free browser-state tests; no npm packages or frontend
+build step are required:
 
 ```sh
 cmake -S . -B build
@@ -83,6 +87,10 @@ stops through the normal Application lifecycle. The framework-free operations
 console is served from `web.root` (the repository `web/` directory by default)
 at `/`. Static paths are URL-decoded, canonicalized, and confined to that root;
 directories and symlinks that resolve outside it are not served.
+The console loads its initial system, video, detector, detection, and GPS state
+through REST, then applies live WebSocket events without a page refresh. Its
+connection indicator reports outages and reconnects automatically with capped
+exponential backoff.
 
 Step 13 also serves public configuration (with credentials, URLs, engine paths,
 and filesystem paths deliberately omitted), latest detections, and configured

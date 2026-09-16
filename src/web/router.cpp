@@ -34,7 +34,7 @@ Response json_response(http::status result, unsigned version, std::string body) 
     return response;
 }
 
-std::string status_json(const StatusSnapshot& status) {
+std::string status_json(const StatusSnapshot& status, bool detector_enabled) {
     std::ostringstream output;
     output.imbue(std::locale::classic());
     output << std::setprecision(6)
@@ -42,7 +42,8 @@ std::string status_json(const StatusSnapshot& status) {
            << status.uptime_s << ",\"video\":{\"fps\":";
     if (status.video_fps) output << *status.video_fps;
     else output << "null";
-    output << "},\"detector\":{\"fps\":";
+    output << "},\"detector\":{\"enabled\":" << json_bool(detector_enabled)
+           << ",\"fps\":";
     if (status.detector_fps) output << *status.detector_fps;
     else output << "null";
     output << ",\"last_inference_ms\":";
@@ -134,7 +135,8 @@ Response route_request(const Request& request, const StatusSnapshot& status,
                              "{\"status\":\"ok\"}\n");
     }
     if (path == "/api/v1/status") {
-        return json_response(http::status::ok, request.version(), status_json(status));
+        return json_response(http::status::ok, request.version(),
+                             status_json(status, api.detector_enabled()));
     }
     if (path == "/api/v1/config") {
         PublicConfigDto config;

@@ -12,7 +12,7 @@
       <p class="eyebrow">SKAI EDGE</p>
       <h1>Operations Console</h1>
     </div>
-    <div class="connection"><span id="connection-dot"></span><span id="connection">Connecting</span></div>
+    <div class="connection" role="status" aria-live="polite"><span id="connection-dot"></span><span id="connection">Loading status</span></div>
   </header>
 
   <main>
@@ -30,7 +30,7 @@
     <section class="metrics" aria-label="Runtime status">
       <article class="panel"><p class="eyebrow">SYSTEM STATUS</p><strong id="system-status">Loading</strong><small id="uptime">Uptime —</small></article>
       <article class="panel"><p class="eyebrow">RTSP STATUS</p><strong id="video-fps">— fps</strong><small id="video-state">Waiting for frames</small></article>
-      <article class="panel"><p class="eyebrow">DETECTOR STATUS</p><strong id="detector-fps">— fps</strong><small id="inference-time">Inference —</small></article>
+      <article class="panel"><p class="eyebrow">DETECTOR STATUS</p><strong id="detector-state">Loading</strong><small><span id="detector-fps">— fps</span> · <span id="inference-time">Inference —</span></small></article>
       <article class="panel"><p class="eyebrow">GPS STATUS</p><strong id="gps-state">Loading</strong><small id="gps-position">Coordinates —</small></article>
     </section>
 

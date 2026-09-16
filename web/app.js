@@ -4,21 +4,42 @@
   const byId = (id) => document.getElementById(id);
   const setText = (id, value) => { byId(id).textContent = value; };
   const number = (value, suffix = "") => value == null ? `—${suffix}` : `${Number(value).toFixed(1)}${suffix}`;
+  const initialRetryDelayMs = 1000;
+  const maximumRetryDelayMs = 30000;
+  const connectionAttemptTimeoutMs = 8000;
+  const revisions = {status: 0, gps: 0, detection: 0};
+  let retryDelayMs = initialRetryDelayMs;
+  let retryTimer = 0;
+  let activeSocket = null;
+  let latestDetectionSequence = -1;
+  let bootstrapPromise;
 
   async function getJson(path) {
-    const response = await fetch(path, {headers: {Accept: "application/json"}});
-    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-    return response.json();
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 5000);
+    try {
+      const response = await fetch(path, {
+        headers: {Accept: "application/json"},
+        signal: controller.signal
+      });
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+      return await response.json();
+    } finally {
+      window.clearTimeout(timeout);
+    }
   }
 
   function renderStatus(data) {
     const videoFps = data.video?.fps ?? data.video_fps;
     const detectorFps = data.detector?.fps ?? data.detector_fps;
     const inferenceMs = data.detector?.last_inference_ms ?? data.last_inference_ms;
+    const detectorEnabled = data.detector?.enabled ?? data.detector_enabled;
     setText("system-status", data.status || "Unknown");
     setText("uptime", `Uptime ${Math.floor(data.uptime_s || 0)}s`);
     setText("video-fps", number(videoFps, " fps"));
     setText("video-state", videoFps == null ? "Waiting for frames" : "Receiving frames");
+    setText("detector-state", detectorEnabled == null ? "Unavailable" :
+      detectorEnabled ? "Enabled" : "Disabled");
     setText("detector-fps", number(detectorFps, " fps"));
     setText("inference-time", `Inference ${number(inferenceMs, " ms")}`);
     byId("system-status").dataset.state = data.status;
@@ -31,10 +52,13 @@
   }
 
   function renderDetections(data) {
-    const rows = byId("detections");
-    rows.replaceChildren();
     const detections = data.detections || [];
     const available = data.available ?? Number.isFinite(data.frame_sequence);
+    const sequence = Number(data.frame_sequence);
+    if (available && Number.isFinite(sequence) && sequence < latestDetectionSequence) return;
+    latestDetectionSequence = available && Number.isFinite(sequence) ? sequence : -1;
+    const rows = byId("detections");
+    rows.replaceChildren();
     setText("detection-count", `${detections.length} object${detections.length === 1 ? "" : "s"}`);
     if (!detections.length) {
       const row = rows.insertRow();
@@ -69,39 +93,106 @@
     setText("last-update", `Updated ${new Date().toLocaleTimeString()}`);
   }
 
+  function setConnection(label, state) {
+    setText("connection", label);
+    const dot = byId("connection-dot");
+    dot.classList.toggle("online", state === "online");
+    dot.classList.toggle("offline", state === "offline");
+  }
+
   function handleEvent(event) {
     let message;
     try { message = JSON.parse(event.data); } catch { return; }
-    if (message.type === "status") renderStatus(message.data);
-    if (message.type === "gps") renderGps(message.data);
-    if (message.type === "detection") renderDetections(message.data);
+    if (message.type === "status") {
+      ++revisions.status;
+      renderStatus(message.data);
+    }
+    if (message.type === "gps") {
+      ++revisions.gps;
+      renderGps(message.data);
+    }
+    if (message.type === "detection") {
+      ++revisions.detection;
+      renderDetections(message.data);
+    }
     if (message.type === "alert") addAlert(message.data);
     if (message.type === "system_error") addAlert(message.data, "System error");
     if (message.type === "recording") setText("recording-state", message.data.active ? "Recording" : "Not recording");
   }
 
+  function scheduleReconnect() {
+    setConnection("Disconnected", "offline");
+    window.clearTimeout(retryTimer);
+    const delay = retryDelayMs;
+    retryDelayMs = Math.min(retryDelayMs * 2, maximumRetryDelayMs);
+    retryTimer = window.setTimeout(() => {
+      setConnection("Reconnecting", "connecting");
+      connect();
+    }, delay);
+  }
+
   function connect() {
+    if (activeSocket && activeSocket.readyState < WebSocket.CLOSING) return;
+    setConnection("Connecting", "connecting");
     const scheme = location.protocol === "https:" ? "wss" : "ws";
-    const socket = new WebSocket(`${scheme}://${location.host}/ws`);
-    socket.addEventListener("open", () => {
-      setText("connection", "Live");
-      byId("connection-dot").classList.add("online");
+    let socket;
+    try {
+      socket = new WebSocket(`${scheme}://${location.host}/ws`);
+      activeSocket = socket;
+    } catch {
+      scheduleReconnect();
+      return;
+    }
+    const attemptTimer = window.setTimeout(() => {
+      if (activeSocket !== socket || socket.readyState !== WebSocket.CONNECTING) return;
+      activeSocket = null;
+      socket.close();
+      scheduleReconnect();
+    }, connectionAttemptTimeoutMs);
+    socket.addEventListener("open", async () => {
+      window.clearTimeout(attemptTimer);
+      if (activeSocket !== socket) return socket.close();
+      setConnection("Synchronizing", "connecting");
+      await bootstrapPromise;
+      await initialLoad();
+      if (activeSocket !== socket || socket.readyState !== WebSocket.OPEN) return;
+      retryDelayMs = initialRetryDelayMs;
+      setConnection("Live", "online");
     });
-    socket.addEventListener("message", handleEvent);
+    socket.addEventListener("message", (event) => {
+      if (activeSocket === socket) handleEvent(event);
+    });
+    socket.addEventListener("error", () => {
+      if (activeSocket === socket) setConnection("Disconnected", "offline");
+    });
     socket.addEventListener("close", () => {
-      setText("connection", "Reconnecting");
-      byId("connection-dot").classList.remove("online");
-      window.setTimeout(connect, 2000);
+      window.clearTimeout(attemptTimer);
+      if (activeSocket !== socket) return;
+      activeSocket = null;
+      latestDetectionSequence = -1;
+      scheduleReconnect();
     });
   }
 
+  async function loadSnapshot(key, path, render, unavailable) {
+    const revision = revisions[key];
+    let data;
+    try {
+      data = await getJson(path);
+    } catch {
+      data = unavailable;
+    }
+    if (revision === revisions[key]) render(data);
+  }
+
   async function initialLoad() {
-    const tasks = [
-      getJson("/api/v1/status").then(renderStatus),
-      getJson("/api/v1/gps").then(renderGps),
-      getJson("/api/v1/detections/latest").then(renderDetections)
-    ];
-    await Promise.allSettled(tasks);
+    await Promise.all([
+      loadSnapshot("status", "/api/v1/status", renderStatus,
+        {status: "unavailable", uptime_s: 0}),
+      loadSnapshot("gps", "/api/v1/gps", renderGps, {available: false}),
+      loadSnapshot("detection", "/api/v1/detections/latest", renderDetections,
+        {available: false, detections: []})
+    ]);
   }
 
   async function recording(action) {
@@ -116,6 +207,6 @@
 
   byId("record-start").addEventListener("click", () => recording("start"));
   byId("record-stop").addEventListener("click", () => recording("stop"));
-  initialLoad();
+  bootstrapPromise = initialLoad();
   connect();
 })();

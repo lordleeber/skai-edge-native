@@ -169,7 +169,9 @@ std::string WebSocketSession::status_data() const {
            << ",\"video_fps\":";
     if (snapshot.video_fps) output << *snapshot.video_fps;
     else output << "null";
-    output << ",\"detector_fps\":";
+    output << ",\"detector_enabled\":"
+           << (api_->detector_enabled() ? "true" : "false")
+           << ",\"detector_fps\":";
     if (snapshot.detector_fps) output << *snapshot.detector_fps;
     else output << "null";
     output << ",\"last_inference_ms\":";

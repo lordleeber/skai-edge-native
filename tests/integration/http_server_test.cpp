@@ -321,6 +321,14 @@ TEST(HttpServer, WebSocketBroadcastsEventsToMultipleClients) {
         EXPECT_NE(json.find("\"message\":\"inference failed\""),
                   std::string::npos);
     }
+    const auto disable = request(
+        server.port(), {http::verb::post, "/api/v1/detector/disable", 11});
+    ASSERT_EQ(disable.result(), http::status::ok);
+    for (auto* client : {&first, &second}) {
+        const auto json = read_websocket(*client);
+        EXPECT_NE(json.find("\"type\":\"status\""), std::string::npos);
+        EXPECT_NE(json.find("\"detector_enabled\":false"), std::string::npos);
+    }
     for (int update = 0; update < 6; ++update) {
         for (auto* client : {&first, &second}) {
             EXPECT_NE(read_websocket(*client).find("\"type\":\"status\""),
