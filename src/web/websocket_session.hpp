@@ -11,19 +11,22 @@
 
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 
 namespace skai::web {
 
-class WebSocketSession final
-    : public std::enable_shared_from_this<WebSocketSession> {
+class WebSocketSession final : public std::enable_shared_from_this<WebSocketSession> {
 public:
     WebSocketSession(boost::beast::tcp_stream stream,
                      std::chrono::steady_clock::time_point started,
                      std::shared_ptr<RuntimeStatus> status,
                      std::shared_ptr<ApiState> api,
-                     std::shared_ptr<EventChannel> events);
+                     std::shared_ptr<EventChannel> events,
+                     std::function<void(std::shared_ptr<WebSocketSession>)>
+                         register_session,
+                     std::function<void(WebSocketSession*)> unregister_session);
     ~WebSocketSession();
 
     void run(boost::beast::http::request<boost::beast::http::string_body> request);
@@ -49,6 +52,8 @@ private:
     std::shared_ptr<RuntimeStatus> status_;
     std::shared_ptr<ApiState> api_;
     std::shared_ptr<EventChannel> events_;
+    std::function<void(std::shared_ptr<WebSocketSession>)> register_session_;
+    std::function<void(WebSocketSession*)> unregister_session_;
     EventQueue outgoing_{32};
     std::string writing_;
     std::uint64_t subscription_id_ = 0;

@@ -106,8 +106,7 @@ add_library(skai-application src/application.cpp)
 target_include_directories(skai-application PUBLIC include)
 target_link_libraries(skai-application PUBLIC skai-config skai-logging Threads::Threads)
 
-add_library(skai-web src/web/http_server.cpp src/web/router.cpp
-    src/web/websocket_session.cpp)
+add_library(skai-web src/web/http_server.cpp src/web/router.cpp src/web/websocket_session.cpp)
 target_include_directories(skai-web PUBLIC include)
 target_link_libraries(skai-web PUBLIC skai-application skai-events Boost::system)
 

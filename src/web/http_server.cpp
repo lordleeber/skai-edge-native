@@ -7,6 +7,7 @@
 #include <boost/beast.hpp>
 #include <boost/beast/websocket.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <functional>
@@ -32,10 +33,12 @@ public:
     HttpSession(tcp::socket socket, std::chrono::steady_clock::time_point started,
                 std::shared_ptr<RuntimeStatus> status, std::shared_ptr<ApiState> api,
                 std::shared_ptr<EventChannel> events,
-                std::function<void(std::shared_ptr<WebSocketSession>)> register_ws)
+                std::function<void(std::shared_ptr<WebSocketSession>)> register_ws,
+                std::function<void(WebSocketSession*)> unregister_ws)
         : stream_(std::move(socket)), started_(started), status_(std::move(status)),
           api_(std::move(api)), events_(std::move(events)),
-          register_ws_(std::move(register_ws)) {
+          register_ws_(std::move(register_ws)),
+          unregister_ws_(std::move(unregister_ws)) {
         parser_.header_limit(header_limit);
         parser_.body_limit(body_limit);
     }
@@ -65,8 +68,8 @@ private:
             parser_.get().target() == "/ws") {
             auto request = parser_.release();
             auto session = std::make_shared<WebSocketSession>(
-                std::move(stream_), started_, status_, api_, events_);
-            register_ws_(session);
+                std::move(stream_), started_, status_, api_, events_, register_ws_,
+                unregister_ws_);
             session->run(std::move(request));
             return;
         }
@@ -110,6 +113,7 @@ private:
     std::shared_ptr<ApiState> api_;
     std::shared_ptr<EventChannel> events_;
     std::function<void(std::shared_ptr<WebSocketSession>)> register_ws_;
+    std::function<void(WebSocketSession*)> unregister_ws_;
     Response response_;
 };
 
@@ -128,7 +132,21 @@ struct HttpServer::State {
                 std::make_shared<HttpSession>(std::move(socket), started, status,
                                               api, events,
                                               [this](auto session) {
+                                                  sessions.erase(std::remove_if(
+                                                      sessions.begin(), sessions.end(),
+                                                      [](const auto& weak) {
+                                                          return weak.expired();
+                                                  }), sessions.end());
                                                   sessions.push_back(session);
+                                              },
+                                              [this](WebSocketSession* session) {
+                                                  sessions.erase(std::remove_if(
+                                                      sessions.begin(), sessions.end(),
+                                                      [session](const auto& weak) {
+                                                          const auto current = weak.lock();
+                                                          return !current ||
+                                                                 current.get() == session;
+                                                      }), sessions.end());
                                               })->run();
             } else if (error != asio::error::operation_aborted) {
                 logger.log(LogLevel::Error, "web", error.message());
@@ -227,6 +245,10 @@ void HttpServer::stop() noexcept {
             beast::error_code ignored;
             state->acceptor.cancel(ignored);
             state->acceptor.close(ignored);
+            state->sessions.erase(std::remove_if(
+                state->sessions.begin(), state->sessions.end(),
+                [](const auto& weak) { return weak.expired(); }),
+                state->sessions.end());
             bool has_websockets = false;
             for (const auto& weak : state->sessions) {
                 if (const auto session = weak.lock()) {

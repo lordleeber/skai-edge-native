@@ -11,6 +11,21 @@
 namespace skai {
 namespace {
 
+std::string json_string(const std::string& value) {
+    std::string result = "\"";
+    for (const unsigned char character : value) {
+        if (character == '"' || character == '\\') {
+            result.push_back('\\');
+            result.push_back(static_cast<char>(character));
+        } else if (character == '\n') result += "\\n";
+        else if (character == '\r') result += "\\r";
+        else if (character == '\t') result += "\\t";
+        else if (character >= 0x20) result.push_back(static_cast<char>(character));
+    }
+    result.push_back('"');
+    return result;
+}
+
 std::string timestamp() {
     const auto now = std::chrono::system_clock::now();
     const auto milliseconds = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -44,6 +59,12 @@ std::string make_event_json(EventType type, const std::string& data_json) {
            data_json + "}\n";
 }
 
+std::string make_system_error_data(const std::string& module,
+                                   const std::string& message) {
+    return std::string("{\"module\":") + json_string(module) +
+           ",\"message\":" + json_string(message) + '}';
+}
+
 std::uint64_t EventChannel::subscribe(Subscriber subscriber) {
     std::lock_guard<std::mutex> lock(mutex_);
     const auto id = next_id_++;
@@ -65,11 +86,6 @@ void EventChannel::publish(EventType type, const std::string& data_json) const {
         for (const auto& item : subscribers_) subscribers.push_back(item.second);
     }
     for (const auto& subscriber : subscribers) subscriber(event);
-}
-
-std::size_t EventChannel::subscriber_count() const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    return subscribers_.size();
 }
 
 EventQueue::EventQueue(std::size_t capacity) : capacity_(capacity) {

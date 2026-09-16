@@ -15,6 +15,8 @@ enum class EventType { Status, Detection, Gps, Alert, Recording, SystemError };
 
 const char* event_type_name(EventType type) noexcept;
 std::string make_event_json(EventType type, const std::string& data_json);
+std::string make_system_error_data(const std::string& module,
+                                   const std::string& message);
 
 class EventChannel {
 public:
@@ -23,7 +25,6 @@ public:
     std::uint64_t subscribe(Subscriber subscriber);
     void unsubscribe(std::uint64_t id);
     void publish(EventType type, const std::string& data_json) const;
-    std::size_t subscriber_count() const;
 
 private:
     mutable std::mutex mutex_;

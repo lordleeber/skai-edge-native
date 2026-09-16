@@ -28,6 +28,12 @@ int main(int argc, char* argv[]) {
     }
 
     skai::Logger logger(cli.rtsp_test ? std::cerr : std::cout);
+    auto events = std::make_shared<skai::EventChannel>();
+    logger.set_error_sink([events](const std::string& module,
+                                   const std::string& message) {
+        events->publish(skai::EventType::SystemError,
+                        skai::make_system_error_data(module, message));
+    });
 
     sigset_t shutdown_signals;
     sigemptyset(&shutdown_signals);
@@ -81,7 +87,6 @@ int main(int argc, char* argv[]) {
     skai::BoundedQueue<skai::Frame> annotated_frames(2);
     auto runtime_status = std::make_shared<skai::RuntimeStatus>();
     auto api_state = std::make_shared<skai::ApiState>(runtime_status);
-    auto events = std::make_shared<skai::EventChannel>();
     skai::Application::Modules modules;
     modules.web = std::make_unique<skai::web::HttpServer>(logger, runtime_status,
                                                           api_state, events);

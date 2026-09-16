@@ -24,10 +24,17 @@ WebSocketSession::WebSocketSession(beast::tcp_stream stream,
                                    std::chrono::steady_clock::time_point started,
                                    std::shared_ptr<RuntimeStatus> status,
                                    std::shared_ptr<ApiState> api,
-                                   std::shared_ptr<EventChannel> events)
+                                   std::shared_ptr<EventChannel> events,
+                                   std::function<void(
+                                       std::shared_ptr<WebSocketSession>)>
+                                       register_session,
+                                   std::function<void(WebSocketSession*)>
+                                       unregister_session)
     : stream_(std::move(stream)), status_timer_(stream_.get_executor()),
       started_(started), status_(std::move(status)), api_(std::move(api)),
-      events_(std::move(events)) {}
+      events_(std::move(events)),
+      register_session_(std::move(register_session)),
+      unregister_session_(std::move(unregister_session)) {}
 
 WebSocketSession::~WebSocketSession() {
     if (subscription_id_) events_->unsubscribe(subscription_id_);
@@ -35,6 +42,7 @@ WebSocketSession::~WebSocketSession() {
 
 void WebSocketSession::run(
     beast::http::request<beast::http::string_body> request) {
+    beast::get_lowest_layer(stream_).expires_never();
     auto timeout = websocket::stream_base::timeout::suggested(
         beast::role_type::server);
     timeout.handshake_timeout = std::chrono::seconds(5);
@@ -62,6 +70,7 @@ void WebSocketSession::stop() {
 
 void WebSocketSession::on_accept(beast::error_code error) {
     if (error) return cleanup();
+    register_session_(shared_from_this());
     const std::weak_ptr<WebSocketSession> weak = shared_from_this();
     subscription_id_ = events_->subscribe([weak](const std::string& event) {
         if (const auto self = weak.lock()) {
@@ -136,6 +145,7 @@ void WebSocketSession::begin_close() {
 void WebSocketSession::cleanup() {
     if (closed_) return;
     closed_ = true;
+    unregister_session_(this);
     status_timer_.cancel();
     if (subscription_id_) {
         events_->unsubscribe(subscription_id_);

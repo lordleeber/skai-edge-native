@@ -90,14 +90,10 @@ reserved but explicitly return unavailable/not-implemented responses until the
 repository and recorder arrive in Steps 18–20; they do not report fabricated
 empty data or successful operations.
 
-WebSocket clients connect to `/ws` and immediately receive status and fixed-GPS
-events. Status is refreshed once per second, and each completed inference
-publishes a detection event. The shared event channel also defines alert,
-recording, and system-error event types for their later producers. Every event
-has a UTC ISO-8601 timestamp and a JSON `data` object. Each client has a bounded
-32-event outgoing queue that drops its oldest pending event under backpressure;
-Beast keepalive pings detect dead peers, inbound messages are capped at 64 KiB,
-and a normal WebSocket close removes the client subscription.
+WebSocket clients connect to `/ws` for timestamped status, GPS, detection, alert,
+recording, and system-error JSON events. Status refreshes once per second;
+each client has a bounded 32-event queue, Beast ping/pong keepalive, a 64 KiB
+inbound limit, and clean disconnect handling.
 
 ## GStreamer runtime and RTSP fixture
 
