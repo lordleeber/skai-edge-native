@@ -4,11 +4,25 @@
   const byId = (id) => document.getElementById(id);
   const setText = (id, value) => { byId(id).textContent = value; };
   const number = (value, suffix = "") => value == null ? `—${suffix}` : `${Number(value).toFixed(1)}${suffix}`;
+  const initialRetryDelayMs = 1000;
+  const maximumRetryDelayMs = 30000;
+  let retryDelayMs = initialRetryDelayMs;
+  let retryTimer = 0;
+  let activeSocket = null;
 
   async function getJson(path) {
-    const response = await fetch(path, {headers: {Accept: "application/json"}});
-    if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-    return response.json();
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 5000);
+    try {
+      const response = await fetch(path, {
+        headers: {Accept: "application/json"},
+        signal: controller.signal
+      });
+      if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+      return await response.json();
+    } finally {
+      window.clearTimeout(timeout);
+    }
   }
 
   function renderStatus(data) {
@@ -69,6 +83,13 @@
     setText("last-update", `Updated ${new Date().toLocaleTimeString()}`);
   }
 
+  function setConnection(label, state) {
+    setText("connection", label);
+    const dot = byId("connection-dot");
+    dot.classList.toggle("online", state === "online");
+    dot.classList.toggle("offline", state === "offline");
+  }
+
   function handleEvent(event) {
     let message;
     try { message = JSON.parse(event.data); } catch { return; }
@@ -80,28 +101,56 @@
     if (message.type === "recording") setText("recording-state", message.data.active ? "Recording" : "Not recording");
   }
 
+  function scheduleReconnect() {
+    setConnection("Disconnected", "offline");
+    window.clearTimeout(retryTimer);
+    const delay = retryDelayMs;
+    retryDelayMs = Math.min(retryDelayMs * 2, maximumRetryDelayMs);
+    retryTimer = window.setTimeout(() => {
+      setConnection("Reconnecting", "connecting");
+      connect();
+    }, delay);
+  }
+
   function connect() {
+    if (activeSocket && activeSocket.readyState < WebSocket.CLOSING) return;
     const scheme = location.protocol === "https:" ? "wss" : "ws";
-    const socket = new WebSocket(`${scheme}://${location.host}/ws`);
+    let socket;
+    try {
+      socket = new WebSocket(`${scheme}://${location.host}/ws`);
+      activeSocket = socket;
+    } catch {
+      scheduleReconnect();
+      return;
+    }
     socket.addEventListener("open", () => {
-      setText("connection", "Live");
-      byId("connection-dot").classList.add("online");
+      retryDelayMs = initialRetryDelayMs;
+      setConnection("Live", "online");
     });
     socket.addEventListener("message", handleEvent);
+    socket.addEventListener("error", () => {
+      setConnection("Disconnected", "offline");
+    });
     socket.addEventListener("close", () => {
-      setText("connection", "Reconnecting");
-      byId("connection-dot").classList.remove("online");
-      window.setTimeout(connect, 2000);
+      if (activeSocket !== socket) return;
+      activeSocket = null;
+      scheduleReconnect();
     });
   }
 
   async function initialLoad() {
     const tasks = [
-      getJson("/api/v1/status").then(renderStatus),
-      getJson("/api/v1/gps").then(renderGps),
-      getJson("/api/v1/detections/latest").then(renderDetections)
+      getJson("/api/v1/status").then(renderStatus).catch(() => {
+        renderStatus({status: "unavailable", uptime_s: 0});
+      }),
+      getJson("/api/v1/gps").then(renderGps).catch(() => {
+        renderGps({available: false});
+      }),
+      getJson("/api/v1/detections/latest").then(renderDetections).catch(() => {
+        renderDetections({available: false, detections: []});
+      })
     ];
-    await Promise.allSettled(tasks);
+    await Promise.all(tasks);
   }
 
   async function recording(action) {
@@ -116,6 +165,9 @@
 
   byId("record-start").addEventListener("click", () => recording("start"));
   byId("record-stop").addEventListener("click", () => recording("stop"));
-  initialLoad();
-  connect();
+  async function start() {
+    await initialLoad();
+    connect();
+  }
+  start();
 })();

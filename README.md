@@ -83,6 +83,10 @@ stops through the normal Application lifecycle. The framework-free operations
 console is served from `web.root` (the repository `web/` directory by default)
 at `/`. Static paths are URL-decoded, canonicalized, and confined to that root;
 directories and symlinks that resolve outside it are not served.
+The console loads its initial system, video, detector, detection, and GPS state
+through REST, then applies live WebSocket events without a page refresh. Its
+connection indicator reports outages and reconnects automatically with capped
+exponential backoff.
 
 Step 13 also serves public configuration (with credentials, URLs, engine paths,
 and filesystem paths deliberately omitted), latest detections, and configured
