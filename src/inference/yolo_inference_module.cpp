@@ -88,7 +88,9 @@ void YoloInferenceModule::run() noexcept {
     while (!stopping_) {
         auto frame = input_.pop();
         if (!frame || stopping_) break;
-        if (api_ && !api_->detector_enabled()) {
+        const auto permit = api_ ? api_->detector_permit()
+                                 : DetectorPermit{true, 0};
+        if (!permit.enabled) {
             if (status_) status_->clear_detector();
             output_.push(std::move(*frame));
             continue;
@@ -112,15 +114,14 @@ void YoloInferenceModule::run() noexcept {
         annotation_.inference_ms = timing.preprocess.wall_ms +
                                    timing.inference_wall_ms +
                                    timing.postprocess_wall_ms;
-        if (status_) {
-            if (has_previous) {
-                status_->update_detector(annotation_.fps, annotation_.inference_ms);
-            } else {
-                status_->update_inference(annotation_.inference_ms);
-            }
+        Frame annotated;
+        if (!annotate_frame(*frame, detections, coco_class_names(), annotation_,
+                            annotated, error)) {
+            logger_.log(LogLevel::Error, "annotation", error);
+            continue;
         }
+        std::vector<DetectionDto> published;
         if (api_) {
-            std::vector<DetectionDto> published;
             published.reserve(detections.detections.size());
             for (const auto& detection : detections.detections) {
                 published.push_back({detection.class_id, class_name(detection.class_id),
@@ -128,15 +129,25 @@ void YoloInferenceModule::run() noexcept {
                                      detection.x1, detection.y1, detection.x2,
                                      detection.y2});
             }
-            api_->publish_detections(detections.frame_sequence, std::move(published));
         }
-        Frame annotated;
-        if (!annotate_frame(*frame, detections, coco_class_names(), annotation_,
-                            annotated, error)) {
-            logger_.log(LogLevel::Error, "annotation", error);
-            continue;
+        auto commit = [&] {
+            previous = now;
+            if (status_) {
+                if (has_previous) {
+                    status_->update_detector(annotation_.fps,
+                                             annotation_.inference_ms);
+                } else {
+                    status_->update_inference(annotation_.inference_ms);
+                }
+            }
+            output_.push(std::move(annotated));
+        };
+        if (!api_) {
+            commit();
+        } else if (!api_->commit_detections(permit, detections.frame_sequence,
+                                            std::move(published), commit)) {
+            output_.push(std::move(*frame));
         }
-        output_.push(std::move(annotated));
     }
 }
 

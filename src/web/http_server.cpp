@@ -136,7 +136,9 @@ HttpServer::HttpServer(Logger& logger, std::shared_ptr<RuntimeStatus> status,
                        std::shared_ptr<ApiState> api)
     : logger_(logger), status_(status ? std::move(status)
                                      : std::make_shared<RuntimeStatus>()),
-      api_(api ? std::move(api) : std::make_shared<ApiState>()) {}
+      api_(api ? std::move(api) : std::make_shared<ApiState>()) {
+    api_->bind_runtime_status(status_);
+}
 
 HttpServer::~HttpServer() {
     stop();

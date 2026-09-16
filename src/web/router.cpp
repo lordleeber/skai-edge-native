@@ -1,6 +1,7 @@
 #include "skai/web/router.hpp"
 
 #include <iomanip>
+#include <limits>
 #include <locale>
 #include <sstream>
 
@@ -156,7 +157,8 @@ Response route_request(const Request& request, const StatusSnapshot& status,
         }
         std::ostringstream body;
         body.imbue(std::locale::classic());
-        body << std::setprecision(6) << "{\"available\":true,\"source\":"
+        body << std::setprecision(std::numeric_limits<double>::max_digits10)
+             << "{\"available\":true,\"source\":"
              << json_string(config.gps_source) << ",\"latitude\":"
              << config.gps_latitude << ",\"longitude\":" << config.gps_longitude
              << ",\"altitude_m\":" << config.gps_altitude_m << "}\n";

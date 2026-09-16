@@ -1,8 +1,10 @@
 #pragma once
 
 #include "skai/config.hpp"
+#include "skai/status.hpp"
 
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <utility>
@@ -46,10 +48,24 @@ struct LatestDetectionsDto {
     std::vector<DetectionDto> detections;
 };
 
+struct DetectorPermit {
+    bool enabled = false;
+    std::uint64_t generation = 0;
+};
+
 // Explicit API-facing DTO state. It intentionally omits credentials, RTSP URLs,
 // engine paths, filesystem paths, and internal module objects.
 class ApiState {
 public:
+    explicit ApiState(std::shared_ptr<RuntimeStatus> status = {})
+        : status_(std::move(status)) {}
+
+    void bind_runtime_status(std::shared_ptr<RuntimeStatus> status) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        status_ = std::move(status);
+        synchronize_runtime_status();
+    }
+
     void configure(const Config& config) {
         PublicConfigDto dto;
         dto.video_transport = config.video.transport;
@@ -73,6 +89,9 @@ public:
         config_ = std::move(dto);
         configured_ = true;
         detector_enabled_ = detector_supported_;
+        ++detector_generation_;
+        latest_ = {};
+        synchronize_runtime_status();
     }
 
     bool public_config(PublicConfigDto& output) const {
@@ -82,12 +101,25 @@ public:
         return true;
     }
 
-    void publish_detections(std::uint64_t frame_sequence,
-                            std::vector<DetectionDto> detections) {
+    DetectorPermit detector_permit() const {
         std::lock_guard<std::mutex> lock(mutex_);
+        return {detector_enabled_, detector_generation_};
+    }
+
+    template <typename Commit>
+    bool commit_detections(const DetectorPermit& permit,
+                           std::uint64_t frame_sequence,
+                           std::vector<DetectionDto> detections,
+                           Commit&& commit) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!detector_enabled_ || permit.generation != detector_generation_) {
+            return false;
+        }
         latest_.available = true;
         latest_.frame_sequence = frame_sequence;
         latest_.detections = std::move(detections);
+        std::forward<Commit>(commit)();
+        return true;
     }
 
     LatestDetectionsDto latest_detections() const {
@@ -97,8 +129,10 @@ public:
 
     void set_detector_enabled(bool enabled) {
         std::lock_guard<std::mutex> lock(mutex_);
-        detector_enabled_ = enabled;
-        if (!enabled) latest_ = {};
+        detector_enabled_ = enabled && detector_supported_;
+        ++detector_generation_;
+        latest_ = {};
+        synchronize_runtime_status();
     }
 
     bool detector_enabled() const {
@@ -109,7 +143,12 @@ public:
     void set_detector_supported(bool supported) {
         std::lock_guard<std::mutex> lock(mutex_);
         detector_supported_ = supported;
-        if (!supported) detector_enabled_ = false;
+        if (!supported) {
+            detector_enabled_ = false;
+            ++detector_generation_;
+            latest_ = {};
+        }
+        synchronize_runtime_status();
     }
 
     bool detector_supported() const {
@@ -118,10 +157,18 @@ public:
     }
 
 private:
+    void synchronize_runtime_status() {
+        if (!status_) return;
+        status_->clear_detector();
+        status_->set_detector_expected(detector_enabled_);
+    }
+
     mutable std::mutex mutex_;
     bool configured_ = false;
     bool detector_enabled_ = true;
     bool detector_supported_ = true;
+    std::uint64_t detector_generation_ = 0;
+    std::shared_ptr<RuntimeStatus> status_;
     PublicConfigDto config_;
     LatestDetectionsDto latest_;
 };

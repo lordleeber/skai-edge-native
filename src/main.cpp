@@ -79,12 +79,11 @@ int main(int argc, char* argv[]) {
     skai::BoundedQueue<skai::Frame> inference_frames(2);
     skai::BoundedQueue<skai::Frame> annotated_frames(2);
     auto runtime_status = std::make_shared<skai::RuntimeStatus>();
-    auto api_state = std::make_shared<skai::ApiState>();
+    auto api_state = std::make_shared<skai::ApiState>(runtime_status);
     skai::Application::Modules modules;
     modules.web = std::make_unique<skai::web::HttpServer>(logger, runtime_status,
                                                           api_state);
 #if SKAI_HAS_YOLO_PIPELINE
-    runtime_status->set_detector_expected(true);
     modules.detector = std::make_unique<skai::YoloInferenceModule>(
         inference_frames, annotated_frames, logger, runtime_status, api_state);
 #else

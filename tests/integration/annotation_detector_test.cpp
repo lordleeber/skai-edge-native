@@ -92,7 +92,7 @@ TEST(AnnotationDetector, RtspPipelinePublishesAnnotationsAndHonorsDisableFlag) {
     skai::BoundedQueue<skai::Frame> input(2);
     skai::BoundedQueue<skai::Frame> output(2);
     auto status = std::make_shared<skai::RuntimeStatus>();
-    auto api = std::make_shared<skai::ApiState>();
+    auto api = std::make_shared<skai::ApiState>(status);
     status->set_detector_expected(true);
     status->set_running(true);
     skai::YoloInferenceModule module(input, output, logger, status, api);

@@ -36,10 +36,7 @@ TEST(HttpServer, ServesRoutesAsynchronouslyAndRejectsOversizedBodies) {
     std::ostringstream logs;
     skai::Logger logger(logs);
     auto status = std::make_shared<skai::RuntimeStatus>();
-    status->set_detector_expected(true);
     status->set_running(true);
-    status->update_video(29.9);
-    status->update_detector(18.4, 43.1);
     auto api = std::make_shared<skai::ApiState>();
     skai::web::HttpServer server(logger, status, api);
     skai::Config config;
@@ -48,6 +45,8 @@ TEST(HttpServer, ServesRoutesAsynchronouslyAndRejectsOversizedBodies) {
     ASSERT_TRUE(server.initialize(config)) << logs.str();
     ASSERT_NE(server.port(), 0);
     ASSERT_TRUE(server.start());
+    status->update_video(29.9);
+    status->update_detector(18.4, 43.1);
 
     const auto health = request(server.port(),
                                 {http::verb::get, "/health", 11});
