@@ -20,6 +20,9 @@ target_link_libraries(skai-core INTERFACE Threads::Threads)
 add_library(skai-tensor-layout src/inference/tensor_layout.cpp)
 target_include_directories(skai-tensor-layout PUBLIC include)
 
+add_library(skai-preprocess-reference src/inference/preprocess.cpp)
+target_include_directories(skai-preprocess-reference PUBLIC include)
+
 set(SKAI_ENABLE_TENSORRT "AUTO" CACHE STRING "Build TensorRT loader: AUTO, ON, or OFF")
 set_property(CACHE SKAI_ENABLE_TENSORRT PROPERTY STRINGS AUTO ON OFF)
 if(NOT SKAI_ENABLE_TENSORRT MATCHES "^(AUTO|ON|OFF)$")
@@ -47,6 +50,22 @@ if(NOT SKAI_ENABLE_TENSORRT STREQUAL "OFF")
         message(FATAL_ERROR "TensorRT loader requires CUDA Toolkit, TensorRT 10+ headers, libnvinfer and libnvinfer_plugin")
     else()
         message(STATUS "TensorRT/CUDA development files unavailable; skipping skai-tensorrt")
+    endif()
+endif()
+
+if(TARGET skai-tensorrt)
+    include(CheckLanguage)
+    check_language(CUDA)
+    if(CMAKE_CUDA_COMPILER)
+        enable_language(CUDA)
+        add_library(skai-preprocess-cuda src/inference/preprocess_cuda.cu)
+        set_target_properties(skai-preprocess-cuda PROPERTIES CUDA_STANDARD 17
+            CUDA_STANDARD_REQUIRED ON CUDA_ARCHITECTURES 87)
+        target_include_directories(skai-preprocess-cuda PUBLIC include)
+        target_link_libraries(skai-preprocess-cuda PUBLIC skai-tensorrt
+            skai-preprocess-reference CUDA::cudart)
+    else()
+        message(STATUS "CUDA compiler unavailable; skipping skai-preprocess-cuda")
     endif()
 endif()
 
