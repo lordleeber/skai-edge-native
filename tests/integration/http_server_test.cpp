@@ -1,12 +1,15 @@
 #include "skai/web/http_server.hpp"
+#include "skai/events.hpp"
 #include "skai/status.hpp"
 
 #include <gtest/gtest.h>
 
 #include <boost/asio.hpp>
 #include <boost/beast.hpp>
+#include <boost/beast/websocket.hpp>
 
 #include <chrono>
+#include <future>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -14,6 +17,7 @@
 namespace asio = boost::asio;
 namespace beast = boost::beast;
 namespace http = beast::http;
+namespace websocket = beast::websocket;
 using tcp = asio::ip::tcp;
 
 namespace {
@@ -118,4 +122,90 @@ TEST(HttpServer, GracefulStopCancelsAnIncompleteRequest) {
         racing_socket.close();
         server.wait();
     }
+}
+
+TEST(HttpServer, WebSocketBroadcastsEventsToMultipleClients) {
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    auto status = std::make_shared<skai::RuntimeStatus>();
+    auto api = std::make_shared<skai::ApiState>();
+    auto events = std::make_shared<skai::EventChannel>();
+    skai::web::HttpServer server(logger, status, api, events);
+    skai::Config config;
+    config.web.bind = "127.0.0.1";
+    config.web.port = 0;
+    ASSERT_TRUE(server.initialize(config));
+    ASSERT_TRUE(server.start());
+
+    asio::io_context first_context;
+    websocket::stream<tcp::socket> first(first_context);
+    first.next_layer().connect(
+        {asio::ip::make_address("127.0.0.1"), server.port()});
+    first.handshake("127.0.0.1", "/ws");
+    asio::io_context second_context;
+    websocket::stream<tcp::socket> second(second_context);
+    second.next_layer().connect(
+        {asio::ip::make_address("127.0.0.1"), server.port()});
+    second.handshake("127.0.0.1", "/ws");
+
+    for (auto* client : {&first, &second}) {
+        beast::flat_buffer status_message;
+        client->read(status_message);
+        EXPECT_NE(beast::buffers_to_string(status_message.data()).find(
+                      "\"type\":\"status\""), std::string::npos);
+        beast::flat_buffer gps_message;
+        client->read(gps_message);
+        EXPECT_NE(beast::buffers_to_string(gps_message.data()).find(
+                      "\"type\":\"gps\""), std::string::npos);
+    }
+
+    events->publish(skai::EventType::Alert,
+                    "{\"class\":\"person\",\"confidence\":0.91}");
+    for (auto* client : {&first, &second}) {
+        beast::flat_buffer message;
+        client->read(message);
+        const auto json = beast::buffers_to_string(message.data());
+        EXPECT_NE(json.find("\"type\":\"alert\""), std::string::npos);
+        EXPECT_NE(json.find("\"class\":\"person\""), std::string::npos);
+    }
+
+    first.close(websocket::close_code::normal);
+    second.close(websocket::close_code::normal);
+    server.stop();
+    server.wait();
+    EXPECT_EQ(events->subscriber_count(), 0U);
+}
+
+TEST(HttpServer, ShutdownClosesConnectedWebSocketPromptly) {
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    skai::web::HttpServer server(logger);
+    skai::Config config;
+    config.web.bind = "127.0.0.1";
+    config.web.port = 0;
+    ASSERT_TRUE(server.initialize(config));
+    ASSERT_TRUE(server.start());
+
+    asio::io_context context;
+    websocket::stream<tcp::socket> client(context);
+    client.next_layer().connect(
+        {asio::ip::make_address("127.0.0.1"), server.port()});
+    client.handshake("127.0.0.1", "/ws");
+    beast::flat_buffer first;
+    client.read(first);
+    beast::flat_buffer second;
+    client.read(second);
+
+    auto close_result = std::async(std::launch::async, [&client] {
+        beast::flat_buffer closed;
+        beast::error_code error;
+        client.read(closed, error);
+        return error;
+    });
+    const auto start = std::chrono::steady_clock::now();
+    server.stop();
+    server.wait();
+    EXPECT_LT(std::chrono::steady_clock::now() - start,
+              std::chrono::seconds(1));
+    EXPECT_EQ(close_result.get(), websocket::error::closed);
 }

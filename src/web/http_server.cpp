@@ -1,15 +1,19 @@
 #include "skai/web/http_server.hpp"
 
 #include "skai/web/router.hpp"
+#include "websocket_session.hpp"
 
 #include <boost/asio.hpp>
 #include <boost/beast.hpp>
+#include <boost/beast/websocket.hpp>
 
 #include <chrono>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace skai::web {
 namespace {
@@ -26,9 +30,12 @@ constexpr auto request_timeout = std::chrono::seconds(5);
 class HttpSession : public std::enable_shared_from_this<HttpSession> {
 public:
     HttpSession(tcp::socket socket, std::chrono::steady_clock::time_point started,
-                std::shared_ptr<RuntimeStatus> status, std::shared_ptr<ApiState> api)
+                std::shared_ptr<RuntimeStatus> status, std::shared_ptr<ApiState> api,
+                std::shared_ptr<EventChannel> events,
+                std::function<void(std::shared_ptr<WebSocketSession>)> register_ws)
         : stream_(std::move(socket)), started_(started), status_(std::move(status)),
-          api_(std::move(api)) {
+          api_(std::move(api)), events_(std::move(events)),
+          register_ws_(std::move(register_ws)) {
         parser_.header_limit(header_limit);
         parser_.body_limit(body_limit);
     }
@@ -54,6 +61,15 @@ private:
             return;
         }
         if (error) return close();
+        if (beast::websocket::is_upgrade(parser_.get()) &&
+            parser_.get().target() == "/ws") {
+            auto request = parser_.release();
+            auto session = std::make_shared<WebSocketSession>(
+                std::move(stream_), started_, status_, api_, events_);
+            register_ws_(session);
+            session->run(std::move(request));
+            return;
+        }
         auto status = status_->snapshot();
         status.uptime_s = static_cast<std::uint64_t>(
             std::chrono::duration_cast<std::chrono::seconds>(
@@ -92,6 +108,8 @@ private:
     std::chrono::steady_clock::time_point started_;
     std::shared_ptr<RuntimeStatus> status_;
     std::shared_ptr<ApiState> api_;
+    std::shared_ptr<EventChannel> events_;
+    std::function<void(std::shared_ptr<WebSocketSession>)> register_ws_;
     Response response_;
 };
 
@@ -99,15 +117,19 @@ private:
 
 struct HttpServer::State {
     State(Logger& logger, std::shared_ptr<RuntimeStatus> status,
-          std::shared_ptr<ApiState> api)
-        : acceptor(context), logger(logger), status(std::move(status)),
-          api(std::move(api)) {}
+          std::shared_ptr<ApiState> api, std::shared_ptr<EventChannel> events)
+        : acceptor(context), shutdown_timer(context), logger(logger),
+          status(std::move(status)), api(std::move(api)),
+          events(std::move(events)) {}
 
     void accept() {
         acceptor.async_accept([this](beast::error_code error, tcp::socket socket) {
             if (!error) {
                 std::make_shared<HttpSession>(std::move(socket), started, status,
-                                              api)->run();
+                                              api, events,
+                                              [this](auto session) {
+                                                  sessions.push_back(session);
+                                              })->run();
             } else if (error != asio::error::operation_aborted) {
                 logger.log(LogLevel::Error, "web", error.message());
             }
@@ -117,9 +139,12 @@ struct HttpServer::State {
 
     asio::io_context context{1};
     tcp::acceptor acceptor;
+    asio::steady_timer shutdown_timer;
     Logger& logger;
     std::shared_ptr<RuntimeStatus> status;
     std::shared_ptr<ApiState> api;
+    std::shared_ptr<EventChannel> events;
+    std::vector<std::weak_ptr<WebSocketSession>> sessions;
     std::thread worker;
     std::chrono::steady_clock::time_point started;
     unsigned short port = 0;
@@ -127,16 +152,24 @@ struct HttpServer::State {
 
 HttpServer::HttpServer(Logger& logger)
     : HttpServer(logger, std::make_shared<RuntimeStatus>(),
-                 std::make_shared<ApiState>()) {}
+                 std::make_shared<ApiState>(), std::make_shared<EventChannel>()) {}
 
 HttpServer::HttpServer(Logger& logger, std::shared_ptr<RuntimeStatus> status)
-    : HttpServer(logger, std::move(status), std::make_shared<ApiState>()) {}
+    : HttpServer(logger, std::move(status), std::make_shared<ApiState>(),
+                 std::make_shared<EventChannel>()) {}
 
 HttpServer::HttpServer(Logger& logger, std::shared_ptr<RuntimeStatus> status,
                        std::shared_ptr<ApiState> api)
+    : HttpServer(logger, std::move(status), std::move(api),
+                 std::make_shared<EventChannel>()) {}
+
+HttpServer::HttpServer(Logger& logger, std::shared_ptr<RuntimeStatus> status,
+                       std::shared_ptr<ApiState> api,
+                       std::shared_ptr<EventChannel> events)
     : logger_(logger), status_(status ? std::move(status)
                                      : std::make_shared<RuntimeStatus>()),
-      api_(api ? std::move(api) : std::make_shared<ApiState>()) {
+      api_(api ? std::move(api) : std::make_shared<ApiState>()),
+      events_(events ? std::move(events) : std::make_shared<EventChannel>()) {
     api_->bind_runtime_status(status_);
 }
 
@@ -148,7 +181,7 @@ HttpServer::~HttpServer() {
 bool HttpServer::initialize(const Config& config) {
     if (state_) return false;
     api_->configure(config);
-    auto next = std::make_unique<State>(logger_, status_, api_);
+    auto next = std::make_unique<State>(logger_, status_, api_, events_);
     beast::error_code error;
     const auto address = asio::ip::make_address(config.web.bind, error);
     if (error) {
@@ -194,7 +227,18 @@ void HttpServer::stop() noexcept {
             beast::error_code ignored;
             state->acceptor.cancel(ignored);
             state->acceptor.close(ignored);
-            state->context.stop();
+            bool has_websockets = false;
+            for (const auto& weak : state->sessions) {
+                if (const auto session = weak.lock()) {
+                    has_websockets = true;
+                    session->stop();
+                }
+            }
+            if (!has_websockets) return state->context.stop();
+            state->shutdown_timer.expires_after(std::chrono::milliseconds(250));
+            state->shutdown_timer.async_wait([state](beast::error_code) {
+                state->context.stop();
+            });
         });
     } catch (...) {
         state->context.stop();

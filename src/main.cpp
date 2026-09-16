@@ -1,5 +1,6 @@
 #include "skai/application.hpp"
 #include "skai/cli.hpp"
+#include "skai/events.hpp"
 #include "skai/logging.hpp"
 #include "skai/video/gstreamer_runtime.hpp"
 #include "skai/video/rtsp_video_module.hpp"
@@ -80,12 +81,14 @@ int main(int argc, char* argv[]) {
     skai::BoundedQueue<skai::Frame> annotated_frames(2);
     auto runtime_status = std::make_shared<skai::RuntimeStatus>();
     auto api_state = std::make_shared<skai::ApiState>(runtime_status);
+    auto events = std::make_shared<skai::EventChannel>();
     skai::Application::Modules modules;
     modules.web = std::make_unique<skai::web::HttpServer>(logger, runtime_status,
-                                                          api_state);
+                                                          api_state, events);
 #if SKAI_HAS_YOLO_PIPELINE
     modules.detector = std::make_unique<skai::YoloInferenceModule>(
-        inference_frames, annotated_frames, logger, runtime_status, api_state);
+        inference_frames, annotated_frames, logger, runtime_status, api_state,
+        events);
 #else
     api_state->set_detector_supported(false);
     logger.log(skai::LogLevel::Warning, "detector",

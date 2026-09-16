@@ -1,6 +1,10 @@
 #include "skai/inference/yolo_inference_module.hpp"
 
 #include <chrono>
+#include <iomanip>
+#include <limits>
+#include <locale>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -33,15 +37,36 @@ std::string class_name(int class_id) {
                : "class_" + std::to_string(class_id);
 }
 
+std::string detection_event_data(const DetectionResult& result) {
+    std::ostringstream output;
+    output.imbue(std::locale::classic());
+    output << std::setprecision(std::numeric_limits<float>::max_digits10)
+           << "{\"frame_sequence\":" << result.frame_sequence
+           << ",\"detections\":[";
+    for (std::size_t index = 0; index < result.detections.size(); ++index) {
+        const auto& detection = result.detections[index];
+        if (index) output << ',';
+        output << "{\"class_id\":" << detection.class_id
+               << ",\"class_name\":\"" << class_name(detection.class_id)
+               << "\",\"confidence\":" << detection.confidence
+               << ",\"box\":[" << detection.x1 << ',' << detection.y1 << ','
+               << detection.x2 << ',' << detection.y2 << "]}";
+    }
+    output << "]}";
+    return output.str();
+}
+
 } // namespace
 
 YoloInferenceModule::YoloInferenceModule(BoundedQueue<Frame>& input,
                                          BoundedQueue<Frame>& annotated_output,
                                          Logger& logger,
                                          std::shared_ptr<RuntimeStatus> status,
-                                         std::shared_ptr<ApiState> api)
+                                         std::shared_ptr<ApiState> api,
+                                         std::shared_ptr<EventChannel> events)
     : input_(input), output_(annotated_output), logger_(logger),
-      status_(std::move(status)), api_(std::move(api)) {}
+      status_(std::move(status)), api_(std::move(api)),
+      events_(std::move(events)) {}
 
 bool YoloInferenceModule::initialize(const Config& config) {
     if (detector_ || worker_.joinable()) return false;
@@ -139,6 +164,10 @@ void YoloInferenceModule::run() noexcept {
                 } else {
                     status_->update_inference(annotation_.inference_ms);
                 }
+            }
+            if (events_) {
+                events_->publish(EventType::Detection,
+                                 detection_event_data(detections));
             }
             output_.push(std::move(annotated));
         };
