@@ -12,6 +12,7 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(GSTREAMER REQUIRED IMPORTED_TARGET gstreamer-1.0)
 pkg_check_modules(GST_VIDEO_APP REQUIRED IMPORTED_TARGET
     gstreamer-app-1.0 gstreamer-video-1.0 gstreamer-rtsp-1.0)
+find_package(OpenCV REQUIRED COMPONENTS core imgproc)
 
 add_library(skai-core INTERFACE)
 target_include_directories(skai-core INTERFACE include)
@@ -26,6 +27,10 @@ target_include_directories(skai-preprocess-reference PUBLIC include)
 add_library(skai-yolo-postprocess src/inference/yolo_postprocess.cpp)
 target_include_directories(skai-yolo-postprocess PUBLIC include)
 target_link_libraries(skai-yolo-postprocess PUBLIC skai-preprocess-reference)
+
+add_library(skai-annotator src/video/annotator.cpp)
+target_include_directories(skai-annotator PUBLIC include PRIVATE ${OpenCV_INCLUDE_DIRS})
+target_link_libraries(skai-annotator PUBLIC skai-yolo-postprocess PRIVATE ${OpenCV_LIBS})
 
 set(SKAI_ENABLE_TENSORRT "AUTO" CACHE STRING "Build TensorRT loader: AUTO, ON, or OFF")
 set_property(CACHE SKAI_ENABLE_TENSORRT PROPERTY STRINGS AUTO ON OFF)

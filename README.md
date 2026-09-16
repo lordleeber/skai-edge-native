@@ -19,6 +19,8 @@ Step 9 adds CPU reference letterbox/NCHW conversion and a fused CUDA path
 validated against the local YOLO11s TensorRT engine.
 Step 10 adds a standalone YOLO11 inference and postprocessing path; connecting
 it to the service inference worker remains a later integration step.
+Step 11 adds a standalone CPU/OpenCV frame annotator for detections and
+optional timing; the service output path remains a later integration step.
 
 ## Build and test
 
@@ -26,7 +28,8 @@ Install CMake 3.22+, a C++17 compiler, yaml-cpp (`libyaml-cpp-dev`),
 GStreamer development packages (`libgstreamer1.0-dev`,
 `libgstreamer-plugins-base1.0-dev`), and GStreamer plugins from the base, good, ugly
 (H.264), libav (software H.264/H.265 decode), and bad (optional H.265) sets,
-then install GoogleTest (`libgtest-dev`) and the test-only RTSP server
+OpenCV development files (`libopencv-dev`), then install GoogleTest
+(`libgtest-dev`) and the test-only RTSP server
 development package (`libgstrtspserver-1.0-dev`) to run tests:
 
 ```sh
@@ -139,6 +142,17 @@ its confidence and NMS thresholds through `YoloPostprocessConfig`; callers
 can populate them from the parsed YAML `detector.confidence` and `detector.nms`
 values. The Jetson test compares a reproducible image with independently
 evaluated `yolo11s.onnx` reference values and reruns it for deterministic output.
+
+## Frame annotation
+
+`skai::annotate_frame()` takes a decoded BGR `Frame`, the matching
+`DetectionResult`, optional class names, and `AnnotationOptions`. It copies the
+frame before OpenCV draws bounding boxes, class/confidence labels, and optional
+FPS/inference timing, so the input pixels and inference result remain unchanged.
+Class IDs without supplied names render as `class_<id>`. Set
+`options.enabled = false` for a pixel-identical copy; the YAML
+`detector.annotate` flag defaults to true and can be passed into this option by
+a future service inference worker. The annotator does not publish video yet.
 
 ## Bounded queue
 

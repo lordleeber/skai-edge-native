@@ -6,7 +6,7 @@ Public APIs live in `include/skai/` (`core/` queues, `video/` RTSP, `inference/`
 
 ## Build, Test, and Development Commands
 
-Install CMake 3.22+, a C++17 compiler, GoogleTest (`libgtest-dev`), yaml-cpp (`libyaml-cpp-dev`), and GStreamer development packages (`libgstreamer1.0-dev`, `libgstreamer-plugins-base1.0-dev`, `libgstrtspserver-1.0-dev`). Install H.264 encoder plugins and `gstreamer1.0-libav` for software decode; H.265 test plugins are optional. From the root:
+Install CMake 3.22+, a C++17 compiler, GoogleTest (`libgtest-dev`), yaml-cpp (`libyaml-cpp-dev`), OpenCV (`libopencv-dev`), and GStreamer development packages (`libgstreamer1.0-dev`, `libgstreamer-plugins-base1.0-dev`, `libgstrtspserver-1.0-dev`). Install H.264 encoder plugins and `gstreamer1.0-libav` for software decode; H.265 test plugins are optional. From the root:
 
 ```sh
 cmake -S . -B build

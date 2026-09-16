@@ -191,10 +191,11 @@ Config parse(const YAML::Node& root) {
     read_scalar(video, "first_frame_timeout_ms", "video", config.video.first_frame_timeout_ms);
 
     if (const auto section = root["detector"]) {
-        check_keys(section, "detector", {"engine", "confidence", "nms"});
+        check_keys(section, "detector", {"engine", "confidence", "nms", "annotate"});
         read_scalar(section, "engine", "detector", config.detector.engine);
         read_scalar(section, "confidence", "detector", config.detector.confidence);
         read_scalar(section, "nms", "detector", config.detector.nms);
+        read_scalar(section, "annotate", "detector", config.detector.annotate);
     }
     if (const auto section = root["web"]) {
         check_keys(section, "web", {"bind", "port"});

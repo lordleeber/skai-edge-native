@@ -23,6 +23,7 @@ struct DetectorConfig {
     std::string engine = "models/yolo11s.engine";
     double confidence = 0.35;
     double nms = 0.45;
+    bool annotate = true;
 };
 
 struct WebConfig {
