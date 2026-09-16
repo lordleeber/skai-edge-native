@@ -26,8 +26,9 @@ constexpr auto request_timeout = std::chrono::seconds(5);
 class HttpSession : public std::enable_shared_from_this<HttpSession> {
 public:
     HttpSession(tcp::socket socket, std::chrono::steady_clock::time_point started,
-                std::shared_ptr<RuntimeStatus> status)
-        : stream_(std::move(socket)), started_(started), status_(std::move(status)) {
+                std::shared_ptr<RuntimeStatus> status, std::shared_ptr<ApiState> api)
+        : stream_(std::move(socket)), started_(started), status_(std::move(status)),
+          api_(std::move(api)) {
         parser_.header_limit(header_limit);
         parser_.body_limit(body_limit);
     }
@@ -57,7 +58,7 @@ private:
         status.uptime_s = static_cast<std::uint64_t>(
             std::chrono::duration_cast<std::chrono::seconds>(
                 std::chrono::steady_clock::now() - started_).count());
-        send(route_request(parser_.get(), status));
+        send(route_request(parser_.get(), status, *api_));
     }
 
     Response json_error(http::status result, const char* message) {
@@ -90,19 +91,23 @@ private:
     http::request_parser<http::string_body> parser_;
     std::chrono::steady_clock::time_point started_;
     std::shared_ptr<RuntimeStatus> status_;
+    std::shared_ptr<ApiState> api_;
     Response response_;
 };
 
 } // namespace
 
 struct HttpServer::State {
-    State(Logger& logger, std::shared_ptr<RuntimeStatus> status)
-        : acceptor(context), logger(logger), status(std::move(status)) {}
+    State(Logger& logger, std::shared_ptr<RuntimeStatus> status,
+          std::shared_ptr<ApiState> api)
+        : acceptor(context), logger(logger), status(std::move(status)),
+          api(std::move(api)) {}
 
     void accept() {
         acceptor.async_accept([this](beast::error_code error, tcp::socket socket) {
             if (!error) {
-                std::make_shared<HttpSession>(std::move(socket), started, status)->run();
+                std::make_shared<HttpSession>(std::move(socket), started, status,
+                                              api)->run();
             } else if (error != asio::error::operation_aborted) {
                 logger.log(LogLevel::Error, "web", error.message());
             }
@@ -114,17 +119,26 @@ struct HttpServer::State {
     tcp::acceptor acceptor;
     Logger& logger;
     std::shared_ptr<RuntimeStatus> status;
+    std::shared_ptr<ApiState> api;
     std::thread worker;
     std::chrono::steady_clock::time_point started;
     unsigned short port = 0;
 };
 
 HttpServer::HttpServer(Logger& logger)
-    : HttpServer(logger, std::make_shared<RuntimeStatus>()) {}
+    : HttpServer(logger, std::make_shared<RuntimeStatus>(),
+                 std::make_shared<ApiState>()) {}
 
 HttpServer::HttpServer(Logger& logger, std::shared_ptr<RuntimeStatus> status)
+    : HttpServer(logger, std::move(status), std::make_shared<ApiState>()) {}
+
+HttpServer::HttpServer(Logger& logger, std::shared_ptr<RuntimeStatus> status,
+                       std::shared_ptr<ApiState> api)
     : logger_(logger), status_(status ? std::move(status)
-                                     : std::make_shared<RuntimeStatus>()) {}
+                                     : std::make_shared<RuntimeStatus>()),
+      api_(api ? std::move(api) : std::make_shared<ApiState>()) {
+    api_->bind_runtime_status(status_);
+}
 
 HttpServer::~HttpServer() {
     stop();
@@ -133,7 +147,8 @@ HttpServer::~HttpServer() {
 
 bool HttpServer::initialize(const Config& config) {
     if (state_) return false;
-    auto next = std::make_unique<State>(logger_, status_);
+    api_->configure(config);
+    auto next = std::make_unique<State>(logger_, status_, api_);
     beast::error_code error;
     const auto address = asio::ip::make_address(config.web.bind, error);
     if (error) {

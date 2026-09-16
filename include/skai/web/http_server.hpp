@@ -1,6 +1,7 @@
 #pragma once
 
 #include "skai/application.hpp"
+#include "skai/api_state.hpp"
 #include "skai/logging.hpp"
 #include "skai/status.hpp"
 
@@ -12,6 +13,8 @@ class HttpServer final : public LifecycleModule {
 public:
     explicit HttpServer(Logger& logger);
     HttpServer(Logger& logger, std::shared_ptr<RuntimeStatus> status);
+    HttpServer(Logger& logger, std::shared_ptr<RuntimeStatus> status,
+               std::shared_ptr<ApiState> api);
     ~HttpServer() override;
 
     bool initialize(const Config& config) override;
@@ -25,6 +28,7 @@ private:
     struct State;
     Logger& logger_;
     std::shared_ptr<RuntimeStatus> status_;
+    std::shared_ptr<ApiState> api_;
     std::unique_ptr<State> state_;
 };
 

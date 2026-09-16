@@ -1,6 +1,7 @@
 #pragma once
 
 #include "skai/application.hpp"
+#include "skai/api_state.hpp"
 #include "skai/core/bounded_queue.hpp"
 #include "skai/inference/yolo_detector.hpp"
 #include "skai/status.hpp"
@@ -18,7 +19,8 @@ class YoloInferenceModule final : public LifecycleModule {
 public:
     YoloInferenceModule(BoundedQueue<Frame>& input,
                         BoundedQueue<Frame>& annotated_output, Logger& logger,
-                        std::shared_ptr<RuntimeStatus> status = {});
+                        std::shared_ptr<RuntimeStatus> status = {},
+                        std::shared_ptr<ApiState> api = {});
 
     bool initialize(const Config& config) override;
     bool start() override;
@@ -32,6 +34,7 @@ private:
     BoundedQueue<Frame>& output_;
     Logger& logger_;
     std::shared_ptr<RuntimeStatus> status_;
+    std::shared_ptr<ApiState> api_;
     AnnotationOptions annotation_;
     std::unique_ptr<TensorRtBootstrap> bootstrap_;
     std::unique_ptr<YoloDetector> detector_;
