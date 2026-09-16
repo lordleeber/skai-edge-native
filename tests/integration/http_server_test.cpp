@@ -65,11 +65,13 @@ http::response<http::string_body> request(unsigned short port,
     asio::io_context context;
     tcp::socket socket(context);
     socket.connect({asio::ip::make_address("127.0.0.1"), port});
+    const bool head = value.method() == http::verb::head;
     http::write(socket, value);
     beast::flat_buffer buffer;
-    http::response<http::string_body> response;
-    http::read(socket, buffer, response);
-    return response;
+    http::response_parser<http::string_body> parser;
+    parser.skip(head);
+    http::read(socket, buffer, parser);
+    return parser.release();
 }
 
 void connect_websocket(websocket::stream<tcp::socket>& client,
@@ -96,6 +98,7 @@ TEST(HttpServer, ServesStaticFrontendWithContentTypes) {
     config.web.port = 0;
     config.web.root = files.root.string();
     ASSERT_TRUE(server.initialize(config)) << logs.str();
+    ASSERT_TRUE(std::filesystem::remove(files.root / "app.js"));
     ASSERT_TRUE(server.start());
 
     const auto index = request(server.port(), {http::verb::get, "/", 11});
@@ -107,12 +110,37 @@ TEST(HttpServer, ServesStaticFrontendWithContentTypes) {
     EXPECT_EQ(script.result(), http::status::ok);
     EXPECT_EQ(script[http::field::content_type],
               "text/javascript; charset=utf-8");
+    const auto script_head = request(
+        server.port(), {http::verb::head, "/app.js", 11});
+    EXPECT_EQ(script_head.result(), http::status::ok);
+    EXPECT_TRUE(script_head.body().empty());
+    EXPECT_EQ(script_head[http::field::content_length],
+              std::to_string(script.body().size()));
     const auto style = request(server.port(), {http::verb::get, "/style.css", 11});
     EXPECT_EQ(style.result(), http::status::ok);
     EXPECT_EQ(style[http::field::content_type], "text/css; charset=utf-8");
 
     server.stop();
     server.wait();
+}
+
+TEST(HttpServer, RejectsUnboundedStaticAssetsDuringInitialization) {
+    TemporaryWebRoot files;
+    {
+        std::ofstream script(files.root / "app.js", std::ios::binary);
+        script.seekp(1024 * 1024);
+        script.put('x');
+    }
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    skai::web::HttpServer server(logger);
+    skai::Config config;
+    config.web.bind = "127.0.0.1";
+    config.web.port = 0;
+    config.web.root = files.root.string();
+
+    EXPECT_FALSE(server.initialize(config));
+    EXPECT_NE(logs.str().find("exceeds 1 MiB"), std::string::npos);
 }
 
 TEST(HttpServer, ConfinesStaticRequestsToConfiguredRoot) {

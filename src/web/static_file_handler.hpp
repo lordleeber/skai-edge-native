@@ -4,6 +4,7 @@
 
 #include <filesystem>
 #include <string>
+#include <unordered_map>
 
 namespace skai::web {
 
@@ -16,7 +17,13 @@ public:
     Response handle(const Request& request) const;
 
 private:
+    struct Asset {
+        std::string body;
+        std::string content_type;
+    };
+
     std::filesystem::path root_;
+    std::unordered_map<std::string, Asset> assets_;
     std::string error_;
 };
 

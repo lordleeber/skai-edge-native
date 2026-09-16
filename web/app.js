@@ -34,13 +34,14 @@
     const rows = byId("detections");
     rows.replaceChildren();
     const detections = data.detections || [];
+    const available = data.available ?? Number.isFinite(data.frame_sequence);
     setText("detection-count", `${detections.length} object${detections.length === 1 ? "" : "s"}`);
     if (!detections.length) {
       const row = rows.insertRow();
       const cell = row.insertCell();
       cell.colSpan = 3;
       cell.className = "empty";
-      cell.textContent = data.available ? "No objects detected" : "No detections yet";
+      cell.textContent = available ? "No objects detected" : "No detections yet";
       return;
     }
     detections.slice(0, 10).forEach((item) => {

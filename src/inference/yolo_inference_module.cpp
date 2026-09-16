@@ -41,7 +41,7 @@ std::string detection_event_data(const DetectionResult& result) {
     std::ostringstream output;
     output.imbue(std::locale::classic());
     output << std::setprecision(std::numeric_limits<float>::max_digits10)
-           << "{\"frame_sequence\":" << result.frame_sequence
+           << "{\"available\":true,\"frame_sequence\":" << result.frame_sequence
            << ",\"detections\":[";
     for (std::size_t index = 0; index < result.detections.size(); ++index) {
         const auto& detection = result.detections[index];

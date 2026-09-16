@@ -134,6 +134,8 @@ TEST(AnnotationDetector, RtspPipelinePublishesAnnotationsAndHonorsDisableFlag) {
     ASSERT_FALSE(published_events.empty());
     EXPECT_NE(published_events.back().find("\"type\":\"detection\""),
               std::string::npos);
+    EXPECT_NE(published_events.back().find("\"available\":true"),
+              std::string::npos);
     EXPECT_NE(published_events.back().find("\"detections\":"),
               std::string::npos);
     source.stop();

@@ -219,6 +219,7 @@ void RtspSource::set_error(const std::string& error) {
         diagnostics_.health = SourceHealth::Error;
         diagnostics_.last_error = error;
     }
+    if (status_) status_->clear_video();
     diagnostics_changed_.notify_all();
     logger_.log(LogLevel::Error, "video", error);
 }
@@ -355,11 +356,16 @@ void RtspSource::connect_rtp_pad(GstPad* pad) {
 }
 
 void RtspSource::publish_recovery(const RtspRecovery& recovery) {
+    const auto health = recovery.health();
     {
         std::lock_guard<std::mutex> lock(diagnostics_mutex_);
-        diagnostics_.health = recovery.health();
+        diagnostics_.health = health;
         diagnostics_.reconnect_count = recovery.reconnect_count();
-        if (recovery.health() == SourceHealth::Connected) diagnostics_.last_error.clear();
+        if (health == SourceHealth::Connected) diagnostics_.last_error.clear();
+    }
+    if (status_ && health != SourceHealth::Connected &&
+        health != SourceHealth::Degraded) {
+        status_->clear_video();
     }
     diagnostics_changed_.notify_all();
 }

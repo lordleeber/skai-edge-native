@@ -3,13 +3,15 @@
 #include <boost/beast/http.hpp>
 
 #include <fstream>
-#include <iterator>
 #include <system_error>
 
 namespace skai::web {
 namespace {
 
 namespace http = boost::beast::http;
+
+constexpr std::uintmax_t maximum_asset_bytes = 1024 * 1024;
+constexpr const char* asset_names[] = {"index.html", "app.js", "style.css"};
 
 Response text_response(http::status status, const std::string& message) {
     Response response{status, 11};
@@ -78,6 +80,43 @@ StaticFileHandler::StaticFileHandler(const std::filesystem::path& root) {
     root_ = std::filesystem::weakly_canonical(root, error);
     if (error || !std::filesystem::is_directory(root_, error)) {
         error_ = "web.root must be an accessible directory";
+        return;
+    }
+    for (const auto* name : asset_names) {
+        const auto candidate = std::filesystem::weakly_canonical(root_ / name,
+                                                                  error);
+        if (error || !is_within(root_, candidate)) {
+            error.clear();
+            continue;
+        }
+        if (!std::filesystem::is_regular_file(candidate, error) || error) {
+            error.clear();
+            continue;
+        }
+        const auto size = std::filesystem::file_size(candidate, error);
+        if (error) {
+            error_ = std::string("cannot inspect static asset: ") + name;
+            return;
+        }
+        if (size > maximum_asset_bytes) {
+            error_ = std::string("static asset exceeds 1 MiB limit: ") + name;
+            return;
+        }
+        std::ifstream file(candidate, std::ios::binary);
+        if (!file) {
+            error_ = std::string("cannot read static asset: ") + name;
+            return;
+        }
+        Asset asset;
+        asset.body.resize(static_cast<std::size_t>(size));
+        file.read(asset.body.data(), static_cast<std::streamsize>(size));
+        if (!file && !file.eof()) {
+            error_ = std::string("cannot read static asset: ") + name;
+            return;
+        }
+        asset.body.resize(static_cast<std::size_t>(file.gcount()));
+        asset.content_type = content_type(candidate);
+        assets_.emplace(candidate.generic_string(), std::move(asset));
     }
 }
 
@@ -110,21 +149,17 @@ Response StaticFileHandler::handle(const Request& request) const {
     if (!is_within(root_, candidate)) {
         return text_response(http::status::forbidden, "forbidden");
     }
-    if (!std::filesystem::is_regular_file(candidate, error) || error) {
+    const auto asset = assets_.find(candidate.generic_string());
+    if (asset == assets_.end()) {
         return text_response(http::status::not_found, "not found");
     }
-
-    std::ifstream file(candidate, std::ios::binary);
-    if (!file) return text_response(http::status::not_found, "not found");
-    std::string body{std::istreambuf_iterator<char>(file),
-                     std::istreambuf_iterator<char>()};
     Response response{http::status::ok, request.version()};
-    response.set(http::field::content_type, content_type(candidate));
+    response.set(http::field::content_type, asset->second.content_type);
     response.set(http::field::cache_control, "no-cache");
     if (request.method() == http::verb::head) {
-        response.content_length(body.size());
+        response.content_length(asset->second.body.size());
     } else {
-        response.body() = std::move(body);
+        response.body() = asset->second.body;
         response.prepare_payload();
     }
     return response;
