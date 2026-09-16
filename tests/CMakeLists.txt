@@ -6,9 +6,10 @@ pkg_check_modules(GST_RTSP_TEST REQUIRED IMPORTED_TARGET
 add_executable(skai-unit-tests unit/command_line_test.cpp unit/config_test.cpp
     unit/logging_test.cpp unit/application_test.cpp unit/bounded_queue_test.cpp
     unit/rtsp_recovery_test.cpp unit/tensor_layout_test.cpp
-    unit/preprocess_reference_test.cpp)
+    unit/preprocess_reference_test.cpp unit/yolo_postprocess_test.cpp)
 target_link_libraries(skai-unit-tests PRIVATE skai-cli skai-config skai-logging
     skai-application skai-core skai-tensor-layout skai-preprocess-reference
+    skai-yolo-postprocess
     GTest::gtest_main)
 target_compile_definitions(skai-unit-tests PRIVATE
     SKAI_INVALID_CONFIG="${PROJECT_SOURCE_DIR}/tests/fixtures/config.invalid.yaml")
@@ -41,6 +42,15 @@ if(TARGET skai-preprocess-cuda)
         SKAI_YOLO_ENGINE="/var/lib/skai-edge/models/yolo11s_fp16.engine"
         SKAI_YOLO_ONNX="/var/lib/skai-edge/models/yolo11s.onnx")
     gtest_discover_tests(skai-preprocess-cuda-tests PROPERTIES LABELS jetson TIMEOUT 120)
+endif()
+
+if(TARGET skai-yolo-detector)
+    add_executable(skai-yolo-detector-tests integration/yolo_detector_test.cpp)
+    target_link_libraries(skai-yolo-detector-tests PRIVATE skai-yolo-detector
+        GTest::gtest_main)
+    target_compile_definitions(skai-yolo-detector-tests PRIVATE
+        SKAI_YOLO_ENGINE="/var/lib/skai-edge/models/yolo11s_fp16.engine")
+    gtest_discover_tests(skai-yolo-detector-tests PROPERTIES LABELS jetson TIMEOUT 120)
 endif()
 
 add_library(skai-rtsp-test-fixture STATIC

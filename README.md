@@ -11,12 +11,14 @@ initializes modules in web/detector/video/GPS order, starts their workers, and
 stops and joins them in reverse order. Step 4 adds a bounded producer/consumer
 queue for future real-time paths. Step 5 adds a GStreamer runtime wrapper and a
 test-only loopback RTSP server. Step 6 adds the single RTSP input module: it
-decodes H.264/H.265 into packed BGR frames in a bounded inference queue. Web,
-inference, and GPS modules are still future work. Step 7 adds automatic recovery,
+decodes H.264/H.265 into packed BGR frames in a bounded inference queue. Web
+and GPS modules are still future work. Step 7 adds automatic recovery,
 frame-freshness stall detection, and JSON RTSP diagnostics. Step 8 adds an
-independent TensorRT engine loader; inference execution comes in Step 10.
+independent TensorRT engine loader.
 Step 9 adds CPU reference letterbox/NCHW conversion and a fused CUDA path
 validated against the local YOLO11s TensorRT engine.
+Step 10 adds a standalone YOLO11 inference and postprocessing path; connecting
+it to the service inference worker remains a later integration step.
 
 ## Build and test
 
@@ -119,6 +121,24 @@ buffer is ready on return. Hardware tests compare the full tensor against the
 CPU reference using `/var/lib/skai-edge/models/yolo11s_fp16.engine` and check
 that `yolo11s.onnx` is present. Run them with
 `ctest --test-dir build -R CudaPreprocess --output-on-failure`.
+
+## YOLO11 inference and postprocessing
+
+`skai::YoloDetector` owns a TensorRT engine, execution context, and reusable
+CUDA preprocessor. After `load(engine_path)`, `run(image, frame_sequence, ...)`
+returns a `DetectionResult` and timing for preprocessing, inference, and CPU
+postprocessing. A process-level `TensorRtBootstrap` must outlive the detector.
+The supported engine contract is FP32 `images` `[1,3,H,W]` and raw FP32
+`output0` `[1,4+classes,candidates]`; embedded-NMS or dynamic-shape engines
+are outside this step.
+
+The GPU-independent `postprocess_yolo()` selects the highest class score per
+candidate, filters by confidence, applies per-class NMS, and restores/clips
+boxes to the original frame using the integer letterbox dimensions. Configure
+its confidence and NMS thresholds through `YoloPostprocessConfig`; callers
+can populate them from the parsed YAML `detector.confidence` and `detector.nms`
+values. The Jetson test compares a reproducible image with independently
+evaluated `yolo11s.onnx` reference values and reruns it for deterministic output.
 
 ## Bounded queue
 
