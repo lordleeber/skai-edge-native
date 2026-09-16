@@ -91,6 +91,40 @@ TEST(YoloPostprocess, UsesRoundedResizeDimensionsForBoxRestoration) {
     EXPECT_NEAR(result.detections[0].y2, 359.0f, 1e-5f);
 }
 
+TEST(YoloPostprocess, AppliesNmsBeforeClippingBoundaryBoxes) {
+    const auto plan = make_plan(640, 640);
+    std::vector<float> output(6 * 2);
+    // Model-space x intervals [-100, 100] and [0, 60] have IoU 0.30.
+    // Clipping first would change them to [0, 100] and [0, 60], with IoU 0.60.
+    set_candidate(output, 2, 0, 0, 100, 200, 20, 0.9f, 0.1f);
+    set_candidate(output, 2, 1, 30, 100, 60, 20, 0.8f, 0.1f);
+    skai::DetectionResult result;
+    std::string error;
+    ASSERT_TRUE(skai::postprocess_yolo({output.data(), output.size(), 6, 2},
+                                        plan, {}, 12, result, error)) << error;
+    ASSERT_EQ(result.detections.size(), 2U);
+    EXPECT_FLOAT_EQ(result.detections[0].x1, 0.0f);
+    EXPECT_FLOAT_EQ(result.detections[0].x2, 100.0f);
+    EXPECT_FLOAT_EQ(result.detections[1].x1, 0.0f);
+    EXPECT_FLOAT_EQ(result.detections[1].x2, 60.0f);
+}
+
+TEST(YoloPostprocess, OutsideBoxesDoNotConsumeDetectionLimit) {
+    const auto plan = make_plan(640, 640);
+    std::vector<float> output(6 * 2);
+    set_candidate(output, 2, 0, -150, 100, 40, 20, 0.95f, 0.1f);
+    set_candidate(output, 2, 1, 30, 100, 20, 20, 0.9f, 0.1f);
+    skai::YoloPostprocessConfig config;
+    config.max_detections = 1;
+    skai::DetectionResult result;
+    std::string error;
+    ASSERT_TRUE(skai::postprocess_yolo({output.data(), output.size(), 6, 2},
+                                        plan, config, 13, result, error)) << error;
+    ASSERT_EQ(result.detections.size(), 1U);
+    EXPECT_FLOAT_EQ(result.detections[0].x1, 20.0f);
+    EXPECT_FLOAT_EQ(result.detections[0].x2, 40.0f);
+}
+
 TEST(YoloPostprocess, RejectsInvalidInputsAndKeepsResultsDeterministic) {
     const auto plan = make_plan(640, 640);
     std::vector<float> output(5 * 2);

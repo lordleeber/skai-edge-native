@@ -8,7 +8,12 @@ namespace skai {
 namespace {
 
 struct Candidate {
-    Detection detection;
+    int class_id = 0;
+    float confidence = 0.0f;
+    double x1 = 0.0;
+    double y1 = 0.0;
+    double x2 = 0.0;
+    double y2 = 0.0;
     std::size_t index = 0;
 };
 
@@ -21,15 +26,15 @@ bool valid_plan(const PreprocessPlan& plan) {
            static_cast<std::int64_t>(plan.pad_top) + plan.resized_height <= plan.height;
 }
 
-double intersection_over_union(const Detection& a, const Detection& b) {
+double intersection_over_union(const Candidate& a, const Candidate& b) {
     const double left = std::max(a.x1, b.x1);
     const double top = std::max(a.y1, b.y1);
     const double right = std::min(a.x2, b.x2);
     const double bottom = std::min(a.y2, b.y2);
     const double intersection = std::max(0.0, right - left) *
                                 std::max(0.0, bottom - top);
-    const double area_a = static_cast<double>(a.x2 - a.x1) * (a.y2 - a.y1);
-    const double area_b = static_cast<double>(b.x2 - b.x1) * (b.y2 - b.y1);
+    const double area_a = (a.x2 - a.x1) * (a.y2 - a.y1);
+    const double area_b = (b.x2 - b.x1) * (b.y2 - b.y1);
     const double total = area_a + area_b - intersection;
     return total > 0.0 ? intersection / total : 0.0;
 }
@@ -65,8 +70,10 @@ bool postprocess_yolo(const YoloOutputView& output, const PreprocessPlan& plan,
     }
 
     const auto count = static_cast<std::size_t>(output.candidates);
-    const double x_scale = static_cast<double>(plan.source_width) / plan.resized_width;
-    const double y_scale = static_cast<double>(plan.source_height) / plan.resized_height;
+    const double content_right = static_cast<double>(plan.pad_left) +
+                                 plan.resized_width;
+    const double content_bottom = static_cast<double>(plan.pad_top) +
+                                  plan.resized_height;
     std::vector<Candidate> filtered;
     filtered.reserve(count);
     for (std::size_t index = 0; index < count; ++index) {
@@ -90,54 +97,62 @@ bool postprocess_yolo(const YoloOutputView& output, const PreprocessPlan& plan,
             !std::isfinite(width) || !std::isfinite(height) ||
             width <= 0.0f || height <= 0.0f) continue;
 
-        const double x1 = (static_cast<double>(cx) - width / 2.0 -
-                           plan.pad_left) * x_scale;
-        const double x2 = (static_cast<double>(cx) + width / 2.0 -
-                           plan.pad_left) * x_scale;
-        const double y1 = (static_cast<double>(cy) - height / 2.0 -
-                           plan.pad_top) * y_scale;
-        const double y2 = (static_cast<double>(cy) + height / 2.0 -
-                           plan.pad_top) * y_scale;
+        const double x1 = static_cast<double>(cx) - width / 2.0;
+        const double x2 = static_cast<double>(cx) + width / 2.0;
+        const double y1 = static_cast<double>(cy) - height / 2.0;
+        const double y2 = static_cast<double>(cy) + height / 2.0;
         if (!std::isfinite(x1) || !std::isfinite(x2) ||
             !std::isfinite(y1) || !std::isfinite(y2)) continue;
-
-        Detection detection;
-        detection.class_id = class_id;
-        detection.confidence = score;
-        detection.x1 = static_cast<float>(std::clamp(x1, 0.0,
-                                                     static_cast<double>(plan.source_width)));
-        detection.y1 = static_cast<float>(std::clamp(y1, 0.0,
-                                                     static_cast<double>(plan.source_height)));
-        detection.x2 = static_cast<float>(std::clamp(x2, 0.0,
-                                                     static_cast<double>(plan.source_width)));
-        detection.y2 = static_cast<float>(std::clamp(y2, 0.0,
-                                                     static_cast<double>(plan.source_height)));
-        if (detection.x2 <= detection.x1 || detection.y2 <= detection.y1) continue;
-        filtered.push_back({detection, index});
+        // A box wholly in padding cannot produce a visible source-frame box.
+        if (x2 <= plan.pad_left || x1 >= content_right ||
+            y2 <= plan.pad_top || y1 >= content_bottom) continue;
+        filtered.push_back({class_id, score, x1, y1, x2, y2, index});
     }
 
     std::sort(filtered.begin(), filtered.end(), [](const Candidate& a,
                                                      const Candidate& b) {
-        if (a.detection.confidence != b.detection.confidence) {
-            return a.detection.confidence > b.detection.confidence;
+        if (a.confidence != b.confidence) {
+            return a.confidence > b.confidence;
         }
         return a.index < b.index;
     });
 
     result.frame_sequence = frame_sequence;
     result.detections.reserve(std::min(config.max_detections, filtered.size()));
+    std::vector<Candidate> kept_model_boxes;
+    kept_model_boxes.reserve(std::min(config.max_detections, filtered.size()));
+    const double x_scale = static_cast<double>(plan.source_width) / plan.resized_width;
+    const double y_scale = static_cast<double>(plan.source_height) / plan.resized_height;
     for (const auto& candidate : filtered) {
         bool suppressed = false;
-        for (const auto& kept : result.detections) {
-            if (candidate.detection.class_id == kept.class_id &&
-                intersection_over_union(candidate.detection, kept) >
+        for (const auto& kept : kept_model_boxes) {
+            if (candidate.class_id == kept.class_id &&
+                intersection_over_union(candidate, kept) >
                     config.nms_iou_threshold) {
                 suppressed = true;
                 break;
             }
         }
         if (suppressed) continue;
-        result.detections.push_back(candidate.detection);
+
+        Detection detection;
+        detection.class_id = candidate.class_id;
+        detection.confidence = candidate.confidence;
+        detection.x1 = static_cast<float>(std::clamp(
+            (candidate.x1 - plan.pad_left) * x_scale, 0.0,
+            static_cast<double>(plan.source_width)));
+        detection.y1 = static_cast<float>(std::clamp(
+            (candidate.y1 - plan.pad_top) * y_scale, 0.0,
+            static_cast<double>(plan.source_height)));
+        detection.x2 = static_cast<float>(std::clamp(
+            (candidate.x2 - plan.pad_left) * x_scale, 0.0,
+            static_cast<double>(plan.source_width)));
+        detection.y2 = static_cast<float>(std::clamp(
+            (candidate.y2 - plan.pad_top) * y_scale, 0.0,
+            static_cast<double>(plan.source_height)));
+        if (detection.x2 <= detection.x1 || detection.y2 <= detection.y1) continue;
+        kept_model_boxes.push_back(candidate);
+        result.detections.push_back(detection);
         if (result.detections.size() == config.max_detections) break;
     }
     return true;
