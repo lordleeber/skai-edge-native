@@ -6,6 +6,7 @@
 #include "skai/video/gstreamer_runtime.hpp"
 #include "skai/video/rtsp_recovery.hpp"
 #include "skai/video/rtsp_metrics.hpp"
+#include "skai/status.hpp"
 
 #include <gst/gst.h>
 
@@ -51,7 +52,8 @@ class RtspSource {
 public:
     RtspSource(BoundedQueue<Frame>& frames, Logger& logger,
                DecodeMode decode_mode = DecodeMode::Auto,
-               bool enqueue_frames = true);
+               bool enqueue_frames = true,
+               std::shared_ptr<RuntimeStatus> status = {});
     ~RtspSource();
 
     RtspSource(const RtspSource&) = delete;
@@ -83,6 +85,7 @@ private:
     Logger& logger_;
     DecodeMode decode_mode_;
     bool enqueue_frames_;
+    std::shared_ptr<RuntimeStatus> status_;
     VideoConfig config_;
     std::unique_ptr<gst::Pipeline> pipeline_;
     GstElement* rtsp_element_ = nullptr; // borrowed from pipeline_; worker-only

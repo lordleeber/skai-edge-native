@@ -42,4 +42,10 @@ TEST(HttpRouter, RejectsUnknownRoutesAndUnsupportedMethods) {
         {http::verb::post, "/health", 11}, status);
     EXPECT_EQ(method.result(), http::status::method_not_allowed);
     EXPECT_EQ(method[http::field::allow], "GET");
+
+    const auto unavailable = skai::web::route_request(
+        {http::verb::get, "/api/v1/status", 11}, status);
+    EXPECT_NE(unavailable.body().find("\"fps\":null"), std::string::npos);
+    EXPECT_NE(unavailable.body().find("\"last_inference_ms\":null"),
+              std::string::npos);
 }

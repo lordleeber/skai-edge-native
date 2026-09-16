@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace skai {
@@ -29,13 +30,16 @@ const std::vector<std::string>& coco_class_names() {
 
 YoloInferenceModule::YoloInferenceModule(BoundedQueue<Frame>& input,
                                          BoundedQueue<Frame>& annotated_output,
-                                         Logger& logger)
-    : input_(input), output_(annotated_output), logger_(logger) {}
+                                         Logger& logger,
+                                         std::shared_ptr<RuntimeStatus> status)
+    : input_(input), output_(annotated_output), logger_(logger),
+      status_(std::move(status)) {}
 
 bool YoloInferenceModule::initialize(const Config& config) {
     if (detector_ || worker_.joinable()) return false;
     input_.reset();
     output_.reset();
+    if (status_) status_->clear_detector();
     annotation_.enabled = config.detector.annotate;
     annotation_.show_metrics = true;
     YoloPostprocessConfig postprocess;
@@ -66,6 +70,7 @@ void YoloInferenceModule::stop() noexcept {
 void YoloInferenceModule::wait() noexcept {
     if (worker_.joinable()) worker_.join();
     output_.shutdown();
+    if (status_) status_->clear_detector();
     detector_.reset();
     bootstrap_.reset();
 }
@@ -81,17 +86,26 @@ void YoloInferenceModule::run() noexcept {
         const BgrImageView image{frame->bgr.data(), frame->bgr.size(), frame->width,
                                  frame->height, frame->stride};
         if (!detector_->run(image, frame->sequence, detections, timing, error)) {
+            if (status_) status_->clear_detector();
             logger_.log(LogLevel::Error, "detector", error);
             continue;
         }
         const auto now = std::chrono::steady_clock::now();
-        annotation_.fps = previous == std::chrono::steady_clock::time_point{}
-                              ? 0.0
-                              : 1.0 / std::chrono::duration<double>(now - previous).count();
+        const bool has_previous = previous != std::chrono::steady_clock::time_point{};
+        annotation_.fps = has_previous
+                              ? 1.0 / std::chrono::duration<double>(now - previous).count()
+                              : 0.0;
         previous = now;
         annotation_.inference_ms = timing.preprocess.wall_ms +
                                    timing.inference_wall_ms +
                                    timing.postprocess_wall_ms;
+        if (status_) {
+            if (has_previous) {
+                status_->update_detector(annotation_.fps, annotation_.inference_ms);
+            } else {
+                status_->update_inference(annotation_.inference_ms);
+            }
+        }
         Frame annotated;
         if (!annotate_frame(*frame, detections, coco_class_names(), annotation_,
                             annotated, error)) {

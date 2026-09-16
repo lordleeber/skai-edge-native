@@ -11,6 +11,7 @@
 
 #include <chrono>
 #include <cstdint>
+#include <memory>
 #include <sstream>
 #include <string>
 
@@ -90,7 +91,10 @@ TEST(AnnotationDetector, RtspPipelinePublishesAnnotationsAndHonorsDisableFlag) {
     skai::Logger logger(logs);
     skai::BoundedQueue<skai::Frame> input(2);
     skai::BoundedQueue<skai::Frame> output(2);
-    skai::YoloInferenceModule module(input, output, logger);
+    auto status = std::make_shared<skai::RuntimeStatus>();
+    status->set_detector_expected(true);
+    status->set_running(true);
+    skai::YoloInferenceModule module(input, output, logger, status);
     std::string error;
     ASSERT_TRUE(skai::gst::initialize_once(error)) << error;
     skai::test::RtspTestServer server;
@@ -101,18 +105,25 @@ TEST(AnnotationDetector, RtspPipelinePublishesAnnotationsAndHonorsDisableFlag) {
     config.detector.annotate = true;
     ASSERT_TRUE(module.initialize(config));
     ASSERT_TRUE(module.start());
-    skai::RtspSource source(input, logger);
+    skai::RtspSource source(input, logger, skai::DecodeMode::Auto, true, status);
     skai::VideoConfig video;
     video.rtsp_url = server.url();
     video.latency_ms = 50;
     ASSERT_TRUE(source.start(video, error)) << error;
     const auto annotated = output.pop_for(std::chrono::seconds(3));
+    const auto second = output.pop_for(std::chrono::seconds(3));
+    ASSERT_TRUE(annotated.has_value()) << logs.str();
+    ASSERT_TRUE(second.has_value()) << logs.str();
+    EXPECT_GT(annotated->sequence, 0U);
+    EXPECT_FALSE(annotated->bgr.empty());
+    const auto live_status = status->snapshot();
+    EXPECT_EQ(live_status.status, "running");
+    EXPECT_TRUE(live_status.video_fps.has_value());
+    EXPECT_TRUE(live_status.detector_fps.has_value());
+    EXPECT_TRUE(live_status.last_inference_ms.has_value());
     source.stop();
     module.stop();
     module.wait();
-    ASSERT_TRUE(annotated.has_value()) << logs.str();
-    EXPECT_GT(annotated->sequence, 0U);
-    EXPECT_FALSE(annotated->bgr.empty());
 
     const auto frame = reference_frame();
     const auto original_pixels = frame.bgr;

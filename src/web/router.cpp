@@ -21,9 +21,16 @@ std::string status_json(const StatusSnapshot& status) {
     output.imbue(std::locale::classic());
     output << std::setprecision(6)
            << "{\"status\":\"" << status.status << "\",\"uptime_s\":"
-           << status.uptime_s << ",\"video\":{\"fps\":" << status.video_fps
-           << "},\"detector\":{\"fps\":" << status.detector_fps
-           << ",\"last_inference_ms\":" << status.last_inference_ms << "}}\n";
+           << status.uptime_s << ",\"video\":{\"fps\":";
+    if (status.video_fps) output << *status.video_fps;
+    else output << "null";
+    output << "},\"detector\":{\"fps\":";
+    if (status.detector_fps) output << *status.detector_fps;
+    else output << "null";
+    output << ",\"last_inference_ms\":";
+    if (status.last_inference_ms) output << *status.last_inference_ms;
+    else output << "null";
+    output << "}}\n";
     return output.str();
 }
 

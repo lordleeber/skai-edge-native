@@ -1,4 +1,5 @@
 #include "skai/web/http_server.hpp"
+#include "skai/status.hpp"
 
 #include <gtest/gtest.h>
 
@@ -6,6 +7,7 @@
 #include <boost/beast.hpp>
 
 #include <chrono>
+#include <memory>
 #include <sstream>
 #include <string>
 
@@ -33,7 +35,12 @@ http::response<http::string_body> request(unsigned short port,
 TEST(HttpServer, ServesRoutesAsynchronouslyAndRejectsOversizedBodies) {
     std::ostringstream logs;
     skai::Logger logger(logs);
-    skai::web::HttpServer server(logger);
+    auto status = std::make_shared<skai::RuntimeStatus>();
+    status->set_detector_expected(true);
+    status->set_running(true);
+    status->update_video(29.9);
+    status->update_detector(18.4, 43.1);
+    skai::web::HttpServer server(logger, status);
     skai::Config config;
     config.web.bind = "127.0.0.1";
     config.web.port = 0;
@@ -52,6 +59,9 @@ TEST(HttpServer, ServesRoutesAsynchronouslyAndRejectsOversizedBodies) {
     const auto concurrent = request(server.port(),
                                     {http::verb::get, "/api/v1/status", 11});
     EXPECT_EQ(concurrent.result(), http::status::ok);
+    EXPECT_NE(concurrent.body().find("\"fps\":29.9"), std::string::npos);
+    EXPECT_NE(concurrent.body().find("\"last_inference_ms\":43.1"),
+              std::string::npos);
     beast::error_code ignored;
     stalled.close(ignored);
 
@@ -90,4 +100,15 @@ TEST(HttpServer, GracefulStopCancelsAnIncompleteRequest) {
     server.wait();
     EXPECT_LT(std::chrono::steady_clock::now() - start,
               std::chrono::seconds(1));
+
+    for (int cycle = 0; cycle < 25; ++cycle) {
+        ASSERT_TRUE(server.initialize(config));
+        ASSERT_TRUE(server.start());
+        tcp::socket racing_socket(context);
+        racing_socket.connect({asio::ip::make_address("127.0.0.1"),
+                               server.port()});
+        server.stop();
+        racing_socket.close();
+        server.wait();
+    }
 }

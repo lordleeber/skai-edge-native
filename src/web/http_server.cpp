@@ -25,8 +25,9 @@ constexpr auto request_timeout = std::chrono::seconds(5);
 
 class HttpSession : public std::enable_shared_from_this<HttpSession> {
 public:
-    HttpSession(tcp::socket socket, std::chrono::steady_clock::time_point started)
-        : stream_(std::move(socket)), started_(started) {
+    HttpSession(tcp::socket socket, std::chrono::steady_clock::time_point started,
+                std::shared_ptr<RuntimeStatus> status)
+        : stream_(std::move(socket)), started_(started), status_(std::move(status)) {
         parser_.header_limit(header_limit);
         parser_.body_limit(body_limit);
     }
@@ -52,7 +53,7 @@ private:
             return;
         }
         if (error) return close();
-        StatusSnapshot status;
+        auto status = status_->snapshot();
         status.uptime_s = static_cast<std::uint64_t>(
             std::chrono::duration_cast<std::chrono::seconds>(
                 std::chrono::steady_clock::now() - started_).count());
@@ -88,18 +89,20 @@ private:
     beast::flat_buffer buffer_;
     http::request_parser<http::string_body> parser_;
     std::chrono::steady_clock::time_point started_;
+    std::shared_ptr<RuntimeStatus> status_;
     Response response_;
 };
 
 } // namespace
 
 struct HttpServer::State {
-    explicit State(Logger& logger) : acceptor(context), logger(logger) {}
+    State(Logger& logger, std::shared_ptr<RuntimeStatus> status)
+        : acceptor(context), logger(logger), status(std::move(status)) {}
 
     void accept() {
         acceptor.async_accept([this](beast::error_code error, tcp::socket socket) {
             if (!error) {
-                std::make_shared<HttpSession>(std::move(socket), started)->run();
+                std::make_shared<HttpSession>(std::move(socket), started, status)->run();
             } else if (error != asio::error::operation_aborted) {
                 logger.log(LogLevel::Error, "web", error.message());
             }
@@ -110,12 +113,18 @@ struct HttpServer::State {
     asio::io_context context{1};
     tcp::acceptor acceptor;
     Logger& logger;
+    std::shared_ptr<RuntimeStatus> status;
     std::thread worker;
     std::chrono::steady_clock::time_point started;
     unsigned short port = 0;
 };
 
-HttpServer::HttpServer(Logger& logger) : logger_(logger) {}
+HttpServer::HttpServer(Logger& logger)
+    : HttpServer(logger, std::make_shared<RuntimeStatus>()) {}
+
+HttpServer::HttpServer(Logger& logger, std::shared_ptr<RuntimeStatus> status)
+    : logger_(logger), status_(status ? std::move(status)
+                                     : std::make_shared<RuntimeStatus>()) {}
 
 HttpServer::~HttpServer() {
     stop();
@@ -124,7 +133,7 @@ HttpServer::~HttpServer() {
 
 bool HttpServer::initialize(const Config& config) {
     if (state_) return false;
-    auto next = std::make_unique<State>(logger_);
+    auto next = std::make_unique<State>(logger_, status_);
     beast::error_code error;
     const auto address = asio::ip::make_address(config.web.bind, error);
     if (error) {
@@ -157,10 +166,24 @@ bool HttpServer::start() {
 
 void HttpServer::stop() noexcept {
     if (!state_) return;
-    beast::error_code ignored;
-    state_->acceptor.cancel(ignored);
-    state_->acceptor.close(ignored);
-    state_->context.stop();
+    if (!state_->worker.joinable()) {
+        beast::error_code ignored;
+        state_->acceptor.cancel(ignored);
+        state_->acceptor.close(ignored);
+        state_->context.stop();
+        return;
+    }
+    auto* state = state_.get();
+    try {
+        asio::post(state->context, [state] {
+            beast::error_code ignored;
+            state->acceptor.cancel(ignored);
+            state->acceptor.close(ignored);
+            state->context.stop();
+        });
+    } catch (...) {
+        state->context.stop();
+    }
 }
 
 void HttpServer::wait() noexcept {

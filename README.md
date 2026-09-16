@@ -71,10 +71,13 @@ diagnostic logs go to stderr.
 
 The service binds `web.bind` and `web.port` with an asynchronous Boost.Asio /
 Boost.Beast server. `GET /health` returns the Step 12 liveness response and
-`GET /api/v1/status` returns JSON containing service uptime plus reserved video
-and detector metric fields. Unknown routes return 404 and unsupported methods
-return 405. Requests have fixed 16 KiB header and 64 KiB body limits and a
-five-second read/write timeout. The server stops through the normal Application
+`GET /api/v1/status` returns JSON containing service uptime plus live video and
+detector metrics from a shared thread-safe runtime snapshot. Metrics remain
+JSON `null` until their module has produced a measurement; service status is
+`degraded` while expected inputs or inference are unavailable. Unknown routes
+return 404 and unsupported methods return 405. Requests have fixed 16 KiB
+header and 64 KiB body limits and a five-second read/write timeout. The server
+stops through the normal Application
 lifecycle. WebSocket, static files, and the wider REST API belong to later steps.
 
 ## GStreamer runtime and RTSP fixture

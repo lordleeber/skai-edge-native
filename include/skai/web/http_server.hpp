@@ -2,6 +2,7 @@
 
 #include "skai/application.hpp"
 #include "skai/logging.hpp"
+#include "skai/status.hpp"
 
 #include <memory>
 
@@ -10,6 +11,7 @@ namespace skai::web {
 class HttpServer final : public LifecycleModule {
 public:
     explicit HttpServer(Logger& logger);
+    HttpServer(Logger& logger, std::shared_ptr<RuntimeStatus> status);
     ~HttpServer() override;
 
     bool initialize(const Config& config) override;
@@ -22,6 +24,7 @@ public:
 private:
     struct State;
     Logger& logger_;
+    std::shared_ptr<RuntimeStatus> status_;
     std::unique_ptr<State> state_;
 };
 

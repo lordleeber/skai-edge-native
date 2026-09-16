@@ -11,7 +11,10 @@
 #include <vector>
 
 #include <sys/wait.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
 #include <poll.h>
+#include <sys/socket.h>
 #include <unistd.h>
 
 namespace {
@@ -28,6 +31,21 @@ struct SignalResult {
     std::string startup_output;
 };
 
+int available_loopback_port() {
+    const int descriptor = socket(AF_INET, SOCK_STREAM, 0);
+    if (descriptor < 0) return 0;
+    sockaddr_in address{};
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    address.sin_port = 0;
+    socklen_t size = sizeof(address);
+    const bool ok = bind(descriptor, reinterpret_cast<sockaddr*>(&address), size) == 0 &&
+                    getsockname(descriptor, reinterpret_cast<sockaddr*>(&address),
+                                &size) == 0;
+    close(descriptor);
+    return ok ? ntohs(address.sin_port) : 0;
+}
+
 struct TemporaryConfig {
     std::string path;
 
@@ -36,10 +54,18 @@ struct TemporaryConfig {
         const int fd = mkstemp(pattern);
         if (fd < 0) return;
         path = pattern;
+        const int web_port = available_loopback_port();
+        if (web_port == 0) {
+            path.clear();
+            close(fd);
+            unlink(pattern);
+            return;
+        }
         const std::string yaml =
             "video: {rtsp_url: '" + url +
             "', transport: tcp, latency_ms: 50}\n"
-            "detector: {engine: '/var/lib/skai-edge/models/yolo11s_fp16.engine'}\n";
+            "detector: {engine: '/var/lib/skai-edge/models/yolo11s_fp16.engine'}\n"
+            "web: {bind: '127.0.0.1', port: " + std::to_string(web_port) + "}\n";
         if (write(fd, yaml.data(), yaml.size()) != static_cast<ssize_t>(yaml.size())) {
             path.clear();
             unlink(pattern);
