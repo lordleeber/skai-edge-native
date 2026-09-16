@@ -23,6 +23,10 @@ target_include_directories(skai-tensor-layout PUBLIC include)
 add_library(skai-preprocess-reference src/inference/preprocess.cpp)
 target_include_directories(skai-preprocess-reference PUBLIC include)
 
+add_library(skai-yolo-postprocess src/inference/yolo_postprocess.cpp)
+target_include_directories(skai-yolo-postprocess PUBLIC include)
+target_link_libraries(skai-yolo-postprocess PUBLIC skai-preprocess-reference)
+
 set(SKAI_ENABLE_TENSORRT "AUTO" CACHE STRING "Build TensorRT loader: AUTO, ON, or OFF")
 set_property(CACHE SKAI_ENABLE_TENSORRT PROPERTY STRINGS AUTO ON OFF)
 if(NOT SKAI_ENABLE_TENSORRT MATCHES "^(AUTO|ON|OFF)$")
@@ -64,6 +68,10 @@ if(TARGET skai-tensorrt)
         target_include_directories(skai-preprocess-cuda PUBLIC include)
         target_link_libraries(skai-preprocess-cuda PUBLIC skai-tensorrt
             skai-preprocess-reference CUDA::cudart)
+        add_library(skai-yolo-detector src/inference/yolo_detector.cpp)
+        target_include_directories(skai-yolo-detector PUBLIC include)
+        target_link_libraries(skai-yolo-detector PUBLIC skai-preprocess-cuda
+            skai-yolo-postprocess)
     else()
         message(STATUS "CUDA compiler unavailable; skipping skai-preprocess-cuda")
     endif()

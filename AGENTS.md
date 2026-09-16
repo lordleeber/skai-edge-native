@@ -31,3 +31,5 @@ Use GoogleTest assertions (`TEST`, `EXPECT_*`, `ASSERT_*`). Name test files `*_t
 ## Commit & Pull Request Guidelines
 
 Recent commits use short, imperative subjects such as `Build PR 1 repository skeleton and lifecycle tests` and `Add project roadmap`. Use a similarly descriptive subject. In pull requests, explain the behavior changed, identify the roadmap stage or related issue when applicable, and include build and test results. Include screenshots only for visible UI changes.
+
+For each completed roadmap step, commit the tested changes on its feature branch, push the branch, and open a pull request immediately. The user has authorized this workflow for future steps; no separate request is needed to open the PR. Merging remains a separate decision.
