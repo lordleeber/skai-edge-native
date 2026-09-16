@@ -3,6 +3,7 @@
 #include "skai/application.hpp"
 #include "skai/core/bounded_queue.hpp"
 #include "skai/inference/yolo_detector.hpp"
+#include "skai/status.hpp"
 #include "skai/video/annotator.hpp"
 
 #include <atomic>
@@ -16,7 +17,8 @@ namespace skai {
 class YoloInferenceModule final : public LifecycleModule {
 public:
     YoloInferenceModule(BoundedQueue<Frame>& input,
-                        BoundedQueue<Frame>& annotated_output, Logger& logger);
+                        BoundedQueue<Frame>& annotated_output, Logger& logger,
+                        std::shared_ptr<RuntimeStatus> status = {});
 
     bool initialize(const Config& config) override;
     bool start() override;
@@ -29,6 +31,7 @@ private:
     BoundedQueue<Frame>& input_;
     BoundedQueue<Frame>& output_;
     Logger& logger_;
+    std::shared_ptr<RuntimeStatus> status_;
     AnnotationOptions annotation_;
     std::unique_ptr<TensorRtBootstrap> bootstrap_;
     std::unique_ptr<YoloDetector> detector_;

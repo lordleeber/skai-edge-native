@@ -71,9 +71,9 @@ std::string serialize_rtsp_metrics(const RtspDiagnostics& d) {
 }
 
 RtspSource::RtspSource(BoundedQueue<Frame>& frames, Logger& logger, DecodeMode decode_mode,
-                       bool enqueue_frames)
+                       bool enqueue_frames, std::shared_ptr<RuntimeStatus> status)
     : frames_(frames), logger_(logger), decode_mode_(decode_mode),
-      enqueue_frames_(enqueue_frames) {}
+      enqueue_frames_(enqueue_frames), status_(std::move(status)) {}
 
 RtspSource::~RtspSource() { stop(); }
 
@@ -88,6 +88,7 @@ bool RtspSource::start(const VideoConfig& config, std::string& error) {
         return false;
     }
     config_ = config;
+    if (status_) status_->clear_video();
     sink_ = nullptr;
     {
         std::lock_guard<std::mutex> lock(diagnostics_mutex_);
@@ -155,8 +156,11 @@ bool RtspSource::open_pipeline(std::string& error) {
 void RtspSource::stop() noexcept {
     request_stop();
     if (worker_.joinable()) worker_.join();
-    std::lock_guard<std::mutex> lock(diagnostics_mutex_);
-    diagnostics_.health = SourceHealth::Stopped;
+    {
+        std::lock_guard<std::mutex> lock(diagnostics_mutex_);
+        diagnostics_.health = SourceHealth::Stopped;
+    }
+    if (status_) status_->clear_video();
 }
 
 void RtspSource::request_stop() noexcept {
@@ -406,6 +410,9 @@ bool RtspSource::capture_sample(GstSample* sample, RtspRecovery& recovery) {
             }
             prior_frame_time_ = frame.timestamp;
             last_frame_time_ = frame.timestamp;
+            if (status_ && diagnostics_.fps_in > 0.0) {
+                status_->update_video(diagnostics_.fps_in);
+            }
         }
         if (enqueue_frames_) frames_.push(std::move(frame));
         publish_recovery(recovery);

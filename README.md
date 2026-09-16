@@ -19,11 +19,13 @@ Step 9 adds CPU reference letterbox/NCHW conversion and a fused CUDA path
 validated against the local YOLO11s TensorRT engine.
 Step 10 adds YOLO11 inference and postprocessing. Step 11 connects the RTSP
 frame queue to a TensorRT worker and adds CPU/OpenCV annotation for detections
-and optional timing. Encoding and external media transport remain later steps.
+and optional timing. Step 12 adds the asynchronous Boost.Beast HTTP foundation.
+Encoding and external media transport remain later steps.
 
 ## Build and test
 
 Install CMake 3.22+, a C++17 compiler, yaml-cpp (`libyaml-cpp-dev`),
+Boost.System development files (`libboost-system-dev`),
 GStreamer development packages (`libgstreamer1.0-dev`,
 `libgstreamer-plugins-base1.0-dev`), and GStreamer plugins from the base, good, ugly
 (H.264), libav (software H.264/H.265 decode), and bad (optional H.265) sets,
@@ -64,6 +66,19 @@ prints one JSON metrics line per second to stdout with health, frame age,
 dropped frames, stale frames discarded on reconnect, reconnect count, and RTP
 jitter statistics when available;
 diagnostic logs go to stderr.
+
+## HTTP status server
+
+The service binds `web.bind` and `web.port` with an asynchronous Boost.Asio /
+Boost.Beast server. `GET /health` returns the Step 12 liveness response and
+`GET /api/v1/status` returns JSON containing service uptime plus live video and
+detector metrics from a shared thread-safe runtime snapshot. Metrics remain
+JSON `null` until their module has produced a measurement; service status is
+`degraded` while expected inputs or inference are unavailable. Unknown routes
+return 404 and unsupported methods return 405. Requests have fixed 16 KiB
+header and 64 KiB body limits and a five-second read/write timeout. The server
+stops through the normal Application
+lifecycle. WebSocket, static files, and the wider REST API belong to later steps.
 
 ## GStreamer runtime and RTSP fixture
 

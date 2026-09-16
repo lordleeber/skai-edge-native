@@ -4,6 +4,7 @@
 #include "skai/video/gstreamer_runtime.hpp"
 #include "skai/video/rtsp_video_module.hpp"
 #include "skai/video/rtsp_source.hpp"
+#include "skai/web/http_server.hpp"
 #if SKAI_HAS_YOLO_PIPELINE
 #include "skai/inference/yolo_inference_module.hpp"
 #endif
@@ -77,15 +78,19 @@ int main(int argc, char* argv[]) {
 
     skai::BoundedQueue<skai::Frame> inference_frames(2);
     skai::BoundedQueue<skai::Frame> annotated_frames(2);
+    auto runtime_status = std::make_shared<skai::RuntimeStatus>();
     skai::Application::Modules modules;
+    modules.web = std::make_unique<skai::web::HttpServer>(logger, runtime_status);
 #if SKAI_HAS_YOLO_PIPELINE
+    runtime_status->set_detector_expected(true);
     modules.detector = std::make_unique<skai::YoloInferenceModule>(
-        inference_frames, annotated_frames, logger);
+        inference_frames, annotated_frames, logger, runtime_status);
 #else
     logger.log(skai::LogLevel::Warning, "detector",
                "service built without TensorRT/CUDA inference support");
 #endif
-    modules.video = std::make_unique<skai::RtspVideoModule>(inference_frames, logger);
+    modules.video = std::make_unique<skai::RtspVideoModule>(inference_frames, logger,
+                                                            runtime_status);
     skai::Application app(cli.config_path, logger, std::move(modules));
     if (!app.initialize()) {
         skai::Logger error_logger(std::cerr);
@@ -97,14 +102,17 @@ int main(int argc, char* argv[]) {
         error_logger.log(skai::LogLevel::Error, app.last_error_module(), app.last_error());
         return 1;
     }
+    runtime_status->set_running(true);
     logger.log(skai::LogLevel::Info, "core", "skai-edge ready");
     int signal_number = 0;
     if (sigwait(&shutdown_signals, &signal_number) != 0) {
         logger.log(skai::LogLevel::Error, "core", "failed to wait for shutdown signal");
+        runtime_status->set_running(false);
         app.stop();
         app.wait();
         return 1;
     }
+    runtime_status->set_running(false);
     app.stop();
     app.wait();
     logger.log(skai::LogLevel::Info, "core", "skai-edge stopped");

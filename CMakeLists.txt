@@ -13,6 +13,7 @@ pkg_check_modules(GSTREAMER REQUIRED IMPORTED_TARGET gstreamer-1.0)
 pkg_check_modules(GST_VIDEO_APP REQUIRED IMPORTED_TARGET
     gstreamer-app-1.0 gstreamer-video-1.0 gstreamer-rtsp-1.0)
 find_package(OpenCV REQUIRED COMPONENTS core imgproc)
+find_package(Boost 1.74 REQUIRED COMPONENTS system)
 
 add_library(skai-core INTERFACE)
 target_include_directories(skai-core INTERFACE include)
@@ -102,6 +103,10 @@ add_library(skai-application src/application.cpp)
 target_include_directories(skai-application PUBLIC include)
 target_link_libraries(skai-application PUBLIC skai-config skai-logging Threads::Threads)
 
+add_library(skai-web src/web/http_server.cpp src/web/router.cpp)
+target_include_directories(skai-web PUBLIC include)
+target_link_libraries(skai-web PUBLIC skai-application Boost::system)
+
 add_library(skai-gstreamer src/video/gstreamer_runtime.cpp)
 target_include_directories(skai-gstreamer PUBLIC include)
 target_link_libraries(skai-gstreamer PUBLIC skai-logging PkgConfig::GSTREAMER)
@@ -113,7 +118,7 @@ target_link_libraries(skai-rtsp-source PUBLIC skai-gstreamer skai-config skai-co
 
 add_executable(skai-edge src/main.cpp)
 target_link_libraries(skai-edge PRIVATE skai-cli skai-application skai-gstreamer
-    skai-rtsp-source)
+    skai-rtsp-source skai-web)
 if(TARGET skai-inference-module)
     target_link_libraries(skai-edge PRIVATE skai-inference-module)
     target_compile_definitions(skai-edge PRIVATE SKAI_HAS_YOLO_PIPELINE=1)
