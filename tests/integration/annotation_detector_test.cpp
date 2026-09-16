@@ -92,9 +92,10 @@ TEST(AnnotationDetector, RtspPipelinePublishesAnnotationsAndHonorsDisableFlag) {
     skai::BoundedQueue<skai::Frame> input(2);
     skai::BoundedQueue<skai::Frame> output(2);
     auto status = std::make_shared<skai::RuntimeStatus>();
+    auto api = std::make_shared<skai::ApiState>();
     status->set_detector_expected(true);
     status->set_running(true);
-    skai::YoloInferenceModule module(input, output, logger, status);
+    skai::YoloInferenceModule module(input, output, logger, status, api);
     std::string error;
     ASSERT_TRUE(skai::gst::initialize_once(error)) << error;
     skai::test::RtspTestServer server;
@@ -121,13 +122,16 @@ TEST(AnnotationDetector, RtspPipelinePublishesAnnotationsAndHonorsDisableFlag) {
     EXPECT_TRUE(live_status.video_fps.has_value());
     EXPECT_TRUE(live_status.detector_fps.has_value());
     EXPECT_TRUE(live_status.last_inference_ms.has_value());
+    const auto latest = api->latest_detections();
+    EXPECT_TRUE(latest.available);
+    EXPECT_GE(latest.frame_sequence, second->sequence);
     source.stop();
     module.stop();
     module.wait();
 
     const auto frame = reference_frame();
     const auto original_pixels = frame.bgr;
-    config.detector.annotate = false;
+    api->set_detector_enabled(false);
     ASSERT_TRUE(module.initialize(config));
     ASSERT_TRUE(module.start());
     ASSERT_TRUE(input.push(frame));

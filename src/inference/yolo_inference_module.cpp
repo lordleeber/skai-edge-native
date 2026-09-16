@@ -26,14 +26,22 @@ const std::vector<std::string>& coco_class_names() {
     return names;
 }
 
+std::string class_name(int class_id) {
+    const auto& names = coco_class_names();
+    return class_id >= 0 && static_cast<std::size_t>(class_id) < names.size()
+               ? names[class_id]
+               : "class_" + std::to_string(class_id);
+}
+
 } // namespace
 
 YoloInferenceModule::YoloInferenceModule(BoundedQueue<Frame>& input,
                                          BoundedQueue<Frame>& annotated_output,
                                          Logger& logger,
-                                         std::shared_ptr<RuntimeStatus> status)
+                                         std::shared_ptr<RuntimeStatus> status,
+                                         std::shared_ptr<ApiState> api)
     : input_(input), output_(annotated_output), logger_(logger),
-      status_(std::move(status)) {}
+      status_(std::move(status)), api_(std::move(api)) {}
 
 bool YoloInferenceModule::initialize(const Config& config) {
     if (detector_ || worker_.joinable()) return false;
@@ -80,6 +88,11 @@ void YoloInferenceModule::run() noexcept {
     while (!stopping_) {
         auto frame = input_.pop();
         if (!frame || stopping_) break;
+        if (api_ && !api_->detector_enabled()) {
+            if (status_) status_->clear_detector();
+            output_.push(std::move(*frame));
+            continue;
+        }
         DetectionResult detections;
         InferenceTiming timing;
         std::string error;
@@ -105,6 +118,17 @@ void YoloInferenceModule::run() noexcept {
             } else {
                 status_->update_inference(annotation_.inference_ms);
             }
+        }
+        if (api_) {
+            std::vector<DetectionDto> published;
+            published.reserve(detections.detections.size());
+            for (const auto& detection : detections.detections) {
+                published.push_back({detection.class_id, class_name(detection.class_id),
+                                     detection.confidence,
+                                     detection.x1, detection.y1, detection.x2,
+                                     detection.y2});
+            }
+            api_->publish_detections(detections.frame_sequence, std::move(published));
         }
         Frame annotated;
         if (!annotate_frame(*frame, detections, coco_class_names(), annotation_,

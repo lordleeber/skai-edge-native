@@ -40,7 +40,8 @@ TEST(HttpServer, ServesRoutesAsynchronouslyAndRejectsOversizedBodies) {
     status->set_running(true);
     status->update_video(29.9);
     status->update_detector(18.4, 43.1);
-    skai::web::HttpServer server(logger, status);
+    auto api = std::make_shared<skai::ApiState>();
+    skai::web::HttpServer server(logger, status, api);
     skai::Config config;
     config.web.bind = "127.0.0.1";
     config.web.port = 0;
@@ -62,6 +63,13 @@ TEST(HttpServer, ServesRoutesAsynchronouslyAndRejectsOversizedBodies) {
     EXPECT_NE(concurrent.body().find("\"fps\":29.9"), std::string::npos);
     EXPECT_NE(concurrent.body().find("\"last_inference_ms\":43.1"),
               std::string::npos);
+    const auto config_response = request(
+        server.port(), {http::verb::get, "/api/v1/config", 11});
+    EXPECT_EQ(config_response.result(), http::status::ok);
+    const auto disable_response = request(
+        server.port(), {http::verb::post, "/api/v1/detector/disable", 11});
+    EXPECT_EQ(disable_response.result(), http::status::ok);
+    EXPECT_FALSE(api->detector_enabled());
     beast::error_code ignored;
     stalled.close(ignored);
 
