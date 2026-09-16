@@ -1,0 +1,65 @@
+:root {
+  color-scheme: dark;
+  --bg: #090e12;
+  --panel: #11191f;
+  --line: #26333b;
+  --muted: #8d9da7;
+  --text: #eef4f5;
+  --accent: #63e6be;
+  --accent-dark: #173e35;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; background: radial-gradient(circle at 80% 0, #13252a, transparent 28rem), var(--bg); color: var(--text); }
+header, main, footer { width: min(1180px, calc(100% - 32px)); margin-inline: auto; }
+header { min-height: 104px; display: flex; align-items: center; justify-content: space-between; }
+h1, h2, p { margin: 0; }
+h1 { font-size: clamp(1.45rem, 3vw, 2rem); letter-spacing: -.04em; }
+h2 { font-size: 1.05rem; }
+.eyebrow { margin-bottom: 7px; color: var(--accent); font: 700 .68rem/1 monospace; letter-spacing: .14em; }
+.connection { display: flex; gap: 9px; align-items: center; color: var(--muted); font-size: .84rem; }
+#connection-dot { width: 8px; height: 8px; border-radius: 50%; background: #efb366; box-shadow: 0 0 12px currentColor; }
+#connection-dot.online { background: var(--accent); }
+.panel { border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--panel) 94%, transparent); box-shadow: 0 18px 45px #0004; }
+.hero { padding: 18px; }
+.section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.tag { border: 1px solid var(--line); border-radius: 99px; padding: 5px 9px; color: var(--muted); font: 600 .68rem/1 monospace; text-transform: uppercase; }
+.video-frame { position: relative; aspect-ratio: 16 / 7; overflow: hidden; border: 1px solid #263a42; border-radius: 8px; background: repeating-linear-gradient(135deg, #0b1216, #0b1216 10px, #0d151a 10px, #0d151a 20px); }
+video { width: 100%; height: 100%; object-fit: contain; }
+.video-placeholder { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; pointer-events: none; color: var(--muted); font-size: .82rem; }
+.video-placeholder span { margin-bottom: 10px; border: 1px solid #e36a6a; border-radius: 4px; padding: 4px 7px; color: #ff8f8f; font: 700 .68rem/1 monospace; letter-spacing: .15em; }
+.metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 12px; }
+.metrics article { min-height: 126px; padding: 18px; display: flex; flex-direction: column; }
+.metrics strong { margin: auto 0 7px; font-size: 1.35rem; text-transform: capitalize; }
+.metrics small, .muted { color: var(--muted); }
+[data-state="running"] { color: var(--accent); }
+[data-state="degraded"] { color: #efb366; }
+.lower-grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: 12px; margin: 12px 0 32px; }
+.lower-grid > article { min-height: 240px; padding: 18px; }
+.recording { grid-column: 1 / -1; min-height: auto !important; display: flex; justify-content: space-between; align-items: center; }
+table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+th, td { padding: 11px 8px; border-bottom: 1px solid var(--line); text-align: left; }
+th { color: var(--muted); font: 600 .68rem/1 monospace; text-transform: uppercase; }
+.empty { padding: 30px 8px; color: var(--muted); text-align: center; }
+.alerts { margin: 0; padding: 0; list-style: none; }
+.alerts li { display: flex; justify-content: space-between; gap: 14px; padding: 12px 4px; border-bottom: 1px solid var(--line); font-size: .8rem; }
+.alerts span { overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+button { border: 0; border-radius: 7px; padding: 10px 15px; background: var(--accent); color: #07120f; font-weight: 750; cursor: pointer; }
+button.secondary { border: 1px solid var(--line); background: transparent; color: var(--text); }
+.button-row { display: flex; gap: 8px; }
+footer { min-height: 64px; display: flex; justify-content: space-between; align-items: center; border-top: 1px solid var(--line); color: var(--muted); font-size: .72rem; }
+
+@media (max-width: 820px) {
+  .metrics { grid-template-columns: repeat(2, 1fr); }
+  .lower-grid { grid-template-columns: 1fr; }
+  .recording { grid-column: auto; }
+  .video-frame { aspect-ratio: 16 / 9; }
+}
+
+@media (max-width: 520px) {
+  header { min-height: 86px; }
+  .metrics { grid-template-columns: 1fr; }
+  .recording { align-items: flex-start; flex-direction: column; gap: 24px; }
+  .connection { font-size: 0; }
+}

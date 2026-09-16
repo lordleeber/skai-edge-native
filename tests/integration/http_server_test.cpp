@@ -9,6 +9,8 @@
 #include <boost/beast/websocket.hpp>
 
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <future>
 #include <memory>
 #include <sstream>
@@ -22,16 +24,54 @@ using tcp = asio::ip::tcp;
 
 namespace {
 
+class TemporaryWebRoot {
+public:
+    TemporaryWebRoot() {
+        const auto suffix = std::to_string(
+            std::chrono::steady_clock::now().time_since_epoch().count());
+        base = std::filesystem::temp_directory_path() / ("skai-web-test-" + suffix);
+        root = base / "public";
+        outside = base / "outside.txt";
+        std::filesystem::create_directories(root / "assets");
+        write(root / "index.html", "<!doctype html><title>SKAI Edge</title>");
+        write(root / "app.js", "document.body.dataset.ready = 'true';");
+        write(root / "style.css", "body { color: #fff; }");
+        write(outside, "private");
+        std::filesystem::create_symlink(outside, root / "escape.txt");
+    }
+
+    ~TemporaryWebRoot() {
+        std::error_code ignored;
+        std::filesystem::remove_all(base, ignored);
+    }
+
+    TemporaryWebRoot(const TemporaryWebRoot&) = delete;
+    TemporaryWebRoot& operator=(const TemporaryWebRoot&) = delete;
+
+    std::filesystem::path base;
+    std::filesystem::path root;
+    std::filesystem::path outside;
+
+private:
+    static void write(const std::filesystem::path& path,
+                      const std::string& contents) {
+        std::ofstream file(path, std::ios::binary);
+        file << contents;
+    }
+};
+
 http::response<http::string_body> request(unsigned short port,
                                           http::request<http::string_body> value) {
     asio::io_context context;
     tcp::socket socket(context);
     socket.connect({asio::ip::make_address("127.0.0.1"), port});
+    const bool head = value.method() == http::verb::head;
     http::write(socket, value);
     beast::flat_buffer buffer;
-    http::response<http::string_body> response;
-    http::read(socket, buffer, response);
-    return response;
+    http::response_parser<http::string_body> parser;
+    parser.skip(head);
+    http::read(socket, buffer, parser);
+    return parser.release();
 }
 
 void connect_websocket(websocket::stream<tcp::socket>& client,
@@ -47,6 +87,90 @@ std::string read_websocket(websocket::stream<tcp::socket>& client) {
 }
 
 } // namespace
+
+TEST(HttpServer, ServesStaticFrontendWithContentTypes) {
+    TemporaryWebRoot files;
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    skai::web::HttpServer server(logger);
+    skai::Config config;
+    config.web.bind = "127.0.0.1";
+    config.web.port = 0;
+    config.web.root = files.root.string();
+    ASSERT_TRUE(server.initialize(config)) << logs.str();
+    ASSERT_TRUE(std::filesystem::remove(files.root / "app.js"));
+    ASSERT_TRUE(server.start());
+
+    const auto index = request(server.port(), {http::verb::get, "/", 11});
+    EXPECT_EQ(index.result(), http::status::ok);
+    EXPECT_EQ(index[http::field::content_type], "text/html; charset=utf-8");
+    EXPECT_NE(index.body().find("SKAI Edge"), std::string::npos);
+
+    const auto script = request(server.port(), {http::verb::get, "/app.js", 11});
+    EXPECT_EQ(script.result(), http::status::ok);
+    EXPECT_EQ(script[http::field::content_type],
+              "text/javascript; charset=utf-8");
+    const auto script_head = request(
+        server.port(), {http::verb::head, "/app.js", 11});
+    EXPECT_EQ(script_head.result(), http::status::ok);
+    EXPECT_TRUE(script_head.body().empty());
+    EXPECT_EQ(script_head[http::field::content_length],
+              std::to_string(script.body().size()));
+    const auto style = request(server.port(), {http::verb::get, "/style.css", 11});
+    EXPECT_EQ(style.result(), http::status::ok);
+    EXPECT_EQ(style[http::field::content_type], "text/css; charset=utf-8");
+
+    server.stop();
+    server.wait();
+}
+
+TEST(HttpServer, RejectsUnboundedStaticAssetsDuringInitialization) {
+    TemporaryWebRoot files;
+    {
+        std::ofstream script(files.root / "app.js", std::ios::binary);
+        script.seekp(1024 * 1024);
+        script.put('x');
+    }
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    skai::web::HttpServer server(logger);
+    skai::Config config;
+    config.web.bind = "127.0.0.1";
+    config.web.port = 0;
+    config.web.root = files.root.string();
+
+    EXPECT_FALSE(server.initialize(config));
+    EXPECT_NE(logs.str().find("exceeds 1 MiB"), std::string::npos);
+}
+
+TEST(HttpServer, ConfinesStaticRequestsToConfiguredRoot) {
+    TemporaryWebRoot files;
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    skai::web::HttpServer server(logger);
+    skai::Config config;
+    config.web.bind = "127.0.0.1";
+    config.web.port = 0;
+    config.web.root = files.root.string();
+    ASSERT_TRUE(server.initialize(config)) << logs.str();
+    ASSERT_TRUE(server.start());
+
+    EXPECT_EQ(request(server.port(), {http::verb::get, "/missing.txt", 11}).result(),
+              http::status::not_found);
+    for (const auto* target : {"/../config/config.example.yaml",
+                               "/%2e%2e/%2e%2e/etc/passwd",
+                               "/..%2f..%2fetc/passwd"}) {
+        EXPECT_EQ(request(server.port(), {http::verb::get, target, 11}).result(),
+                  http::status::forbidden) << target;
+    }
+    EXPECT_EQ(request(server.port(), {http::verb::get, "/escape.txt", 11}).result(),
+              http::status::forbidden);
+    EXPECT_EQ(request(server.port(), {http::verb::get, "/assets", 11}).result(),
+              http::status::not_found);
+
+    server.stop();
+    server.wait();
+}
 
 TEST(HttpServer, ServesRoutesAsynchronouslyAndRejectsOversizedBodies) {
     std::ostringstream logs;
@@ -67,6 +191,9 @@ TEST(HttpServer, ServesRoutesAsynchronouslyAndRejectsOversizedBodies) {
     const auto health = request(server.port(),
                                 {http::verb::get, "/health", 11});
     EXPECT_EQ(health.result(), http::status::ok);
+    const auto health_with_query = request(
+        server.port(), {http::verb::get, "/health?probe=readiness", 11});
+    EXPECT_EQ(health_with_query.result(), http::status::ok);
 
     asio::io_context stalled_context;
     tcp::socket stalled(stalled_context);

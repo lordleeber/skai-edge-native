@@ -79,8 +79,10 @@ JSON `null` until their module has produced a measurement; service status is
 `degraded` while expected inputs or inference are unavailable. Unknown routes
 return 404 and unsupported methods return 405. Requests have fixed 16 KiB
 header and 64 KiB body limits and a five-second read/write timeout. The server
-stops through the normal Application lifecycle. Static files belong to a later
-step.
+stops through the normal Application lifecycle. The framework-free operations
+console is served from `web.root` (the repository `web/` directory by default)
+at `/`. Static paths are URL-decoded, canonicalized, and confined to that root;
+directories and symlinks that resolve outside it are not served.
 
 Step 13 also serves public configuration (with credentials, URLs, engine paths,
 and filesystem paths deliberately omitted), latest detections, and configured

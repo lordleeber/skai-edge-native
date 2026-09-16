@@ -29,6 +29,11 @@ struct DetectorConfig {
 struct WebConfig {
     std::string bind = "0.0.0.0";
     int port = 8080;
+#ifdef SKAI_DEFAULT_WEB_ROOT
+    std::string root = SKAI_DEFAULT_WEB_ROOT;
+#else
+    std::string root = "web";
+#endif
 };
 
 struct RecordingConfig {

@@ -260,15 +260,20 @@ TEST(RtspSource, ReportsUnhealthySourceAfterDisconnect) {
     skai::BoundedQueue<skai::Frame> frames(2);
     std::ostringstream output;
     skai::Logger logger(output);
-    skai::RtspSource source(frames, logger, skai::DecodeMode::Software);
+    auto status = std::make_shared<skai::RuntimeStatus>();
+    status->set_running(true);
+    skai::RtspSource source(frames, logger, skai::DecodeMode::Software, true,
+                            status);
     skai::VideoConfig config;
     config.rtsp_url = server.url();
     ASSERT_TRUE(source.start(config, error)) << error << output.str();
     ASSERT_TRUE(frames.pop_for(std::chrono::seconds(3)).has_value()) << output.str();
+    EXPECT_TRUE(status->snapshot().video_fps.has_value());
     server.stop();
     EXPECT_TRUE(wait_for_health(source, skai::SourceHealth::Reconnecting,
                                 std::chrono::seconds(3))) << output.str();
     EXPECT_FALSE(source.diagnostics().last_error.empty());
+    EXPECT_FALSE(status->snapshot().video_fps.has_value());
 }
 
 TEST(RtspVideoModule, PublishesToSharedInferenceQueueAfterRestart) {
