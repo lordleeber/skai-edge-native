@@ -19,6 +19,9 @@ add_library(skai-core INTERFACE)
 target_include_directories(skai-core INTERFACE include)
 target_link_libraries(skai-core INTERFACE Threads::Threads)
 
+add_library(skai-events src/events.cpp)
+target_include_directories(skai-events PUBLIC include)
+
 add_library(skai-tensor-layout src/inference/tensor_layout.cpp)
 target_include_directories(skai-tensor-layout PUBLIC include)
 
@@ -81,7 +84,7 @@ if(TARGET skai-tensorrt)
         add_library(skai-inference-module src/inference/yolo_inference_module.cpp)
         target_include_directories(skai-inference-module PUBLIC include)
         target_link_libraries(skai-inference-module PUBLIC skai-yolo-detector
-            skai-annotator skai-application skai-core)
+            skai-annotator skai-application skai-core skai-events)
     else()
         message(STATUS "CUDA compiler unavailable; skipping skai-preprocess-cuda")
     endif()
@@ -103,9 +106,9 @@ add_library(skai-application src/application.cpp)
 target_include_directories(skai-application PUBLIC include)
 target_link_libraries(skai-application PUBLIC skai-config skai-logging Threads::Threads)
 
-add_library(skai-web src/web/http_server.cpp src/web/router.cpp)
+add_library(skai-web src/web/http_server.cpp src/web/router.cpp src/web/websocket_session.cpp)
 target_include_directories(skai-web PUBLIC include)
-target_link_libraries(skai-web PUBLIC skai-application Boost::system)
+target_link_libraries(skai-web PUBLIC skai-application skai-events Boost::system)
 
 add_library(skai-gstreamer src/video/gstreamer_runtime.cpp)
 target_include_directories(skai-gstreamer PUBLIC include)

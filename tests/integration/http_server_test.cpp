@@ -1,12 +1,15 @@
 #include "skai/web/http_server.hpp"
+#include "skai/events.hpp"
 #include "skai/status.hpp"
 
 #include <gtest/gtest.h>
 
 #include <boost/asio.hpp>
 #include <boost/beast.hpp>
+#include <boost/beast/websocket.hpp>
 
 #include <chrono>
+#include <future>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -14,6 +17,7 @@
 namespace asio = boost::asio;
 namespace beast = boost::beast;
 namespace http = beast::http;
+namespace websocket = beast::websocket;
 using tcp = asio::ip::tcp;
 
 namespace {
@@ -28,6 +32,18 @@ http::response<http::string_body> request(unsigned short port,
     http::response<http::string_body> response;
     http::read(socket, buffer, response);
     return response;
+}
+
+void connect_websocket(websocket::stream<tcp::socket>& client,
+                       unsigned short port) {
+    client.next_layer().connect({asio::ip::make_address("127.0.0.1"), port});
+    client.handshake("127.0.0.1", "/ws");
+}
+
+std::string read_websocket(websocket::stream<tcp::socket>& client) {
+    beast::flat_buffer message;
+    client.read(message);
+    return beast::buffers_to_string(message.data());
 }
 
 } // namespace
@@ -88,7 +104,7 @@ TEST(HttpServer, ServesRoutesAsynchronouslyAndRejectsOversizedBodies) {
     server.wait();
 }
 
-TEST(HttpServer, GracefulStopCancelsAnIncompleteRequest) {
+TEST(HttpServer, GracefulStopCancelsIncompleteHttpAndWebSocketHandshakes) {
     std::ostringstream logs;
     skai::Logger logger(logs);
     skai::web::HttpServer server(logger);
@@ -118,4 +134,105 @@ TEST(HttpServer, GracefulStopCancelsAnIncompleteRequest) {
         racing_socket.close();
         server.wait();
     }
+    ASSERT_TRUE(server.initialize(config));
+    ASSERT_TRUE(server.start());
+    tcp::socket pending(context);
+    pending.connect({asio::ip::make_address("127.0.0.1"), server.port()});
+    asio::write(pending, asio::buffer(
+        "GET /ws HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\n"
+        "Connection: Upgrade\r\nSec-WebSocket-Version: 13\r\n"
+        "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n"));
+    server.stop();
+    server.wait();
+}
+
+TEST(HttpServer, WebSocketBroadcastsEventsToMultipleClients) {
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    auto status = std::make_shared<skai::RuntimeStatus>();
+    auto api = std::make_shared<skai::ApiState>();
+    auto events = std::make_shared<skai::EventChannel>();
+    logger.set_error_sink([events](const std::string& module,
+                                   const std::string& message) {
+        events->publish(skai::EventType::SystemError,
+                        skai::make_system_error_data(module, message));
+    });
+    skai::web::HttpServer server(logger, status, api, events);
+    skai::Config config;
+    config.web.bind = "127.0.0.1";
+    config.web.port = 0;
+    ASSERT_TRUE(server.initialize(config));
+    ASSERT_TRUE(server.start());
+
+    asio::io_context first_context;
+    websocket::stream<tcp::socket> first(first_context);
+    connect_websocket(first, server.port());
+    asio::io_context second_context;
+    websocket::stream<tcp::socket> second(second_context);
+    connect_websocket(second, server.port());
+
+    for (auto* client : {&first, &second}) {
+        EXPECT_NE(read_websocket(*client).find("\"type\":\"status\""),
+                  std::string::npos);
+        EXPECT_NE(read_websocket(*client).find("\"type\":\"gps\""),
+                  std::string::npos);
+    }
+
+    events->publish(skai::EventType::Alert,
+                    "{\"class\":\"person\",\"confidence\":0.91}");
+    for (auto* client : {&first, &second}) {
+        const auto json = read_websocket(*client);
+        EXPECT_NE(json.find("\"type\":\"alert\""), std::string::npos);
+        EXPECT_NE(json.find("\"class\":\"person\""), std::string::npos);
+    }
+
+    logger.log(skai::LogLevel::Error, "detector", "inference failed");
+    for (auto* client : {&first, &second}) {
+        const auto json = read_websocket(*client);
+        EXPECT_NE(json.find("\"type\":\"system_error\""), std::string::npos);
+        EXPECT_NE(json.find("\"module\":\"detector\""), std::string::npos);
+        EXPECT_NE(json.find("\"message\":\"inference failed\""),
+                  std::string::npos);
+    }
+    for (int update = 0; update < 6; ++update) {
+        for (auto* client : {&first, &second}) {
+            EXPECT_NE(read_websocket(*client).find("\"type\":\"status\""),
+                      std::string::npos);
+        }
+    }
+
+    first.close(websocket::close_code::normal);
+    second.close(websocket::close_code::normal);
+    server.stop();
+    server.wait();
+}
+
+TEST(HttpServer, ShutdownClosesConnectedWebSocketPromptly) {
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    skai::web::HttpServer server(logger);
+    skai::Config config;
+    config.web.bind = "127.0.0.1";
+    config.web.port = 0;
+    ASSERT_TRUE(server.initialize(config));
+    ASSERT_TRUE(server.start());
+
+    asio::io_context context;
+    websocket::stream<tcp::socket> client(context);
+    connect_websocket(client, server.port());
+    read_websocket(client);
+    read_websocket(client);
+
+    auto close_result = std::async(std::launch::async, [&client] {
+        beast::flat_buffer closed;
+        beast::error_code error;
+        client.read(closed, error);
+        return error;
+    });
+    const auto start = std::chrono::steady_clock::now();
+    server.stop();
+    server.wait();
+    EXPECT_LT(std::chrono::steady_clock::now() - start,
+              std::chrono::seconds(1));
+    EXPECT_EQ(close_result.get(), websocket::error::closed);
 }

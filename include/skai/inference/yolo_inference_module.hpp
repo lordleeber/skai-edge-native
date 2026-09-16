@@ -3,6 +3,7 @@
 #include "skai/application.hpp"
 #include "skai/api_state.hpp"
 #include "skai/core/bounded_queue.hpp"
+#include "skai/events.hpp"
 #include "skai/inference/yolo_detector.hpp"
 #include "skai/status.hpp"
 #include "skai/video/annotator.hpp"
@@ -20,7 +21,8 @@ public:
     YoloInferenceModule(BoundedQueue<Frame>& input,
                         BoundedQueue<Frame>& annotated_output, Logger& logger,
                         std::shared_ptr<RuntimeStatus> status = {},
-                        std::shared_ptr<ApiState> api = {});
+                        std::shared_ptr<ApiState> api = {},
+                        std::shared_ptr<EventChannel> events = {});
 
     bool initialize(const Config& config) override;
     bool start() override;
@@ -35,6 +37,7 @@ private:
     Logger& logger_;
     std::shared_ptr<RuntimeStatus> status_;
     std::shared_ptr<ApiState> api_;
+    std::shared_ptr<EventChannel> events_;
     AnnotationOptions annotation_;
     std::unique_ptr<TensorRtBootstrap> bootstrap_;
     std::unique_ptr<YoloDetector> detector_;

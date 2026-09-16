@@ -1,5 +1,6 @@
 #include "skai/application.hpp"
 #include "skai/cli.hpp"
+#include "skai/events.hpp"
 #include "skai/logging.hpp"
 #include "skai/video/gstreamer_runtime.hpp"
 #include "skai/video/rtsp_video_module.hpp"
@@ -27,6 +28,12 @@ int main(int argc, char* argv[]) {
     }
 
     skai::Logger logger(cli.rtsp_test ? std::cerr : std::cout);
+    auto events = std::make_shared<skai::EventChannel>();
+    logger.set_error_sink([events](const std::string& module,
+                                   const std::string& message) {
+        events->publish(skai::EventType::SystemError,
+                        skai::make_system_error_data(module, message));
+    });
 
     sigset_t shutdown_signals;
     sigemptyset(&shutdown_signals);
@@ -82,10 +89,11 @@ int main(int argc, char* argv[]) {
     auto api_state = std::make_shared<skai::ApiState>(runtime_status);
     skai::Application::Modules modules;
     modules.web = std::make_unique<skai::web::HttpServer>(logger, runtime_status,
-                                                          api_state);
+                                                          api_state, events);
 #if SKAI_HAS_YOLO_PIPELINE
     modules.detector = std::make_unique<skai::YoloInferenceModule>(
-        inference_frames, annotated_frames, logger, runtime_status, api_state);
+        inference_frames, annotated_frames, logger, runtime_status, api_state,
+        events);
 #else
     api_state->set_detector_supported(false);
     logger.log(skai::LogLevel::Warning, "detector",

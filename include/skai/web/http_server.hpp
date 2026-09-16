@@ -2,6 +2,7 @@
 
 #include "skai/application.hpp"
 #include "skai/api_state.hpp"
+#include "skai/events.hpp"
 #include "skai/logging.hpp"
 #include "skai/status.hpp"
 
@@ -15,6 +16,9 @@ public:
     HttpServer(Logger& logger, std::shared_ptr<RuntimeStatus> status);
     HttpServer(Logger& logger, std::shared_ptr<RuntimeStatus> status,
                std::shared_ptr<ApiState> api);
+    HttpServer(Logger& logger, std::shared_ptr<RuntimeStatus> status,
+               std::shared_ptr<ApiState> api,
+               std::shared_ptr<EventChannel> events);
     ~HttpServer() override;
 
     bool initialize(const Config& config) override;
@@ -29,6 +33,7 @@ private:
     Logger& logger_;
     std::shared_ptr<RuntimeStatus> status_;
     std::shared_ptr<ApiState> api_;
+    std::shared_ptr<EventChannel> events_;
     std::unique_ptr<State> state_;
 };
 

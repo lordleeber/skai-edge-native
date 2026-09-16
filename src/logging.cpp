@@ -57,12 +57,28 @@ void Logger::set_minimum_level(LogLevel level) {
     minimum_level_ = level;
 }
 
-void Logger::log(LogLevel level, const std::string& module, const std::string& message) {
+void Logger::set_error_sink(ErrorSink sink) {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (level < minimum_level_) return;
-    output_ << "timestamp=\"" << timestamp() << "\" level=" << log_level_name(level)
-            << " module=" << module << " message=\"" << escape(message) << "\"\n"
-            << std::flush;
+    error_sink_ = std::move(sink);
+}
+
+void Logger::log(LogLevel level, const std::string& module, const std::string& message) {
+    ErrorSink sink;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (level < minimum_level_) return;
+        output_ << "timestamp=\"" << timestamp() << "\" level="
+                << log_level_name(level) << " module=" << module
+                << " message=\"" << escape(message) << "\"\n" << std::flush;
+        if (level == LogLevel::Error) sink = error_sink_;
+    }
+    if (sink) {
+        try {
+            sink(module, message);
+        } catch (...) {
+            // Logging must remain safe when an optional observer fails.
+        }
+    }
 }
 
 } // namespace skai

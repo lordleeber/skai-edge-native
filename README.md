@@ -21,6 +21,7 @@ Step 10 adds YOLO11 inference and postprocessing. Step 11 connects the RTSP
 frame queue to a TensorRT worker and adds CPU/OpenCV annotation for detections
 and optional timing. Step 12 adds the asynchronous Boost.Beast HTTP foundation.
 Step 13 adds the versioned REST routing surface and explicit API DTO state.
+Step 14 adds a multi-client WebSocket event channel at `GET /ws`.
 Encoding and external media transport remain later steps.
 
 ## Build and test
@@ -78,8 +79,8 @@ JSON `null` until their module has produced a measurement; service status is
 `degraded` while expected inputs or inference are unavailable. Unknown routes
 return 404 and unsupported methods return 405. Requests have fixed 16 KiB
 header and 64 KiB body limits and a five-second read/write timeout. The server
-stops through the normal Application lifecycle. WebSocket and static files
-belong to later steps.
+stops through the normal Application lifecycle. Static files belong to a later
+step.
 
 Step 13 also serves public configuration (with credentials, URLs, engine paths,
 and filesystem paths deliberately omitted), latest detections, and configured
@@ -88,6 +89,11 @@ inference worker runs or passes frames through. Alert and recording routes are
 reserved but explicitly return unavailable/not-implemented responses until the
 repository and recorder arrive in Steps 18–20; they do not report fabricated
 empty data or successful operations.
+
+WebSocket clients connect to `/ws` for timestamped status, GPS, detection, alert,
+recording, and system-error JSON events. Status refreshes once per second;
+each client has a bounded 32-event queue, Beast ping/pong keepalive, a 64 KiB
+inbound limit, and clean disconnect handling.
 
 ## GStreamer runtime and RTSP fixture
 

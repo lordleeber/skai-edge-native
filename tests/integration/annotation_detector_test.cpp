@@ -14,6 +14,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -93,9 +94,14 @@ TEST(AnnotationDetector, RtspPipelinePublishesAnnotationsAndHonorsDisableFlag) {
     skai::BoundedQueue<skai::Frame> output(2);
     auto status = std::make_shared<skai::RuntimeStatus>();
     auto api = std::make_shared<skai::ApiState>(status);
+    auto events = std::make_shared<skai::EventChannel>();
+    std::vector<std::string> published_events;
+    events->subscribe([&](const std::string& event) {
+        published_events.push_back(event);
+    });
     status->set_detector_expected(true);
     status->set_running(true);
-    skai::YoloInferenceModule module(input, output, logger, status, api);
+    skai::YoloInferenceModule module(input, output, logger, status, api, events);
     std::string error;
     ASSERT_TRUE(skai::gst::initialize_once(error)) << error;
     skai::test::RtspTestServer server;
@@ -125,6 +131,11 @@ TEST(AnnotationDetector, RtspPipelinePublishesAnnotationsAndHonorsDisableFlag) {
     const auto latest = api->latest_detections();
     EXPECT_TRUE(latest.available);
     EXPECT_GE(latest.frame_sequence, second->sequence);
+    ASSERT_FALSE(published_events.empty());
+    EXPECT_NE(published_events.back().find("\"type\":\"detection\""),
+              std::string::npos);
+    EXPECT_NE(published_events.back().find("\"detections\":"),
+              std::string::npos);
     source.stop();
     module.stop();
     module.wait();
