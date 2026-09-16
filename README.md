@@ -24,6 +24,8 @@ Step 13 adds the versioned REST routing surface and explicit API DTO state.
 Step 14 adds a multi-client WebSocket event channel at `GET /ws`.
 Step 15 adds the framework-free operations console, and Step 16 keeps its
 runtime state synchronized through REST snapshots and WebSocket events.
+Step 17 provides a fixed-position GPS source; its API and UI always identify
+the coordinates as fixed/simulated rather than live receiver data.
 Encoding and external media transport remain later steps.
 
 ## Build and test

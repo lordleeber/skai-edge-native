@@ -301,8 +301,10 @@ TEST(HttpServer, WebSocketBroadcastsEventsToMultipleClients) {
     for (auto* client : {&first, &second}) {
         EXPECT_NE(read_websocket(*client).find("\"type\":\"status\""),
                   std::string::npos);
-        EXPECT_NE(read_websocket(*client).find("\"type\":\"gps\""),
-                  std::string::npos);
+        const auto gps = read_websocket(*client);
+        EXPECT_NE(gps.find("\"type\":\"gps\""), std::string::npos);
+        EXPECT_NE(gps.find("\"source\":\"fixed\""), std::string::npos);
+        EXPECT_NE(gps.find("\"valid\":true"), std::string::npos);
     }
 
     events->publish(skai::EventType::Alert,

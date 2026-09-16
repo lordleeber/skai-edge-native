@@ -182,16 +182,21 @@ std::string WebSocketSession::status_data() const {
 }
 
 std::string WebSocketSession::gps_data() const {
-    PublicConfigDto config;
-    if (!api_->public_config(config) || !config.gps_enabled) {
+    const auto fix = api_->latest_gps();
+    if (!fix) {
         return "{\"available\":false}";
     }
     std::ostringstream output;
     output.imbue(std::locale::classic());
     output << std::setprecision(std::numeric_limits<double>::max_digits10)
-           << "{\"available\":true,\"source\":\"fixed\",\"latitude\":"
-           << config.gps_latitude << ",\"longitude\":" << config.gps_longitude
-           << ",\"altitude_m\":" << config.gps_altitude_m << '}';
+           << "{\"available\":true,\"valid\":"
+           << (fix->valid ? "true" : "false")
+           << ",\"source\":\"" << fix->source << "\",\"latitude\":"
+           << fix->latitude << ",\"longitude\":" << fix->longitude
+           << ",\"altitude_m\":" << fix->altitude_m
+           << ",\"hdop\":" << fix->hdop
+           << ",\"satellites_visible\":" << fix->satellites_visible
+           << ",\"satellites_used\":" << fix->satellites_used << '}';
     return output.str();
 }
 

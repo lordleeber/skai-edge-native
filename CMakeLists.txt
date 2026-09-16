@@ -104,6 +104,10 @@ target_link_libraries(skai-config PUBLIC yaml-cpp skai-logging)
 target_compile_definitions(skai-config PUBLIC
     SKAI_DEFAULT_WEB_ROOT="${PROJECT_SOURCE_DIR}/web")
 
+add_library(skai-gps src/gps/gps_source.cpp)
+target_include_directories(skai-gps PUBLIC include)
+target_link_libraries(skai-gps PUBLIC skai-config)
+
 add_library(skai-application src/application.cpp)
 target_include_directories(skai-application PUBLIC include)
 target_link_libraries(skai-application PUBLIC skai-config skai-logging Threads::Threads)
@@ -111,7 +115,8 @@ target_link_libraries(skai-application PUBLIC skai-config skai-logging Threads::
 add_library(skai-web src/web/http_server.cpp src/web/router.cpp
     src/web/static_file_handler.cpp src/web/websocket_session.cpp)
 target_include_directories(skai-web PUBLIC include)
-target_link_libraries(skai-web PUBLIC skai-application skai-events Boost::system)
+target_link_libraries(skai-web PUBLIC skai-application skai-events skai-gps
+    Boost::system)
 
 add_library(skai-gstreamer src/video/gstreamer_runtime.cpp)
 target_include_directories(skai-gstreamer PUBLIC include)

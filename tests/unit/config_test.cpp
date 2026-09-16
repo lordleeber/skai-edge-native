@@ -125,6 +125,19 @@ TEST(Config, RejectsInvalidGpsCoordinate) {
     EXPECT_NE(result.error.find("gps.latitude"), std::string::npos);
 }
 
+TEST(Config, RejectsInvalidGpsLongitudeAndSource) {
+    const auto longitude = skai::parse_config(
+        "video: {rtsp_url: 'rtsp://camera/stream'}\ngps: {longitude: -181}\n");
+    EXPECT_FALSE(longitude.ok);
+    EXPECT_NE(longitude.error.find("gps.longitude"), std::string::npos);
+
+    const auto source = skai::parse_config(
+        "video: {rtsp_url: 'rtsp://camera/stream'}\ngps: {source: serial}\n");
+    EXPECT_FALSE(source.ok);
+    EXPECT_NE(source.error.find("gps.source"), std::string::npos);
+    EXPECT_NE(source.error.find("fixed"), std::string::npos);
+}
+
 TEST(Config, RejectsUnknownLoggingLevel) {
     const auto result = skai::parse_config(
         "video: {rtsp_url: 'rtsp://camera/stream'}\nlogging: {level: loud}\n");

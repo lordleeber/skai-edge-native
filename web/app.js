@@ -47,7 +47,8 @@
   }
 
   function renderGps(data) {
-    setText("gps-state", data.available ? "Position fixed" : "Unavailable");
+    const fixed = data.available && data.valid !== false && data.source === "fixed";
+    setText("gps-state", fixed ? "Fixed / simulated" : "Unavailable");
     setText("gps-position", data.available ? `${data.latitude.toFixed(6)}, ${data.longitude.toFixed(6)}` : "Coordinates —");
   }
 

@@ -1,11 +1,13 @@
 #pragma once
 
 #include "skai/config.hpp"
+#include "skai/gps/gps_source.hpp"
 #include "skai/status.hpp"
 
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -67,6 +69,7 @@ public:
     }
 
     void configure(const Config& config) {
+        auto gps = GpsSource(config.gps).latest();
         PublicConfigDto dto;
         dto.video_transport = config.video.transport;
         dto.video_latency_ms = config.video.latency_ms;
@@ -87,6 +90,7 @@ public:
         dto.webrtc_max_peers = config.webrtc.max_peers;
         std::lock_guard<std::mutex> lock(mutex_);
         config_ = std::move(dto);
+        gps_ = std::move(gps);
         configured_ = true;
         detector_enabled_ = detector_supported_;
         ++detector_generation_;
@@ -125,6 +129,11 @@ public:
     LatestDetectionsDto latest_detections() const {
         std::lock_guard<std::mutex> lock(mutex_);
         return latest_;
+    }
+
+    std::optional<GpsFix> latest_gps() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return gps_;
     }
 
     void set_detector_enabled(bool enabled) {
@@ -170,6 +179,7 @@ private:
     std::uint64_t detector_generation_ = 0;
     std::shared_ptr<RuntimeStatus> status_;
     PublicConfigDto config_;
+    std::optional<GpsFix> gps_;
     LatestDetectionsDto latest_;
 };
 
