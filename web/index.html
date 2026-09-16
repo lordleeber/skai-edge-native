@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SKAI Edge Console</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <div>
+      <p class="eyebrow">SKAI EDGE</p>
+      <h1>Operations Console</h1>
+    </div>
+    <div class="connection"><span id="connection-dot"></span><span id="connection">Connecting</span></div>
+  </header>
+
+  <main>
+    <section class="hero panel" aria-labelledby="live-title">
+      <div class="section-heading">
+        <div><p class="eyebrow">CAMERA 01</p><h2 id="live-title">Live video</h2></div>
+        <span class="tag">Stream placeholder</span>
+      </div>
+      <div class="video-frame">
+        <video id="live-video" controls muted playsinline aria-label="Live camera video"></video>
+        <div class="video-placeholder"><span>LIVE</span><p>WebRTC stream will appear here</p></div>
+      </div>
+    </section>
+
+    <section class="metrics" aria-label="Runtime status">
+      <article class="panel"><p class="eyebrow">SYSTEM STATUS</p><strong id="system-status">Loading</strong><small id="uptime">Uptime —</small></article>
+      <article class="panel"><p class="eyebrow">RTSP STATUS</p><strong id="video-fps">— fps</strong><small id="video-state">Waiting for frames</small></article>
+      <article class="panel"><p class="eyebrow">DETECTOR STATUS</p><strong id="detector-fps">— fps</strong><small id="inference-time">Inference —</small></article>
+      <article class="panel"><p class="eyebrow">GPS STATUS</p><strong id="gps-state">Loading</strong><small id="gps-position">Coordinates —</small></article>
+    </section>
+
+    <section class="lower-grid">
+      <article class="panel">
+        <div class="section-heading"><h2>Latest detections</h2><span class="tag" id="detection-count">0 objects</span></div>
+        <div class="table-wrap"><table><thead><tr><th>Class</th><th>Confidence</th><th>Frame</th></tr></thead><tbody id="detections"><tr><td colspan="3" class="empty">No detections yet</td></tr></tbody></table></div>
+      </article>
+
+      <article class="panel">
+        <div class="section-heading"><h2>Recent alerts</h2><span class="tag">Live</span></div>
+        <ul id="alerts" class="alerts"><li class="empty">No recent alerts</li></ul>
+      </article>
+
+      <article class="panel recording">
+        <div><p class="eyebrow">RECORDING CONTROLS</p><h2 id="recording-state">Not recording</h2><p class="muted">Capture and preserve the current stream.</p></div>
+        <div class="button-row"><button id="record-start" type="button">Start recording</button><button id="record-stop" class="secondary" type="button">Stop</button></div>
+      </article>
+    </section>
+  </main>
+  <footer><span>SKAI Edge Native</span><span id="last-update">Awaiting telemetry</span></footer>
+  <script src="/app.js" defer></script>
+</body>
+</html>

@@ -147,6 +147,7 @@ void validate(const Config& config) {
     check_range(!config.web.bind.empty(), "web.bind", "must not be empty");
     check_range(config.web.port >= 1 && config.web.port <= 65535,
                 "web.port", "must be between 1 and 65535");
+    check_range(!config.web.root.empty(), "web.root", "must not be empty");
     check_range(!config.recording.directory.empty(), "recording.directory", "must not be empty");
     check_range(config.recording.segment_seconds >= 1,
                 "recording.segment_seconds", "must be positive");
@@ -198,9 +199,10 @@ Config parse(const YAML::Node& root) {
         read_scalar(section, "annotate", "detector", config.detector.annotate);
     }
     if (const auto section = root["web"]) {
-        check_keys(section, "web", {"bind", "port"});
+        check_keys(section, "web", {"bind", "port", "root"});
         read_scalar(section, "bind", "web", config.web.bind);
         read_scalar(section, "port", "web", config.web.port);
+        read_scalar(section, "root", "web", config.web.root);
     }
     if (const auto section = root["recording"]) {
         check_keys(section, "recording", {"enabled", "directory", "segment_seconds"});

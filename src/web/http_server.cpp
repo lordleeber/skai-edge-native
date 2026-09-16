@@ -1,6 +1,7 @@
 #include "skai/web/http_server.hpp"
 
 #include "skai/web/router.hpp"
+#include "static_file_handler.hpp"
 #include "websocket_session.hpp"
 
 #include <boost/asio.hpp>
@@ -33,10 +34,12 @@ public:
     HttpSession(tcp::socket socket, std::chrono::steady_clock::time_point started,
                 std::shared_ptr<RuntimeStatus> status, std::shared_ptr<ApiState> api,
                 std::shared_ptr<EventChannel> events,
+                std::shared_ptr<StaticFileHandler> static_files,
                 std::function<void(std::shared_ptr<WebSocketSession>)> register_ws,
                 std::function<void(WebSocketSession*)> unregister_ws)
         : stream_(std::move(socket)), started_(started), status_(std::move(status)),
           api_(std::move(api)), events_(std::move(events)),
+          static_files_(std::move(static_files)),
           register_ws_(std::move(register_ws)),
           unregister_ws_(std::move(unregister_ws)) {
         parser_.header_limit(header_limit);
@@ -71,6 +74,13 @@ private:
                 std::move(stream_), started_, status_, api_, events_, register_ws_,
                 unregister_ws_);
             session->run(std::move(request));
+            return;
+        }
+        const auto target = parser_.get().target();
+        const auto query = target.find('?');
+        const auto path = target.substr(0, query);
+        if (path != "/health" && path.find("/api/") != 0 && path != "/ws") {
+            send(static_files_->handle(parser_.get()));
             return;
         }
         auto status = status_->snapshot();
@@ -112,6 +122,7 @@ private:
     std::shared_ptr<RuntimeStatus> status_;
     std::shared_ptr<ApiState> api_;
     std::shared_ptr<EventChannel> events_;
+    std::shared_ptr<StaticFileHandler> static_files_;
     std::function<void(std::shared_ptr<WebSocketSession>)> register_ws_;
     std::function<void(WebSocketSession*)> unregister_ws_;
     Response response_;
@@ -121,16 +132,19 @@ private:
 
 struct HttpServer::State {
     State(Logger& logger, std::shared_ptr<RuntimeStatus> status,
-          std::shared_ptr<ApiState> api, std::shared_ptr<EventChannel> events)
+          std::shared_ptr<ApiState> api, std::shared_ptr<EventChannel> events,
+          const std::string& web_root)
         : acceptor(context), shutdown_timer(context), logger(logger),
           status(std::move(status)), api(std::move(api)),
-          events(std::move(events)) {}
+          events(std::move(events)),
+          static_files(std::make_shared<StaticFileHandler>(web_root)) {}
 
     void accept() {
         acceptor.async_accept([this](beast::error_code error, tcp::socket socket) {
             if (!error) {
                 std::make_shared<HttpSession>(std::move(socket), started, status,
                                               api, events,
+                                              static_files,
                                               [this](auto session) {
                                                   sessions.erase(std::remove_if(
                                                       sessions.begin(), sessions.end(),
@@ -162,6 +176,7 @@ struct HttpServer::State {
     std::shared_ptr<RuntimeStatus> status;
     std::shared_ptr<ApiState> api;
     std::shared_ptr<EventChannel> events;
+    std::shared_ptr<StaticFileHandler> static_files;
     std::vector<std::weak_ptr<WebSocketSession>> sessions;
     std::thread worker;
     std::chrono::steady_clock::time_point started;
@@ -199,7 +214,12 @@ HttpServer::~HttpServer() {
 bool HttpServer::initialize(const Config& config) {
     if (state_) return false;
     api_->configure(config);
-    auto next = std::make_unique<State>(logger_, status_, api_, events_);
+    auto next = std::make_unique<State>(logger_, status_, api_, events_,
+                                        config.web.root);
+    if (!next->static_files->valid()) {
+        logger_.log(LogLevel::Error, "web", next->static_files->error());
+        return false;
+    }
     beast::error_code error;
     const auto address = asio::ip::make_address(config.web.bind, error);
     if (error) {
