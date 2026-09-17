@@ -51,7 +51,8 @@ bool Application::initialize() {
                     ? "using built-in defaults" : "configuration validated");
 
     const ModuleRef ordered[] = {
-        {"web", modules_.web.get()}, {"detector", modules_.detector.get()},
+        {"storage", modules_.storage.get()}, {"web", modules_.web.get()},
+        {"detector", modules_.detector.get()},
         {"video", modules_.video.get()}, {"gps", modules_.gps.get()}};
     for (const auto& item : ordered) {
         if (!item.module) continue;

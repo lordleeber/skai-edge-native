@@ -42,6 +42,10 @@ struct RecordingConfig {
     int segment_seconds = 300;
 };
 
+struct StorageConfig {
+    std::string database_path = "/var/lib/skai-edge/skai-edge.db";
+};
+
 struct GpsConfig {
     bool enabled = true;
     std::string source = "fixed";
@@ -66,6 +70,7 @@ struct Config {
     DetectorConfig detector;
     WebConfig web;
     RecordingConfig recording;
+    StorageConfig storage;
     GpsConfig gps;
     WebrtcConfig webrtc;
     LoggingConfig logging;

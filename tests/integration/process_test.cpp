@@ -65,7 +65,8 @@ struct TemporaryConfig {
             "video: {rtsp_url: '" + url +
             "', transport: tcp, latency_ms: 50}\n"
             "detector: {engine: '/var/lib/skai-edge/models/yolo11s_fp16.engine'}\n"
-            "web: {bind: '127.0.0.1', port: " + std::to_string(web_port) + "}\n";
+            "web: {bind: '127.0.0.1', port: " + std::to_string(web_port) + "}\n"
+            "storage: {database_path: '" + path + ".db'}\n";
         if (write(fd, yaml.data(), yaml.size()) != static_cast<ssize_t>(yaml.size())) {
             path.clear();
             unlink(pattern);
@@ -74,7 +75,12 @@ struct TemporaryConfig {
     }
 
     ~TemporaryConfig() {
-        if (!path.empty()) unlink(path.c_str());
+        if (!path.empty()) {
+            unlink(path.c_str());
+            unlink((path + ".db").c_str());
+            unlink((path + ".db-shm").c_str());
+            unlink((path + ".db-wal").c_str());
+        }
     }
 };
 

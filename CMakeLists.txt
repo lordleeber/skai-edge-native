@@ -14,6 +14,7 @@ pkg_check_modules(GST_VIDEO_APP REQUIRED IMPORTED_TARGET
     gstreamer-app-1.0 gstreamer-video-1.0 gstreamer-rtsp-1.0)
 find_package(OpenCV REQUIRED COMPONENTS core imgproc)
 find_package(Boost 1.74 REQUIRED COMPONENTS system)
+find_package(SQLite3 REQUIRED)
 
 add_library(skai-core INTERFACE)
 target_include_directories(skai-core INTERFACE include)
@@ -108,6 +109,10 @@ add_library(skai-application src/application.cpp)
 target_include_directories(skai-application PUBLIC include)
 target_link_libraries(skai-application PUBLIC skai-config skai-logging Threads::Threads)
 
+add_library(skai-storage src/storage/database.cpp src/storage/alert_repository.cpp)
+target_include_directories(skai-storage PUBLIC include)
+target_link_libraries(skai-storage PUBLIC skai-application skai-gps SQLite::SQLite3)
+
 add_library(skai-gps src/gps/gps_source.cpp src/gps/gps_state.cpp
     src/gps/gps_module.cpp)
 target_include_directories(skai-gps PUBLIC include)
@@ -130,7 +135,7 @@ target_link_libraries(skai-rtsp-source PUBLIC skai-gstreamer skai-config skai-co
 
 add_executable(skai-edge src/main.cpp)
 target_link_libraries(skai-edge PRIVATE skai-cli skai-application skai-gstreamer
-    skai-rtsp-source skai-web)
+    skai-rtsp-source skai-web skai-storage)
 if(TARGET skai-inference-module)
     target_link_libraries(skai-edge PRIVATE skai-inference-module)
     target_compile_definitions(skai-edge PRIVATE SKAI_HAS_YOLO_PIPELINE=1)

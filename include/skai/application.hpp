@@ -27,6 +27,7 @@ public:
 class Application {
 public:
     struct Modules {
+        std::unique_ptr<LifecycleModule> storage;
         std::unique_ptr<LifecycleModule> web;
         std::unique_ptr<LifecycleModule> detector;
         std::unique_ptr<LifecycleModule> video;

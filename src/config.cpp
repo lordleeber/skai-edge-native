@@ -151,6 +151,8 @@ void validate(const Config& config) {
     check_range(!config.recording.directory.empty(), "recording.directory", "must not be empty");
     check_range(config.recording.segment_seconds >= 1,
                 "recording.segment_seconds", "must be positive");
+    check_range(!config.storage.database_path.empty(), "storage.database_path",
+                "must not be empty");
 
     check_range(config.gps.source == "fixed", "gps.source", "must be fixed");
     check_range(std::isfinite(config.gps.latitude) && std::abs(config.gps.latitude) <= 90,
@@ -171,7 +173,8 @@ void validate(const Config& config) {
 }
 
 Config parse(const YAML::Node& root) {
-    check_keys(root, "", {"video", "detector", "web", "recording", "gps", "webrtc", "logging"});
+    check_keys(root, "", {"video", "detector", "web", "recording", "storage",
+                           "gps", "webrtc", "logging"});
     if (!root["video"] || !root["video"].IsMap() || !root["video"]["rtsp_url"]) {
         throw std::invalid_argument("video.rtsp_url is required");
     }
@@ -209,6 +212,10 @@ Config parse(const YAML::Node& root) {
         read_scalar(section, "enabled", "recording", config.recording.enabled);
         read_scalar(section, "directory", "recording", config.recording.directory);
         read_scalar(section, "segment_seconds", "recording", config.recording.segment_seconds);
+    }
+    if (const auto section = root["storage"]) {
+        check_keys(section, "storage", {"database_path"});
+        read_scalar(section, "database_path", "storage", config.storage.database_path);
     }
     if (const auto section = root["gps"]) {
         check_keys(section, "gps", {"enabled", "source", "latitude", "longitude", "altitude_m"});
