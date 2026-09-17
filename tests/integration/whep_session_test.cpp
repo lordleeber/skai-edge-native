@@ -9,6 +9,7 @@
 #include <boost/asio.hpp>
 #include <boost/beast.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <memory>
@@ -29,11 +30,23 @@ struct BrowserOffer {
     std::shared_ptr<rtc::Track> track;
     std::string sdp;
 };
-
-BrowserOffer make_browser_offer() {
+class SlowWebRtcManager final : public skai::WebRtcManager {
+public:
+    using WebRtcManager::WebRtcManager;
+    skai::CreateSessionResult create_session(std::string_view offer) override {
+        entered = true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        auto result = WebRtcManager::create_session(offer);
+        completed = true;
+        return result;
+    }
+    std::atomic_bool entered{false}, completed{false};
+};
+BrowserOffer make_browser_offer(
+        rtc::Description::Direction direction = rtc::Description::Direction::RecvOnly) {
     BrowserOffer result;
     result.peer = std::make_shared<rtc::PeerConnection>();
-    rtc::Description::Video media("video", rtc::Description::Direction::RecvOnly);
+    rtc::Description::Video media("video", direction);
     media.addH264Codec(96);
     result.track = result.peer->addTrack(media);
 
@@ -99,17 +112,23 @@ TEST(WebRtcManager, CreatesUniqueAnswersEnforcesCapacityAndClosesSessions) {
     EXPECT_EQ(malformed.error, skai::CreateSessionError::InvalidOffer);
     EXPECT_EQ(manager.session_count(), 0U);
 
+    for (const auto direction : {rtc::Description::Direction::SendOnly,
+                                 rtc::Description::Direction::Inactive}) {
+        const auto forbidden = manager.create_session(make_browser_offer(direction).sdp);
+        EXPECT_EQ(forbidden.error, skai::CreateSessionError::InvalidOffer);
+        EXPECT_NE(forbidden.message.find("recvonly or sendrecv"), std::string::npos);
+    }
+
     auto first_offer = make_browser_offer();
-    ASSERT_FALSE(first_offer.sdp.empty());
     const auto first = manager.create_session(first_offer.sdp);
     ASSERT_TRUE(first) << first.message;
     EXPECT_EQ(first.session_id.size(), 32U);
     EXPECT_NE(first.answer_sdp.find("a=ice-ufrag:"), std::string::npos);
     EXPECT_NE(first.answer_sdp.find("a=candidate:"), std::string::npos);
-    EXPECT_NE(first.answer_sdp.find("a=end-of-candidates"), std::string::npos);
+    EXPECT_NE(first.answer_sdp.find("a=sendonly"), std::string::npos);
     EXPECT_EQ(manager.session_count(), 1U);
 
-    auto blocked_offer = make_browser_offer();
+    auto blocked_offer = make_browser_offer(rtc::Description::Direction::SendRecv);
     const auto blocked = manager.create_session(blocked_offer.sdp);
     EXPECT_EQ(blocked.error, skai::CreateSessionError::Capacity);
     EXPECT_TRUE(manager.close_session(first.session_id));
@@ -118,6 +137,7 @@ TEST(WebRtcManager, CreatesUniqueAnswersEnforcesCapacityAndClosesSessions) {
     const auto second = manager.create_session(blocked_offer.sdp);
     ASSERT_TRUE(second) << second.message;
     EXPECT_NE(second.session_id, first.session_id);
+    EXPECT_NE(second.answer_sdp.find("a=sendonly"), std::string::npos);
     manager.shutdown();
     EXPECT_EQ(manager.session_count(), 0U);
     EXPECT_EQ(manager.create_session(blocked_offer.sdp).error,
@@ -176,7 +196,6 @@ TEST(WhepHttpApi, CreatesAndDeletesSessionWithoutWebSocket) {
     const std::string location(created[http::field::location]);
     EXPECT_EQ(location.rfind("/api/v1/webrtc/sessions/", 0), 0U);
     EXPECT_EQ(manager->session_count(), 1U);
-
     http::request<http::string_body> remove{http::verb::delete_, location, 11};
     EXPECT_EQ(request(server.port(), std::move(remove)).result(), http::status::no_content);
     EXPECT_EQ(manager->session_count(), 0U);
@@ -191,5 +210,33 @@ TEST(WhepHttpApi, CreatesAndDeletesSessionWithoutWebSocket) {
     ASSERT_EQ(manager->session_count(), 1U);
     server.stop();
     server.wait();
+    EXPECT_EQ(manager->session_count(), 0U);
+}
+
+TEST(WhepHttpApi, KeepsControlPlaneResponsiveAndRollsBackAbandonedResponse) {
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    auto config = loopback_config(logger);
+    auto manager = std::make_shared<SlowWebRtcManager>(logger);
+    skai::web::HttpServer server(logger, nullptr, nullptr, nullptr, nullptr, nullptr, manager);
+    ASSERT_TRUE(server.initialize(config));
+    ASSERT_TRUE(server.start());
+    asio::io_context context;
+    tcp::socket abandoned(context);
+    abandoned.connect({asio::ip::make_address("127.0.0.1"), server.port()});
+    http::request<http::string_body> post{http::verb::post, "/api/v1/webrtc/whep", 11};
+    post.set(http::field::content_type, "application/sdp");
+    post.body() = make_browser_offer().sdp;
+    post.prepare_payload();
+    http::write(abandoned, post);
+    while (!manager->entered) std::this_thread::yield();
+    EXPECT_EQ(request(server.port(), {http::verb::get, "/health", 11}).result(),
+              http::status::ok);
+    abandoned.set_option(asio::socket_base::linger(true, 0));
+    abandoned.close();
+    while (!manager->completed) std::this_thread::yield();
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (manager->session_count() && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
     EXPECT_EQ(manager->session_count(), 0U);
 }

@@ -68,13 +68,13 @@ public:
     explicit WebRtcManager(Logger& logger,
         std::chrono::milliseconds stale_timeout = std::chrono::minutes(5),
         std::chrono::milliseconds gathering_timeout = std::chrono::seconds(5));
-    ~WebRtcManager();
+    virtual ~WebRtcManager();
 
     WebRtcManager(const WebRtcManager&) = delete;
     WebRtcManager& operator=(const WebRtcManager&) = delete;
 
     void configure(const WebrtcConfig& config);
-    CreateSessionResult create_session(std::string_view offer_sdp);
+    virtual CreateSessionResult create_session(std::string_view offer_sdp);
     bool close_session(std::string_view session_id);
     std::size_t cleanup_stale_sessions();
     std::size_t session_count() const;

@@ -61,9 +61,37 @@ WebRtcSession::~WebRtcSession() { close(); }
 
 CreateSessionResult WebRtcSession::accept_offer(
         std::string_view offer, std::chrono::milliseconds timeout) {
+    std::shared_ptr<rtc::PeerConnection> peer;
     try {
         rtc::Description description(std::string(offer), rtc::Description::Type::Offer);
-        peer_->setRemoteDescription(std::move(description));
+        auto session_direction = rtc::Description::Direction::SendRecv;
+        for (const auto& attribute : description.attributes()) {
+            if (attribute == "sendonly") session_direction = rtc::Description::Direction::SendOnly;
+            if (attribute == "recvonly") session_direction = rtc::Description::Direction::RecvOnly;
+            if (attribute == "inactive") session_direction = rtc::Description::Direction::Inactive;
+        }
+        for (int index = 0; index < description.mediaCount(); ++index) {
+            const auto entry = description.media(index);
+            const auto media = std::get_if<rtc::Description::Media*>(&entry);
+            if (!media || (*media)->isRemoved()) continue;
+            const auto direction = (*media)->direction() == rtc::Description::Direction::Unknown
+                ? session_direction : (*media)->direction();
+            if (direction == rtc::Description::Direction::SendOnly ||
+                direction == rtc::Description::Direction::Inactive) {
+                return {CreateSessionError::InvalidOffer, {}, {},
+                        "WHEP media must be recvonly or sendrecv"};
+            }
+            (*media)->setDirection(rtc::Description::Direction::RecvOnly);
+        }
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (closed_ || !peer_) {
+                return {CreateSessionError::Internal, {}, {},
+                        "PeerConnection closed while accepting the offer"};
+            }
+            peer = peer_;
+        }
+        peer->setRemoteDescription(std::move(description));
     } catch (const std::invalid_argument& error) {
         return {CreateSessionError::InvalidOffer, {}, {}, error.what()};
     } catch (const std::exception& error) {
@@ -87,10 +115,15 @@ CreateSessionResult WebRtcSession::accept_offer(
     last_activity_ = std::chrono::steady_clock::now();
     lock.unlock();
 
-    const auto local = peer_->localDescription();
+    const auto local = peer->localDescription();
     if (!local || local->type() != rtc::Description::Type::Answer) {
         return {CreateSessionError::Internal, {}, {},
                 "PeerConnection did not produce an SDP answer"};
+    }
+    lock.lock();
+    if (closed_ || failed_) {
+        return {CreateSessionError::Internal, {}, {},
+                "PeerConnection closed while creating the answer"};
     }
     return {CreateSessionError::None, id_, std::string(*local), {}};
 }
@@ -162,8 +195,16 @@ CreateSessionResult WebRtcManager::create_session(std::string_view offer_sdp) {
         close_session(session->id());
         return result;
     }
-    logger_.log(LogLevel::Info, "webrtc", "created WHEP session " + result.session_id);
-    return result;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        const auto found = sessions_.find(session->id());
+        if (stopping_ || found == sessions_.end() || found->second != session) {
+            session->close();
+            return {CreateSessionError::Disabled, {}, {}, "WebRTC is shutting down"};
+        }
+        logger_.log(LogLevel::Info, "webrtc", "created WHEP session " + result.session_id);
+        return result;
+    }
 }
 
 bool WebRtcManager::close_session(std::string_view session_id) {
