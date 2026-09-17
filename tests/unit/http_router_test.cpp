@@ -1,5 +1,6 @@
 #include "skai/web/router.hpp"
 #include "skai/api_state.hpp"
+#include "skai/gps/gps_state.hpp"
 
 #include <gtest/gtest.h>
 
@@ -68,7 +69,10 @@ TEST(HttpRouter, RejectsUnknownRoutesAndUnsupportedMethods) {
 }
 
 TEST(HttpRouter, ServesExplicitConfigDetectionAndGpsDtos) {
-    skai::ApiState api;
+    auto gps_state = std::make_shared<skai::GpsState>();
+    gps_state->update(skai::GpsFix{true, "fixed", -33.868820, 151.209290,
+                                   58.75, 0.9, 12, 10});
+    skai::ApiState api({}, gps_state);
     skai::Config config;
     config.video.transport = "udp";
     config.video.username = "secret-user";
@@ -97,8 +101,8 @@ TEST(HttpRouter, ServesExplicitConfigDetectionAndGpsDtos) {
     EXPECT_NE(gps.body().find("\"hdop\":"), std::string::npos);
     EXPECT_NE(gps.body().find("\"satellites_visible\":"), std::string::npos);
     EXPECT_NE(gps.body().find("\"satellites_used\":"), std::string::npos);
-    EXPECT_DOUBLE_EQ(json_number(gps.body(), "latitude"), config.gps.latitude);
-    EXPECT_DOUBLE_EQ(json_number(gps.body(), "longitude"), config.gps.longitude);
+    EXPECT_DOUBLE_EQ(json_number(gps.body(), "latitude"), -33.868820);
+    EXPECT_DOUBLE_EQ(json_number(gps.body(), "longitude"), 151.209290);
 
     const auto no_detections = skai::web::route_request(
         {http::verb::get, "/api/v1/detections/latest", 11}, status, api);

@@ -1,4 +1,6 @@
 #include "skai/gps/gps_source.hpp"
+#include "skai/gps/gps_module.hpp"
+#include "skai/gps/gps_state.hpp"
 
 #include <gtest/gtest.h>
 
@@ -36,4 +38,33 @@ TEST(GpsSource, DisabledConfigHasNoLatestFix) {
     skai::GpsConfig config;
     config.enabled = false;
     EXPECT_FALSE(skai::GpsSource(config).latest().has_value());
+}
+
+TEST(GpsModule, PublishesAndClearsSharedApplicationState) {
+    auto state = std::make_shared<skai::GpsState>();
+    skai::GpsModule module(state);
+    skai::Config config;
+    config.gps.latitude = 35.6762;
+    config.gps.longitude = 139.6503;
+
+    ASSERT_TRUE(module.initialize(config));
+    ASSERT_TRUE(state->latest().has_value());
+    EXPECT_DOUBLE_EQ(state->latest()->latitude, config.gps.latitude);
+    EXPECT_TRUE(module.start());
+    module.stop();
+    module.wait();
+    EXPECT_FALSE(state->latest().has_value());
+}
+
+TEST(GpsModule, DisabledSourcePublishesNoFix) {
+    auto state = std::make_shared<skai::GpsState>();
+    skai::GpsModule module(state);
+    skai::Config config;
+    config.gps.enabled = false;
+
+    ASSERT_TRUE(module.initialize(config));
+    EXPECT_FALSE(state->latest().has_value());
+    EXPECT_TRUE(module.start());
+    module.stop();
+    module.wait();
 }
