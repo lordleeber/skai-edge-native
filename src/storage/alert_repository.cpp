@@ -242,7 +242,8 @@ std::vector<AlertEvent> AlertRepository::find_recent(std::size_t limit,
 }
 
 std::vector<AlertEvent> AlertRepository::find_by_time_range(
-    std::int64_t from_ms, std::int64_t to_ms, std::string& error) const {
+    std::int64_t from_ms, std::int64_t to_ms, std::size_t limit,
+    std::string& error) const {
     std::lock_guard<std::mutex> lock(database_.mutex_);
     error.clear();
     auto* connection = database_.connection_;
@@ -252,10 +253,11 @@ std::vector<AlertEvent> AlertRepository::find_by_time_range(
         "SELECT id, timestamp_ms, latitude, longitude, altitude_m, gps_valid, gps_source, "
         "snapshot_path, frame_sequence, model_version FROM alerts "
         "WHERE timestamp_ms >= ? AND timestamp_ms <= ? "
-        "ORDER BY timestamp_ms DESC, id DESC;",
-        [from_ms, to_ms](sqlite3_stmt* statement) {
+        "ORDER BY timestamp_ms DESC, id DESC LIMIT ?;",
+        [from_ms, to_ms, limit](sqlite3_stmt* statement) {
             sqlite3_bind_int64(statement, 1, from_ms);
             sqlite3_bind_int64(statement, 2, to_ms);
+            sqlite3_bind_int(statement, 3, bounded_limit(limit));
         }, error);
 }
 

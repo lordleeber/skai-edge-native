@@ -55,6 +55,7 @@ private:
     };
 
     bool persist(const Frame& frame, AlertEvent& alert, std::string& error);
+    bool reconcile_deletions(std::string& error);
     void report_error(const std::string& error) const;
 
     std::shared_ptr<GpsState> gps_;

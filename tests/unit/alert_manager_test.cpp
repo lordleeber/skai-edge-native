@@ -192,6 +192,14 @@ TEST(AlertManager, PersistsSnapshotMetadataAndCleansUpConsistently) {
     EXPECT_EQ(stored->detections.size(), 2U);
 
     const auto snapshot = alerts[0].snapshot_path;
+    const auto tombstone = snapshot + ".deleting";
+    std::filesystem::rename(snapshot, tombstone);
+    manager.configure({rule}, temporary.child("snapshots"), "yolo11s.engine");
+    EXPECT_TRUE(std::filesystem::exists(snapshot));
+    ASSERT_TRUE(std::filesystem::create_directory(tombstone));
+    EXPECT_FALSE(manager.cleanup_oldest(0, error));
+    EXPECT_TRUE(repository->find_by_id(alerts[0].id, error));
+    std::filesystem::remove(tombstone);
     ASSERT_TRUE(manager.cleanup_oldest(0, error)) << error;
     EXPECT_FALSE(std::filesystem::exists(snapshot));
     EXPECT_FALSE(repository->find_by_id(alerts[0].id, error));

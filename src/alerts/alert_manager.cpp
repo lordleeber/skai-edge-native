@@ -4,7 +4,9 @@
 #include <opencv2/imgcodecs.hpp>
 
 #include <algorithm>
+#include <cerrno>
 #include <cmath>
+#include <cstring>
 #include <ctime>
 #include <filesystem>
 #include <iomanip>
@@ -12,6 +14,9 @@
 #include <locale>
 #include <sstream>
 #include <utility>
+
+#include <fcntl.h>
+#include <unistd.h>
 
 namespace skai {
 namespace {
@@ -44,6 +49,22 @@ bool in_roi(const Detection& detection, int width, int height,
     const double center_y = (detection.y1 + detection.y2) * 0.5 / height;
     return center_x >= roi->x1 && center_x <= roi->x2 &&
            center_y >= roi->y1 && center_y <= roi->y2;
+}
+
+bool sync_path(const std::filesystem::path& path, bool directory,
+               std::string& error) {
+    const int flags = O_RDONLY | O_CLOEXEC | (directory ? O_DIRECTORY : 0);
+    const int descriptor = open(path.c_str(), flags);
+    if (descriptor < 0) {
+        error = "could not open for sync: " + std::string(std::strerror(errno));
+        return false;
+    }
+    const int result = fsync(descriptor);
+    const int saved_errno = errno;
+    close(descriptor);
+    if (result == 0) return true;
+    error = "could not sync storage: " + std::string(std::strerror(saved_errno));
+    return false;
 }
 
 std::string event_data(const AlertEvent& event) {
@@ -95,6 +116,8 @@ void AlertManager::configure(std::vector<AlertRuleConfig> rules,
     model_version_ = std::move(model_version);
     rules_.reserve(rules.size());
     for (auto& rule : rules) rules_.push_back({std::move(rule), 0, std::nullopt});
+    std::string error;
+    if (repository_ && !reconcile_deletions(error)) report_error(error);
 }
 
 std::vector<AlertEvent> AlertManager::process(
@@ -196,6 +219,7 @@ bool AlertManager::persist(const Frame& frame, AlertEvent& alert,
         error = "could not encode alert snapshot: " + std::string(failure.what());
         return false;
     }
+    if (!sync_path(temporary_path, false, error)) return false;
     std::filesystem::rename(temporary_path, final_path, filesystem_error);
     if (filesystem_error) {
         std::error_code ignored;
@@ -203,6 +227,7 @@ bool AlertManager::persist(const Frame& frame, AlertEvent& alert,
         error = "could not publish alert snapshot: " + filesystem_error.message();
         return false;
     }
+    if (!sync_path(directory, true, error)) return false;
     alert.snapshot_path = final_path.string();
     std::string database_error;
     if (repository_->insert(alert, database_error)) return true;
@@ -225,18 +250,59 @@ bool AlertManager::cleanup_oldest(std::size_t keep, std::string& error) {
             error = "snapshot path is outside alert directory";
             return false;
         }
+        const auto tombstone = path.string() + ".deleting";
+        std::error_code filesystem_error;
+        std::filesystem::rename(path, tombstone, filesystem_error);
+        if (filesystem_error || !sync_path(path.parent_path(), true, error)) {
+            if (error.empty()) error = "could not quarantine alert snapshot: " +
+                                       filesystem_error.message();
+            return false;
+        }
         if (!repository_->remove(alert.id, error)) {
+            std::filesystem::rename(tombstone, path, filesystem_error);
+            std::string ignored;
+            sync_path(path.parent_path(), true, ignored);
             if (error.empty()) error = "alert disappeared during cleanup";
             return false;
         }
-        std::error_code filesystem_error;
-        if (!std::filesystem::remove(path, filesystem_error) || filesystem_error) {
+        if (!std::filesystem::remove(tombstone, filesystem_error) || filesystem_error) {
             error = "could not remove alert snapshot: " +
                     (filesystem_error ? filesystem_error.message() : "file is missing");
             return false;
         }
+        if (!sync_path(path.parent_path(), true, error)) return false;
     }
     return true;
+}
+
+bool AlertManager::reconcile_deletions(std::string& error) {
+    error.clear();
+    std::error_code filesystem_error;
+    const bool exists = std::filesystem::exists(snapshot_directory_, filesystem_error);
+    if (filesystem_error) {
+        error = "could not inspect alert directory: " + filesystem_error.message();
+        return false;
+    }
+    if (!exists) return true;
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(
+             snapshot_directory_, filesystem_error)) {
+        if (filesystem_error) break;
+        const auto path = entry.path();
+        const bool regular = entry.is_regular_file(filesystem_error);
+        if (filesystem_error) break;
+        if (!regular || path.extension() != ".deleting") continue;
+        auto final_path = path;
+        final_path.replace_extension();
+        const auto id = final_path.stem().string();
+        const auto alert = repository_->find_by_id(id, error);
+        if (!error.empty()) return false;
+        if (alert) std::filesystem::rename(path, final_path, filesystem_error);
+        else std::filesystem::remove(path, filesystem_error);
+        if (filesystem_error || !sync_path(path.parent_path(), true, error)) break;
+    }
+    if (filesystem_error) error = "could not reconcile alert cleanup: " +
+                                  filesystem_error.message();
+    return error.empty();
 }
 
 void AlertManager::report_error(const std::string& error) const {

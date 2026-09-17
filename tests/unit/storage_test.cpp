@@ -196,7 +196,7 @@ TEST(AlertRepository, FiltersAndRemovesOldestAlerts) {
     ASSERT_TRUE(repository.insert(first, error)) << error;
     ASSERT_TRUE(repository.insert(second, error)) << error;
 
-    const auto range = repository.find_by_time_range(1500, 2500, error);
+    const auto range = repository.find_by_time_range(0, 2500, 1, error);
     ASSERT_TRUE(error.empty()) << error;
     ASSERT_EQ(range.size(), 1U);
     EXPECT_EQ(range[0].id, "second");
@@ -216,11 +216,13 @@ TEST(HttpRouter, ServesPersistedAlertQueries) {
     std::string error;
     ASSERT_TRUE(database.open(error)) << error;
     skai::AlertRepository repository(database);
-    ASSERT_TRUE(repository.insert(make_alert("alert-1", 1700), error)) << error;
+    auto alert = make_alert("alert-1", 1700);
+    alert.detections[0].class_name = "traffic light";
+    ASSERT_TRUE(repository.insert(alert, error)) << error;
     skai::ApiState api;
 
     const auto list = skai::web::route_request(
-        {boost::beast::http::verb::get, "/api/v1/alerts?class=person", 11},
+        {boost::beast::http::verb::get, "/api/v1/alerts?class=traffic%20light", 11},
         {}, api, &repository);
     EXPECT_EQ(list.result(), boost::beast::http::status::ok);
     EXPECT_NE(list.body().find("\"id\":\"alert-1\""), std::string::npos);
@@ -233,4 +235,8 @@ TEST(HttpRouter, ServesPersistedAlertQueries) {
         {boost::beast::http::verb::get, "/api/v1/alerts/missing", 11},
         {}, api, &repository);
     EXPECT_EQ(missing.result(), boost::beast::http::status::not_found);
+    const auto malformed = skai::web::route_request(
+        {boost::beast::http::verb::get, "/api/v1/alerts?class=bad%2", 11},
+        {}, api, &repository);
+    EXPECT_EQ(malformed.result(), boost::beast::http::status::bad_request);
 }

@@ -13,6 +13,8 @@
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <condition_variable>
+#include <mutex>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -98,8 +100,12 @@ TEST(AnnotationDetector, RtspPipelinePublishesAnnotationsAndHonorsDisableFlag) {
     auto api = std::make_shared<skai::ApiState>(status);
     auto events = std::make_shared<skai::EventChannel>();
     std::vector<std::string> published_events;
+    std::mutex events_mutex;
+    std::condition_variable event_available;
     events->subscribe([&](const std::string& event) {
+        std::lock_guard<std::mutex> lock(events_mutex);
         published_events.push_back(event);
+        event_available.notify_all();
     });
     auto alerts = std::make_shared<skai::AlertManager>(nullptr, events);
     status->set_detector_expected(true);
@@ -121,6 +127,13 @@ TEST(AnnotationDetector, RtspPipelinePublishesAnnotationsAndHonorsDisableFlag) {
     ASSERT_TRUE(output.pop_for(std::chrono::seconds(2)).has_value()) << logs.str();
     ASSERT_TRUE(input.push(reference_frame()));
     ASSERT_TRUE(output.pop_for(std::chrono::seconds(2)).has_value()) << logs.str();
+    std::unique_lock<std::mutex> events_lock(events_mutex);
+    ASSERT_TRUE(event_available.wait_for(events_lock, std::chrono::seconds(2), [&] {
+        return std::any_of(published_events.begin(), published_events.end(),
+                           [](const auto& event) {
+            return event.find("\"type\":\"alert\"") != std::string::npos;
+        });
+    }));
     const auto alert_event = std::find_if(
         published_events.begin(), published_events.end(), [](const auto& event) {
             return event.find("\"type\":\"alert\"") != std::string::npos;
@@ -128,7 +141,9 @@ TEST(AnnotationDetector, RtspPipelinePublishesAnnotationsAndHonorsDisableFlag) {
     ASSERT_NE(alert_event, published_events.end());
     EXPECT_NE(alert_event->find("\"class_name\":\"umbrella\""),
               std::string::npos);
+    events_lock.unlock();
     const auto alert_count = [&] {
+        std::lock_guard<std::mutex> lock(events_mutex);
         return std::count_if(published_events.begin(), published_events.end(),
                              [](const auto& event) {
             return event.find("\"type\":\"alert\"") != std::string::npos;
@@ -146,7 +161,14 @@ TEST(AnnotationDetector, RtspPipelinePublishesAnnotationsAndHonorsDisableFlag) {
     EXPECT_EQ(alert_count(), alerts_before_toggle);
     ASSERT_TRUE(input.push(reference_frame()));
     ASSERT_TRUE(output.pop_for(std::chrono::seconds(2)).has_value()) << logs.str();
-    EXPECT_EQ(alert_count(), alerts_before_toggle + 1);
+    events_lock.lock();
+    EXPECT_TRUE(event_available.wait_for(events_lock, std::chrono::seconds(2), [&] {
+        return std::count_if(published_events.begin(), published_events.end(),
+                             [](const auto& event) {
+            return event.find("\"type\":\"alert\"") != std::string::npos;
+        }) == alerts_before_toggle + 1;
+    }));
+    events_lock.unlock();
     skai::RtspSource source(input, logger, skai::DecodeMode::Auto, true, status);
     skai::VideoConfig video;
     video.rtsp_url = server.url();

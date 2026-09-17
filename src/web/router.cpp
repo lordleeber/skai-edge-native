@@ -138,19 +138,34 @@ std::string alerts_json(const std::vector<AlertEvent>& alerts) {
     return result + "]}\n";
 }
 
-std::unordered_map<std::string, std::string> query_parameters(
-    const std::string& target) {
-    std::unordered_map<std::string, std::string> values;
+bool decode_component(const std::string& encoded, std::string& decoded) {
+    decoded.clear();
+    for (std::size_t i = 0; i < encoded.size(); ++i) {
+        if (encoded[i] != '%') { decoded.push_back(encoded[i]); continue; }
+        if (i + 2 >= encoded.size()) return false;
+        unsigned value = 0;
+        const auto parsed = std::from_chars(encoded.data() + i + 1,
+                                            encoded.data() + i + 3, value, 16);
+        if (parsed.ec != std::errc{} || parsed.ptr != encoded.data() + i + 3) return false;
+        decoded.push_back(static_cast<char>(value));
+        i += 2;
+    }
+    return true;
+}
+
+bool query_parameters(const std::string& target,
+                      std::unordered_map<std::string, std::string>& values) {
     auto position = target.find('?');
     while (position != std::string::npos && position + 1 < target.size()) {
         const auto end = target.find('&', position + 1);
         const auto equal = target.find('=', position + 1);
         if (equal == std::string::npos || (end != std::string::npos && equal > end)) break;
-        values[target.substr(position + 1, equal - position - 1)] =
-            target.substr(equal + 1, end - equal - 1);
+        std::string value;
+        if (!decode_component(target.substr(equal + 1, end - equal - 1), value)) return false;
+        values[target.substr(position + 1, equal - position - 1)] = std::move(value);
         position = end;
     }
-    return values;
+    return true;
 }
 
 template <typename Number>
@@ -248,7 +263,11 @@ Response route_request(const Request& request, const StatusSnapshot& status,
                                              "{\"error\":\"alert not found\"}\n");
             return json_response(http::status::ok, request.version(), alert_json(*alert) + "\n");
         }
-        const auto parameters = query_parameters(target);
+        std::unordered_map<std::string, std::string> parameters;
+        if (!query_parameters(target, parameters)) {
+            return json_response(http::status::bad_request, request.version(),
+                                 "{\"error\":\"invalid query encoding\"}\n");
+        }
         std::size_t limit = 100;
         if (const auto it = parameters.find("limit"); it != parameters.end()) {
             if (!parse_number(it->second, limit) || limit == 0 || limit > 1000) {
@@ -271,8 +290,7 @@ Response route_request(const Request& request, const StatusSnapshot& status,
                 return json_response(http::status::bad_request, request.version(),
                                      "{\"error\":\"invalid time range\"}\n");
             }
-            items = alerts->find_by_time_range(from_ms, to_ms, error);
-            if (items.size() > limit) items.resize(limit);
+            items = alerts->find_by_time_range(from_ms, to_ms, limit, error);
         } else if (class_name != parameters.end()) {
             items = alerts->find_by_class(class_name->second, limit, error);
         } else items = alerts->find_recent(limit, error);
