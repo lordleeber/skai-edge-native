@@ -79,9 +79,11 @@ std::string serialize_h264_encoder_metrics(const H264EncoderMetrics& metrics) {
     json << "{\"frames_submitted\":" << metrics.frames_submitted
          << ",\"frames_rejected\":" << metrics.frames_rejected
          << ",\"frames_dropped\":" << metrics.frames_dropped
+         << ",\"appsrc_pressure_dropped\":" << metrics.appsrc_pressure_dropped
          << ",\"access_units_encoded\":" << metrics.access_units_encoded
          << ",\"bytes_encoded\":" << metrics.bytes_encoded
          << ",\"access_units_dropped\":" << metrics.access_units_dropped
+         << ",\"pipeline_rebuilds\":" << metrics.pipeline_rebuilds
          << ",\"last_access_unit_age_ms\":" << metrics.last_access_unit_age_ms
          << ",\"last_error\":\"" << json_escape(metrics.last_error) << "\"}";
     return json.str();
@@ -89,8 +91,8 @@ std::string serialize_h264_encoder_metrics(const H264EncoderMetrics& metrics) {
 
 H264Encoder::H264Encoder(BoundedQueue<Frame>& input,
                          BoundedQueue<EncodedAccessUnit>& output,
-                         Logger& logger)
-    : input_(input), output_(output), logger_(logger) {}
+                         Logger& logger, std::shared_ptr<RuntimeStatus> status)
+    : input_(input), output_(output), logger_(logger), status_(std::move(status)) {}
 
 H264Encoder::~H264Encoder() { stop(); }
 
@@ -113,12 +115,16 @@ bool H264Encoder::start(const H264EncoderConfig& config, std::string& error) {
     config_ = config;
     width_ = 0;
     height_ = 0;
+    timestamp_epoch_ = {};
+    last_input_pts_ns_ = 0;
+    has_input_pts_ = false;
     {
         std::lock_guard<std::mutex> lock(metrics_mutex_);
         metrics_ = {};
         last_access_unit_time_ = {};
     }
     output_.reset();
+    publish_metrics();
     running_ = true;
     try {
         worker_ = std::thread(&H264Encoder::run, this);
@@ -137,12 +143,13 @@ void H264Encoder::stop() noexcept {
     request_stop();
     if (worker_.joinable()) worker_.join();
     output_.shutdown();
+    publish_metrics();
 }
 
 H264EncoderMetrics H264Encoder::metrics() const {
     std::lock_guard<std::mutex> lock(metrics_mutex_);
     auto snapshot = metrics_;
-    snapshot.frames_dropped = input_.stats().dropped;
+    snapshot.frames_dropped = input_.stats().dropped + snapshot.appsrc_pressure_dropped;
     snapshot.access_units_dropped = output_.stats().dropped;
     if (last_access_unit_time_ != std::chrono::steady_clock::time_point{}) {
         snapshot.last_access_unit_age_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -178,7 +185,8 @@ bool H264Encoder::open_pipeline(const Frame& first_frame, std::string& error) {
         "video/x-h264", "stream-format", G_TYPE_STRING, "byte-stream", "alignment",
         G_TYPE_STRING, "au", nullptr);
     g_object_set(source, "caps", raw_caps, "is-live", TRUE, "format", GST_FORMAT_TIME,
-                 "block", FALSE, "max-buffers", 2ULL, "leaky-type", 2, nullptr);
+                 "block", FALSE, "max-buffers", 2ULL, "max-bytes", 0ULL,
+                 "max-time", 0ULL, "leaky-type", 0, nullptr);
     g_object_set(encoder, "bitrate", config_.bitrate_kbps, "key-int-max",
                  config_.keyframe_interval, "speed-preset", 1, "tune", 4, nullptr);
     g_object_set(parser, "config-interval", -1, nullptr);
@@ -203,6 +211,11 @@ bool H264Encoder::open_pipeline(const Frame& first_frame, std::string& error) {
     appsink_ = sink;
     width_ = first_frame.width;
     height_ = first_frame.height;
+    timestamp_epoch_ = first_frame.timestamp == std::chrono::steady_clock::time_point{}
+                           ? std::chrono::steady_clock::now()
+                           : first_frame.timestamp;
+    last_input_pts_ns_ = 0;
+    has_input_pts_ = false;
     // An appsrc pipeline cannot preroll until an input buffer arrives.  Request
     // PLAYING here and let submit_frame provide that first buffer immediately,
     // rather than waiting for Pipeline::start's state-change timeout.
@@ -228,15 +241,24 @@ void H264Encoder::close_pipeline() noexcept {
     }
     appsrc_ = nullptr;
     appsink_ = nullptr;
+    timestamp_epoch_ = {};
+    has_input_pts_ = false;
     if (pipeline_) pipeline_->stop();
     pipeline_.reset();
 }
 
-bool H264Encoder::submit_frame(const Frame& frame, std::string& error) {
+bool H264Encoder::submit_frame(const Frame& frame, bool& dropped, std::string& error) {
+    dropped = false;
     if (!valid_frame(frame, error)) return false;
     if (frame.width != width_ || frame.height != height_) {
         error = "encoder frame dimensions changed after the pipeline started";
         return false;
+    }
+    guint64 queued_buffers = 0;
+    g_object_get(appsrc_, "current-level-buffers", &queued_buffers, nullptr);
+    if (queued_buffers >= 2) {
+        dropped = true;
+        return true;
     }
     const auto row_bytes = static_cast<std::size_t>(frame.width) * 3;
     const auto size = row_bytes * static_cast<std::size_t>(frame.height);
@@ -257,7 +279,21 @@ bool H264Encoder::submit_frame(const Frame& frame, std::string& error) {
                     row_bytes);
     }
     gst_buffer_unmap(buffer, &mapped);
-    GST_BUFFER_PTS(buffer) = frame.pts_ns;
+    const auto capture_time = frame.timestamp == std::chrono::steady_clock::time_point{}
+                                  ? std::chrono::steady_clock::now()
+                                  : frame.timestamp;
+    const auto elapsed = capture_time > timestamp_epoch_
+                             ? std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                   capture_time - timestamp_epoch_).count()
+                             : 0;
+    auto pts_ns = static_cast<std::uint64_t>(elapsed);
+    if (has_input_pts_ && pts_ns <= last_input_pts_ns_) {
+        pts_ns = last_input_pts_ns_ + 1;
+    }
+    last_input_pts_ns_ = pts_ns;
+    has_input_pts_ = true;
+    GST_BUFFER_PTS(buffer) = pts_ns;
+    GST_BUFFER_DTS(buffer) = GST_CLOCK_TIME_NONE;
     GST_BUFFER_DURATION(buffer) = gst_util_uint64_scale_int(
         GST_SECOND, config_.fps_den, config_.fps_num);
     GST_BUFFER_OFFSET(buffer) = frame.sequence;
@@ -290,6 +326,7 @@ bool H264Encoder::capture_sample(GstSample* sample) {
         metrics_.bytes_encoded += mapped.size;
         last_access_unit_time_ = std::chrono::steady_clock::now();
     }
+    publish_metrics();
     return true;
 }
 
@@ -321,6 +358,23 @@ void H264Encoder::set_error(const std::string& error) {
         metrics_.last_error = error;
     }
     logger_.log(LogLevel::Error, "encoder", error);
+    publish_metrics();
+}
+
+void H264Encoder::publish_metrics() {
+    if (!status_) return;
+    const auto metrics_snapshot = metrics();
+    RuntimeStatusSnapshot::Encoder encoder;
+    encoder.frames_submitted = metrics_snapshot.frames_submitted;
+    encoder.frames_rejected = metrics_snapshot.frames_rejected;
+    encoder.frames_dropped = metrics_snapshot.frames_dropped;
+    encoder.appsrc_pressure_dropped = metrics_snapshot.appsrc_pressure_dropped;
+    encoder.access_units_encoded = metrics_snapshot.access_units_encoded;
+    encoder.bytes_encoded = metrics_snapshot.bytes_encoded;
+    encoder.access_units_dropped = metrics_snapshot.access_units_dropped;
+    encoder.last_access_unit_age_ms = metrics_snapshot.last_access_unit_age_ms;
+    encoder.last_error = metrics_snapshot.last_error;
+    status_->update_encoder(encoder);
 }
 
 void H264Encoder::run() noexcept {
@@ -328,6 +382,7 @@ void H264Encoder::run() noexcept {
         auto frame = input_.pop_for(std::chrono::milliseconds(25));
         if (!frame) {
             if (input_.is_shutdown()) break;
+            publish_metrics();
             continue;
         }
         std::string error;
@@ -346,6 +401,15 @@ void H264Encoder::run() noexcept {
                 close_pipeline();
             }
         }
+        if (pipeline_ && (frame->width != width_ || frame->height != height_)) {
+            close_pipeline();
+            {
+                std::lock_guard<std::mutex> lock(metrics_mutex_);
+                ++metrics_.pipeline_rebuilds;
+                metrics_.last_error.clear();
+            }
+            publish_metrics();
+        }
         if (!pipeline_ && !open_pipeline(*frame, error)) {
             {
                 std::lock_guard<std::mutex> lock(metrics_mutex_);
@@ -354,7 +418,8 @@ void H264Encoder::run() noexcept {
             set_error(error);
             continue;
         }
-        if (!submit_frame(*frame, error)) {
+        bool dropped = false;
+        if (!submit_frame(*frame, dropped, error)) {
             {
                 std::lock_guard<std::mutex> lock(metrics_mutex_);
                 ++metrics_.frames_rejected;
@@ -362,8 +427,12 @@ void H264Encoder::run() noexcept {
             set_error(error);
             continue;
         }
-        std::lock_guard<std::mutex> lock(metrics_mutex_);
-        ++metrics_.frames_submitted;
+        {
+            std::lock_guard<std::mutex> lock(metrics_mutex_);
+            if (dropped) ++metrics_.appsrc_pressure_dropped;
+            else ++metrics_.frames_submitted;
+        }
+        publish_metrics();
     }
     close_pipeline();
 }

@@ -177,6 +177,18 @@ std::string WebSocketSession::status_data() const {
     output << ",\"last_inference_ms\":";
     if (snapshot.last_inference_ms) output << *snapshot.last_inference_ms;
     else output << "null";
+    output << ",\"encoder\":";
+    if (!snapshot.encoder) {
+        output << "null";
+    } else {
+        const auto& encoder = *snapshot.encoder;
+        output << "{\"frames_submitted\":" << encoder.frames_submitted
+               << ",\"frames_dropped\":" << encoder.frames_dropped
+               << ",\"access_units_encoded\":" << encoder.access_units_encoded
+               << ",\"access_units_dropped\":" << encoder.access_units_dropped
+               << ",\"last_access_unit_age_ms\":"
+               << encoder.last_access_unit_age_ms << '}';
+    }
     output << '}';
     return output.str();
 }

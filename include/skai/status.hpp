@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <mutex>
 #include <optional>
 #include <string>
 
@@ -13,6 +14,18 @@ struct RuntimeStatusSnapshot {
     std::optional<double> video_fps;
     std::optional<double> detector_fps;
     std::optional<double> last_inference_ms;
+    struct Encoder {
+        std::uint64_t frames_submitted = 0;
+        std::uint64_t frames_rejected = 0;
+        std::uint64_t frames_dropped = 0;
+        std::uint64_t appsrc_pressure_dropped = 0;
+        std::uint64_t access_units_encoded = 0;
+        std::uint64_t bytes_encoded = 0;
+        std::uint64_t access_units_dropped = 0;
+        std::int64_t last_access_unit_age_ms = -1;
+        std::string last_error;
+    };
+    std::optional<Encoder> encoder;
 };
 
 // Lock-free cross-module metrics for the control plane. Writers publish a
@@ -50,6 +63,24 @@ public:
         detector_fps_available_.store(false);
     }
 
+    void update_encoder(const RuntimeStatusSnapshot::Encoder& encoder) {
+        encoder_frames_submitted_.store(encoder.frames_submitted);
+        encoder_frames_rejected_.store(encoder.frames_rejected);
+        encoder_frames_dropped_.store(encoder.frames_dropped);
+        encoder_appsrc_pressure_dropped_.store(encoder.appsrc_pressure_dropped);
+        encoder_access_units_encoded_.store(encoder.access_units_encoded);
+        encoder_bytes_encoded_.store(encoder.bytes_encoded);
+        encoder_access_units_dropped_.store(encoder.access_units_dropped);
+        encoder_last_access_unit_age_ms_.store(encoder.last_access_unit_age_ms);
+        {
+            std::lock_guard<std::mutex> lock(encoder_error_mutex_);
+            encoder_last_error_ = encoder.last_error;
+        }
+        encoder_available_.store(true, std::memory_order_release);
+    }
+
+    void clear_encoder() noexcept { encoder_available_.store(false); }
+
     RuntimeStatusSnapshot snapshot() const {
         RuntimeStatusSnapshot result;
         const bool running = running_.load();
@@ -66,6 +97,22 @@ public:
             }
             result.last_inference_ms = inference_ms_.load();
         }
+        if (encoder_available_.load(std::memory_order_acquire)) {
+            RuntimeStatusSnapshot::Encoder encoder;
+            encoder.frames_submitted = encoder_frames_submitted_.load();
+            encoder.frames_rejected = encoder_frames_rejected_.load();
+            encoder.frames_dropped = encoder_frames_dropped_.load();
+            encoder.appsrc_pressure_dropped = encoder_appsrc_pressure_dropped_.load();
+            encoder.access_units_encoded = encoder_access_units_encoded_.load();
+            encoder.bytes_encoded = encoder_bytes_encoded_.load();
+            encoder.access_units_dropped = encoder_access_units_dropped_.load();
+            encoder.last_access_unit_age_ms = encoder_last_access_unit_age_ms_.load();
+            {
+                std::lock_guard<std::mutex> lock(encoder_error_mutex_);
+                encoder.last_error = encoder_last_error_;
+            }
+            result.encoder = std::move(encoder);
+        }
         return result;
     }
 
@@ -78,6 +125,17 @@ private:
     std::atomic<double> video_fps_{0.0};
     std::atomic<double> detector_fps_{0.0};
     std::atomic<double> inference_ms_{0.0};
+    std::atomic<bool> encoder_available_{false};
+    std::atomic<std::uint64_t> encoder_frames_submitted_{0};
+    std::atomic<std::uint64_t> encoder_frames_rejected_{0};
+    std::atomic<std::uint64_t> encoder_frames_dropped_{0};
+    std::atomic<std::uint64_t> encoder_appsrc_pressure_dropped_{0};
+    std::atomic<std::uint64_t> encoder_access_units_encoded_{0};
+    std::atomic<std::uint64_t> encoder_bytes_encoded_{0};
+    std::atomic<std::uint64_t> encoder_access_units_dropped_{0};
+    std::atomic<std::int64_t> encoder_last_access_unit_age_ms_{-1};
+    mutable std::mutex encoder_error_mutex_;
+    std::string encoder_last_error_;
 };
 
 } // namespace skai

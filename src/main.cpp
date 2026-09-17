@@ -7,6 +7,7 @@
 #include "skai/storage/database.hpp"
 #include "skai/storage/alert_repository.hpp"
 #include "skai/video/gstreamer_runtime.hpp"
+#include "skai/video/h264_encoder_module.hpp"
 #include "skai/video/rtsp_video_module.hpp"
 #include "skai/video/rtsp_source.hpp"
 #include "skai/web/http_server.hpp"
@@ -90,6 +91,7 @@ int main(int argc, char* argv[]) {
 
     skai::BoundedQueue<skai::Frame> inference_frames(2);
     skai::BoundedQueue<skai::Frame> annotated_frames(2);
+    skai::BoundedQueue<skai::EncodedAccessUnit> encoded_access_units(120);
     auto runtime_status = std::make_shared<skai::RuntimeStatus>();
     auto gps_state = std::make_shared<skai::GpsState>();
     auto api_state = std::make_shared<skai::ApiState>(runtime_status, gps_state);
@@ -106,6 +108,8 @@ int main(int argc, char* argv[]) {
     modules.detector = std::make_unique<skai::YoloInferenceModule>(
         inference_frames, annotated_frames, logger, runtime_status, api_state,
         events, alert_manager);
+    modules.encoder = std::make_unique<skai::H264EncoderModule>(
+        annotated_frames, encoded_access_units, logger, runtime_status);
 #else
     api_state->set_detector_supported(false);
     logger.log(skai::LogLevel::Warning, "detector",

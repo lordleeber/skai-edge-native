@@ -2,6 +2,7 @@
 
 #include "skai/core/bounded_queue.hpp"
 #include "skai/logging.hpp"
+#include "skai/status.hpp"
 #include "skai/video/frame.hpp"
 #include "skai/video/gstreamer_runtime.hpp"
 
@@ -40,9 +41,11 @@ struct H264EncoderMetrics {
     std::uint64_t frames_submitted = 0;
     std::uint64_t frames_rejected = 0;
     std::uint64_t frames_dropped = 0;
+    std::uint64_t appsrc_pressure_dropped = 0;
     std::uint64_t access_units_encoded = 0;
     std::uint64_t bytes_encoded = 0;
     std::uint64_t access_units_dropped = 0;
+    std::uint64_t pipeline_rebuilds = 0;
     std::int64_t last_access_unit_age_ms = -1;
     std::string last_error;
 };
@@ -55,7 +58,7 @@ std::string serialize_h264_encoder_metrics(const H264EncoderMetrics& metrics);
 class H264Encoder {
 public:
     H264Encoder(BoundedQueue<Frame>& input, BoundedQueue<EncodedAccessUnit>& output,
-                Logger& logger);
+                Logger& logger, std::shared_ptr<RuntimeStatus> status = {});
     ~H264Encoder();
 
     H264Encoder(const H264Encoder&) = delete;
@@ -72,16 +75,18 @@ private:
     static GstFlowReturn on_new_sample(GstAppSink* sink, gpointer user_data);
     bool open_pipeline(const Frame& first_frame, std::string& error);
     void close_pipeline() noexcept;
-    bool submit_frame(const Frame& frame, std::string& error);
+    bool submit_frame(const Frame& frame, bool& dropped, std::string& error);
     bool capture_sample(GstSample* sample);
     void run() noexcept;
     void set_error(const std::string& error);
+    void publish_metrics();
     bool begin_callback();
     void end_callback();
 
     BoundedQueue<Frame>& input_;
     BoundedQueue<EncodedAccessUnit>& output_;
     Logger& logger_;
+    std::shared_ptr<RuntimeStatus> status_;
     H264EncoderConfig config_;
     std::unique_ptr<gst::Pipeline> pipeline_;
     GstElement* appsrc_ = nullptr; // borrowed from pipeline_; worker-only
@@ -97,6 +102,9 @@ private:
     std::chrono::steady_clock::time_point last_access_unit_time_{};
     int width_ = 0;
     int height_ = 0;
+    std::chrono::steady_clock::time_point timestamp_epoch_{};
+    std::uint64_t last_input_pts_ns_ = 0;
+    bool has_input_pts_ = false;
 };
 
 } // namespace skai

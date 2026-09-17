@@ -52,7 +52,7 @@ bool Application::initialize() {
 
     const ModuleRef ordered[] = {
         {"storage", modules_.storage.get()}, {"web", modules_.web.get()},
-        {"detector", modules_.detector.get()},
+        {"encoder", modules_.encoder.get()}, {"detector", modules_.detector.get()},
         {"video", modules_.video.get()}, {"gps", modules_.gps.get()}};
     for (const auto& item : ordered) {
         if (!item.module) continue;
