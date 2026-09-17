@@ -1,11 +1,13 @@
 #pragma once
 
 #include "skai/config.hpp"
+#include "skai/gps/gps_state.hpp"
 #include "skai/status.hpp"
 
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -25,9 +27,6 @@ struct PublicConfigDto {
     int recording_segment_seconds = 0;
     bool gps_enabled = false;
     std::string gps_source;
-    double gps_latitude = 0.0;
-    double gps_longitude = 0.0;
-    double gps_altitude_m = 0.0;
     bool webrtc_enabled = false;
     int webrtc_max_peers = 0;
 };
@@ -57,8 +56,11 @@ struct DetectorPermit {
 // engine paths, filesystem paths, and internal module objects.
 class ApiState {
 public:
-    explicit ApiState(std::shared_ptr<RuntimeStatus> status = {})
-        : status_(std::move(status)) {}
+    explicit ApiState(std::shared_ptr<RuntimeStatus> status = {},
+                      std::shared_ptr<GpsState> gps_state = {})
+        : status_(std::move(status)),
+          gps_state_(gps_state ? std::move(gps_state)
+                               : std::make_shared<GpsState>()) {}
 
     void bind_runtime_status(std::shared_ptr<RuntimeStatus> status) {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -80,9 +82,6 @@ public:
         dto.recording_segment_seconds = config.recording.segment_seconds;
         dto.gps_enabled = config.gps.enabled;
         dto.gps_source = config.gps.source;
-        dto.gps_latitude = config.gps.latitude;
-        dto.gps_longitude = config.gps.longitude;
-        dto.gps_altitude_m = config.gps.altitude_m;
         dto.webrtc_enabled = config.webrtc.enabled;
         dto.webrtc_max_peers = config.webrtc.max_peers;
         std::lock_guard<std::mutex> lock(mutex_);
@@ -127,6 +126,10 @@ public:
         return latest_;
     }
 
+    std::optional<GpsFix> latest_gps() const {
+        return gps_state_->latest();
+    }
+
     void set_detector_enabled(bool enabled) {
         std::lock_guard<std::mutex> lock(mutex_);
         detector_enabled_ = enabled && detector_supported_;
@@ -169,6 +172,7 @@ private:
     bool detector_supported_ = true;
     std::uint64_t detector_generation_ = 0;
     std::shared_ptr<RuntimeStatus> status_;
+    std::shared_ptr<GpsState> gps_state_;
     PublicConfigDto config_;
     LatestDetectionsDto latest_;
 };

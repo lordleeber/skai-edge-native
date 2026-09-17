@@ -1,5 +1,7 @@
 #include "skai/web/http_server.hpp"
 #include "skai/events.hpp"
+#include "skai/gps/gps_source.hpp"
+#include "skai/gps/gps_state.hpp"
 #include "skai/status.hpp"
 
 #include <gtest/gtest.h>
@@ -277,7 +279,9 @@ TEST(HttpServer, WebSocketBroadcastsEventsToMultipleClients) {
     std::ostringstream logs;
     skai::Logger logger(logs);
     auto status = std::make_shared<skai::RuntimeStatus>();
-    auto api = std::make_shared<skai::ApiState>();
+    auto gps_state = std::make_shared<skai::GpsState>();
+    gps_state->update(skai::GpsSource(skai::GpsConfig{}).latest());
+    auto api = std::make_shared<skai::ApiState>(nullptr, gps_state);
     auto events = std::make_shared<skai::EventChannel>();
     logger.set_error_sink([events](const std::string& module,
                                    const std::string& message) {
@@ -301,8 +305,10 @@ TEST(HttpServer, WebSocketBroadcastsEventsToMultipleClients) {
     for (auto* client : {&first, &second}) {
         EXPECT_NE(read_websocket(*client).find("\"type\":\"status\""),
                   std::string::npos);
-        EXPECT_NE(read_websocket(*client).find("\"type\":\"gps\""),
-                  std::string::npos);
+        const auto gps = read_websocket(*client);
+        EXPECT_NE(gps.find("\"type\":\"gps\""), std::string::npos);
+        EXPECT_NE(gps.find("\"source\":\"fixed\""), std::string::npos);
+        EXPECT_NE(gps.find("\"valid\":true"), std::string::npos);
     }
 
     events->publish(skai::EventType::Alert,

@@ -55,7 +55,8 @@ function createHarness() {
   const snapshots = {
     status: {status: "running", uptime_s: 10, video: {fps: 30},
       detector: {enabled: false, fps: null, last_inference_ms: null}},
-    gps: {available: true, latitude: 25.033964, longitude: 121.564468},
+    gps: {available: true, valid: true, source: "fixed",
+      latitude: 25.033964, longitude: 121.564468},
     detections: {available: true, frame_sequence: 5, detections: [
       {class_id: 0, class_name: "person", confidence: 0.9}
     ]}
@@ -146,6 +147,7 @@ test("REST bootstrap is resynchronized after the socket opens", async () => {
 
   assert.equal(harness.elements.get("connection").textContent, "Live");
   assert.equal(harness.elements.get("detector-state").textContent, "Disabled");
+  assert.equal(harness.elements.get("gps-state").textContent, "Fixed / simulated");
   assert.equal(harness.fetchCalls.filter((path) => path.endsWith("/status")).length, 2);
 
   harness.sockets[0].message({type: "status", data: {

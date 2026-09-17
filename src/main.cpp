@@ -1,6 +1,8 @@
 #include "skai/application.hpp"
 #include "skai/cli.hpp"
 #include "skai/events.hpp"
+#include "skai/gps/gps_module.hpp"
+#include "skai/gps/gps_state.hpp"
 #include "skai/logging.hpp"
 #include "skai/video/gstreamer_runtime.hpp"
 #include "skai/video/rtsp_video_module.hpp"
@@ -86,7 +88,8 @@ int main(int argc, char* argv[]) {
     skai::BoundedQueue<skai::Frame> inference_frames(2);
     skai::BoundedQueue<skai::Frame> annotated_frames(2);
     auto runtime_status = std::make_shared<skai::RuntimeStatus>();
-    auto api_state = std::make_shared<skai::ApiState>(runtime_status);
+    auto gps_state = std::make_shared<skai::GpsState>();
+    auto api_state = std::make_shared<skai::ApiState>(runtime_status, gps_state);
     skai::Application::Modules modules;
     modules.web = std::make_unique<skai::web::HttpServer>(logger, runtime_status,
                                                           api_state, events);
@@ -101,6 +104,7 @@ int main(int argc, char* argv[]) {
 #endif
     modules.video = std::make_unique<skai::RtspVideoModule>(inference_frames, logger,
                                                             runtime_status);
+    modules.gps = std::make_unique<skai::GpsModule>(gps_state);
     skai::Application app(cli.config_path, logger, std::move(modules));
     if (!app.initialize()) {
         skai::Logger error_logger(std::cerr);

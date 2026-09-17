@@ -152,18 +152,22 @@ Response route_request(const Request& request, const StatusSnapshot& status,
                              detections_json(api.latest_detections()));
     }
     if (path == "/api/v1/gps") {
-        PublicConfigDto config;
-        if (!api.public_config(config) || !config.gps_enabled) {
+        const auto fix = api.latest_gps();
+        if (!fix) {
             return json_response(http::status::service_unavailable, request.version(),
                                  "{\"available\":false}\n");
         }
         std::ostringstream body;
         body.imbue(std::locale::classic());
         body << std::setprecision(std::numeric_limits<double>::max_digits10)
-             << "{\"available\":true,\"source\":"
-             << json_string(config.gps_source) << ",\"latitude\":"
-             << config.gps_latitude << ",\"longitude\":" << config.gps_longitude
-             << ",\"altitude_m\":" << config.gps_altitude_m << "}\n";
+             << "{\"available\":true,\"valid\":" << json_bool(fix->valid)
+             << ",\"source\":" << json_string(fix->source)
+             << ",\"latitude\":" << fix->latitude
+             << ",\"longitude\":" << fix->longitude
+             << ",\"altitude_m\":" << fix->altitude_m
+             << ",\"hdop\":" << fix->hdop
+             << ",\"satellites_visible\":" << fix->satellites_visible
+             << ",\"satellites_used\":" << fix->satellites_used << "}\n";
         return json_response(http::status::ok, request.version(), body.str());
     }
     if (alert_route(path) || path == "/api/v1/recordings") {

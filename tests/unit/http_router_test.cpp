@@ -1,5 +1,6 @@
 #include "skai/web/router.hpp"
 #include "skai/api_state.hpp"
+#include "skai/gps/gps_state.hpp"
 
 #include <gtest/gtest.h>
 
@@ -68,7 +69,10 @@ TEST(HttpRouter, RejectsUnknownRoutesAndUnsupportedMethods) {
 }
 
 TEST(HttpRouter, ServesExplicitConfigDetectionAndGpsDtos) {
-    skai::ApiState api;
+    auto gps_state = std::make_shared<skai::GpsState>();
+    gps_state->update(skai::GpsFix{true, "fixed", -33.868820, 151.209290,
+                                   58.75, 0.9, 12, 10});
+    skai::ApiState api({}, gps_state);
     skai::Config config;
     config.video.transport = "udp";
     config.video.username = "secret-user";
@@ -93,8 +97,12 @@ TEST(HttpRouter, ServesExplicitConfigDetectionAndGpsDtos) {
         {http::verb::get, "/api/v1/gps", 11}, status, api);
     EXPECT_EQ(gps.result(), http::status::ok);
     EXPECT_NE(gps.body().find("\"source\":\"fixed\""), std::string::npos);
-    EXPECT_DOUBLE_EQ(json_number(gps.body(), "latitude"), config.gps.latitude);
-    EXPECT_DOUBLE_EQ(json_number(gps.body(), "longitude"), config.gps.longitude);
+    EXPECT_NE(gps.body().find("\"valid\":true"), std::string::npos);
+    EXPECT_NE(gps.body().find("\"hdop\":"), std::string::npos);
+    EXPECT_NE(gps.body().find("\"satellites_visible\":"), std::string::npos);
+    EXPECT_NE(gps.body().find("\"satellites_used\":"), std::string::npos);
+    EXPECT_DOUBLE_EQ(json_number(gps.body(), "latitude"), -33.868820);
+    EXPECT_DOUBLE_EQ(json_number(gps.body(), "longitude"), 151.209290);
 
     const auto no_detections = skai::web::route_request(
         {http::verb::get, "/api/v1/detections/latest", 11}, status, api);
@@ -159,6 +167,19 @@ TEST(HttpRouter, ControlsDetectorAndMakesDeferredSubsystemsExplicit) {
     const auto unsupported = skai::web::route_request(
         {http::verb::post, "/api/v1/detector/enable", 11}, status, api);
     EXPECT_EQ(unsupported.result(), http::status::service_unavailable);
+}
+
+TEST(HttpRouter, DisabledGpsHasNoApiFix) {
+    skai::ApiState api;
+    skai::Config config;
+    config.gps.enabled = false;
+    api.configure(config);
+
+    EXPECT_FALSE(api.latest_gps().has_value());
+    const auto response = skai::web::route_request(
+        {http::verb::get, "/api/v1/gps", 11}, {}, api);
+    EXPECT_EQ(response.result(), http::status::service_unavailable);
+    EXPECT_NE(response.body().find("\"available\":false"), std::string::npos);
 }
 
 TEST(ApiState, RejectsObsoleteInferenceAndResetsTransientData) {
