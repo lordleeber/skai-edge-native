@@ -51,7 +51,24 @@ std::string status_json(const StatusSnapshot& status, bool detector_enabled) {
     output << ",\"last_inference_ms\":";
     if (status.last_inference_ms) output << *status.last_inference_ms;
     else output << "null";
-    output << "}}\n";
+    output << "},\"encoder\":";
+    if (!status.encoder) {
+        output << "null";
+    } else {
+        const auto& encoder = *status.encoder;
+        output << "{\"frames_submitted\":" << encoder.frames_submitted
+               << ",\"frames_rejected\":" << encoder.frames_rejected
+               << ",\"frames_dropped\":" << encoder.frames_dropped
+               << ",\"appsrc_pressure_dropped\":"
+               << encoder.appsrc_pressure_dropped
+               << ",\"access_units_encoded\":" << encoder.access_units_encoded
+               << ",\"bytes_encoded\":" << encoder.bytes_encoded
+               << ",\"access_units_dropped\":" << encoder.access_units_dropped
+               << ",\"last_access_unit_age_ms\":"
+               << encoder.last_access_unit_age_ms
+               << ",\"last_error\":" << json_string(encoder.last_error) << '}';
+    }
+    output << "}\n";
     return output.str();
 }
 

@@ -30,6 +30,7 @@ TEST(HttpRouter, ServesHealthAndRuntimeStatusJson) {
     status.video_fps = 29.9;
     status.detector_fps = 18.4;
     status.last_inference_ms = 43.1;
+    status.encoder = skai::RuntimeStatusSnapshot::Encoder{7, 0, 1, 1, 6, 2048, 2, 30, {}};
 
     const auto health = skai::web::route_request(
         {http::verb::get, "/health", 11}, status, api);
@@ -46,6 +47,8 @@ TEST(HttpRouter, ServesHealthAndRuntimeStatusJson) {
     EXPECT_NE(response.body().find("\"detector\":{\"enabled\":true"),
               std::string::npos);
     EXPECT_NE(response.body().find("\"last_inference_ms\":43.1"),
+              std::string::npos);
+    EXPECT_NE(response.body().find("\"encoder\":{\"frames_submitted\":7"),
               std::string::npos);
 }
 
