@@ -40,6 +40,10 @@ add_executable(skai-gstreamer-tests unit/gstreamer_runtime_test.cpp)
 target_link_libraries(skai-gstreamer-tests PRIVATE skai-gstreamer GTest::gtest_main)
 gtest_discover_tests(skai-gstreamer-tests PROPERTIES TIMEOUT 15)
 
+add_executable(skai-h264-encoder-tests unit/h264_encoder_test.cpp)
+target_link_libraries(skai-h264-encoder-tests PRIVATE skai-h264-encoder GTest::gtest_main)
+gtest_discover_tests(skai-h264-encoder-tests PROPERTIES TIMEOUT 15)
+
 if(TARGET skai-tensorrt)
     add_executable(skai-tensorrt-tests integration/tensorrt_engine_test.cpp)
     target_include_directories(skai-tensorrt-tests PRIVATE ${PROJECT_SOURCE_DIR}/src)

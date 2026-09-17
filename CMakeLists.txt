@@ -135,6 +135,11 @@ add_library(skai-gstreamer src/video/gstreamer_runtime.cpp)
 target_include_directories(skai-gstreamer PUBLIC include)
 target_link_libraries(skai-gstreamer PUBLIC skai-logging PkgConfig::GSTREAMER)
 
+add_library(skai-h264-encoder src/video/h264_encoder.cpp)
+target_include_directories(skai-h264-encoder PUBLIC include)
+target_link_libraries(skai-h264-encoder PUBLIC skai-gstreamer skai-core
+    PkgConfig::GST_VIDEO_APP)
+
 add_library(skai-rtsp-source src/video/rtsp_source.cpp src/video/rtsp_video_module.cpp)
 target_include_directories(skai-rtsp-source PUBLIC include)
 target_link_libraries(skai-rtsp-source PUBLIC skai-gstreamer skai-config skai-core
