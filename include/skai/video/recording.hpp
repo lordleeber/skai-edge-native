@@ -39,6 +39,7 @@ private:
     void enforce_quota() noexcept;
     std::string next_path(unsigned int fragment_id) const;
     void publish_state();
+    void fail(const std::string& error);
     void run() noexcept;
 
     BoundedQueue<EncodedAccessUnit>& input_;
@@ -53,6 +54,9 @@ private:
     std::atomic<bool> running_{false};
     mutable std::mutex error_mutex_;
     std::string last_error_;
+    std::string session_id_;
+    bool waiting_for_keyframe_ = true;
+    std::uint64_t expected_sequence_ = 0;
 };
 
 } // namespace skai

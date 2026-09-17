@@ -7,7 +7,7 @@
   const initialRetryDelayMs = 1000;
   const maximumRetryDelayMs = 30000;
   const connectionAttemptTimeoutMs = 8000;
-  const revisions = {status: 0, gps: 0, detection: 0};
+  const revisions = {status: 0, gps: 0, detection: 0, recording: 0};
   let retryDelayMs = initialRetryDelayMs;
   let retryTimer = 0;
   let activeSocket = null;
@@ -78,6 +78,11 @@
     });
   }
 
+  function renderRecording(data) {
+    setText("recording-state", data?.active ? "Recording" :
+      data?.state === "error" ? "Recording error" : "Not recording");
+  }
+
   function addAlert(data, kind = "Alert") {
     if (data.id && alertIds.has(data.id)) return;
     if (data.id) alertIds.add(data.id);
@@ -126,7 +131,7 @@
     }
     if (message.type === "alert") addAlert(message.data);
     if (message.type === "system_error") addAlert(message.data, "System error");
-    if (message.type === "recording") setText("recording-state", message.data.active ? "Recording" : "Not recording");
+    if (message.type === "recording") { ++revisions.recording; renderRecording(message.data); }
   }
 
   function scheduleReconnect() {
@@ -201,6 +206,8 @@
       loadSnapshot("gps", "/api/v1/gps", renderGps, {available: false}),
       loadSnapshot("detection", "/api/v1/detections/latest", renderDetections,
         {available: false, detections: []}),
+      loadSnapshot("recording", "/api/v1/recordings", renderRecording,
+        {active: false, state: "stopped"}),
       getJson("/api/v1/alerts?limit=6").then(mergeAlerts).catch(() => {})
     ]);
   }
@@ -210,6 +217,7 @@
       const response = await fetch(`/api/v1/recording/${action}`, {method: "POST"});
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "Recording unavailable");
+      renderRecording(data);
     } catch (error) {
       addAlert({message: error.message}, "Recording");
     }

@@ -346,7 +346,10 @@ Response route_request(const Request& request, const StatusSnapshot& status,
         if ((started ? recording->start(error) : recording->stop(error))) {
             const auto recording_status = recording->status();
             return json_response(http::status::ok, request.version(),
-                std::string("{\"state\":") + json_string(recording_status.state) + "}\n");
+                std::string("{\"state\":") + json_string(recording_status.state) +
+                ",\"active\":" + json_bool(recording_status.active) +
+                ",\"current_path\":" + json_string(recording_status.current_path) +
+                ",\"last_error\":" + json_string(recording_status.last_error) + "}\n");
         }
         return json_response(http::status::service_unavailable, request.version(),
                              "{\"error\":" + json_string(error) + "}\n");
