@@ -83,6 +83,11 @@ forces `USE_SYSTEM_JUICE=ON`, so `LibJuice::LibJuice` always resolves to
 the standalone `skai-ice-server`, tests, examples, and WebSocket support, so
 `cpp-httplib` is not part of the `skai-edge` runtime.
 
+Step 24 exposes non-trickle WHEP signaling at `POST /api/v1/webrtc/whep`.
+Successful `application/sdp` offers return `201 Created`; deleting the returned
+`Location` closes the peer. Sessions enforce `webrtc.max_peers`, stale cleanup,
+and shutdown cleanup. H.264 media forwarding follows in Step 25.
+
 For an executable-only build without GoogleTest or the RTSP-server fixture:
 
 ```sh

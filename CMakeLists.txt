@@ -151,9 +151,11 @@ add_library(skai-application src/application.cpp)
 target_include_directories(skai-application PUBLIC include)
 target_link_libraries(skai-application PUBLIC skai-config skai-logging Threads::Threads)
 
-add_library(skai-webrtc-runtime src/webrtc/ice_runtime_module.cpp)
+add_library(skai-webrtc-runtime src/webrtc/ice_runtime_module.cpp
+    src/webrtc/webrtc_manager.cpp)
 target_include_directories(skai-webrtc-runtime PUBLIC include)
-target_link_libraries(skai-webrtc-runtime PUBLIC skai-application skai_ice::skai_ice)
+target_link_libraries(skai-webrtc-runtime PUBLIC skai-application skai_ice::skai_ice
+    LibDataChannel::LibDataChannel)
 
 add_library(skai-storage src/storage/database.cpp src/storage/alert_repository.cpp)
 target_include_directories(skai-storage PUBLIC include)
@@ -175,7 +177,7 @@ add_library(skai-web src/web/http_server.cpp src/web/router.cpp
     src/web/static_file_handler.cpp src/web/websocket_session.cpp)
 target_include_directories(skai-web PUBLIC include)
 target_link_libraries(skai-web PUBLIC skai-application skai-events skai-gps
-    skai-storage skai-recording Boost::system)
+    skai-storage skai-recording skai-webrtc-runtime Boost::system)
 
 add_library(skai-gstreamer src/video/gstreamer_runtime.cpp)
 target_include_directories(skai-gstreamer PUBLIC include)
@@ -199,7 +201,7 @@ target_link_libraries(skai-rtsp-source PUBLIC skai-gstreamer skai-config skai-co
 add_executable(skai-edge src/main.cpp)
 target_link_libraries(skai-edge PRIVATE skai-cli skai-application skai-gstreamer
     skai-rtsp-source skai-h264-encoder skai-recording skai-web skai-storage
-    skai-webrtc-runtime LibDataChannel::LibDataChannel)
+    skai-webrtc-runtime)
 if(TARGET skai-inference-module)
     target_link_libraries(skai-edge PRIVATE skai-inference-module)
     target_compile_definitions(skai-edge PRIVATE SKAI_HAS_YOLO_PIPELINE=1)

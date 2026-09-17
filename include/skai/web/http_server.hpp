@@ -7,6 +7,7 @@
 #include "skai/status.hpp"
 #include "skai/storage/alert_repository.hpp"
 #include "skai/video/recording_control.hpp"
+#include "skai/webrtc/webrtc_manager.hpp"
 
 #include <memory>
 
@@ -25,7 +26,8 @@ public:
                std::shared_ptr<ApiState> api,
                std::shared_ptr<EventChannel> events,
                std::shared_ptr<AlertRepository> alerts,
-               std::shared_ptr<RecordingController> recording = {});
+               std::shared_ptr<RecordingController> recording = {},
+               std::shared_ptr<WebRtcManager> webrtc = {});
     ~HttpServer() override;
 
     bool initialize(const Config& config) override;
@@ -43,6 +45,7 @@ private:
     std::shared_ptr<EventChannel> events_;
     std::shared_ptr<AlertRepository> alerts_;
     std::shared_ptr<RecordingController> recording_;
+    std::shared_ptr<WebRtcManager> webrtc_;
     std::unique_ptr<State> state_;
 };
 

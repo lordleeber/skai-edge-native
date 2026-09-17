@@ -202,7 +202,7 @@ bool alert_route(const std::string& path) {
 
 Response route_request(const Request& request, const StatusSnapshot& status,
                        ApiState& api, AlertRepository* alerts,
-                       RecordingController* recording) {
+                       RecordingController* recording, WebRtcManager* webrtc) {
     const std::string target(request.target());
     const auto query = target.find('?');
     const std::string path = target.substr(0, query);
@@ -214,17 +214,24 @@ Response route_request(const Request& request, const StatusSnapshot& status,
     const bool post_route = path == "/api/v1/recording/start" ||
                             path == "/api/v1/recording/stop" ||
                             path == "/api/v1/detector/enable" ||
-                            path == "/api/v1/detector/disable";
-    if (!get_route && !post_route) {
+                            path == "/api/v1/detector/disable" ||
+                            path == "/api/v1/webrtc/whep";
+    constexpr std::string_view session_prefix = "/api/v1/webrtc/sessions/";
+    const bool delete_route = path.rfind(session_prefix, 0) == 0 &&
+        path.size() > session_prefix.size() &&
+        path.find('/', session_prefix.size()) == std::string::npos;
+    if (!get_route && !post_route && !delete_route) {
         return json_response(http::status::not_found, request.version(),
                              "{\"error\":\"not found\"}\n");
     }
-    const auto expected = get_route ? http::verb::get : http::verb::post;
+    const auto expected = get_route ? http::verb::get :
+                          delete_route ? http::verb::delete_ : http::verb::post;
     if (request.method() != expected) {
         auto response = json_response(http::status::method_not_allowed,
                                       request.version(),
                                       "{\"error\":\"method not allowed\"}\n");
-        response.set(http::field::allow, get_route ? "GET" : "POST");
+        response.set(http::field::allow, get_route ? "GET" :
+                     delete_route ? "DELETE" : "POST");
         return response;
     }
     if (path == "/health") {
@@ -266,6 +273,52 @@ Response route_request(const Request& request, const StatusSnapshot& status,
              << ",\"satellites_visible\":" << fix->satellites_visible
              << ",\"satellites_used\":" << fix->satellites_used << "}\n";
         return json_response(http::status::ok, request.version(), body.str());
+    }
+    if (path == "/api/v1/webrtc/whep") {
+        if (!webrtc) {
+            return json_response(http::status::service_unavailable, request.version(),
+                                 "{\"error\":\"WebRTC unavailable\"}\n");
+        }
+        if (request[http::field::content_type] != "application/sdp") {
+            return json_response(http::status::unsupported_media_type, request.version(),
+                                 "{\"error\":\"Content-Type must be application/sdp\"}\n");
+        }
+        const auto created = webrtc->create_session(request.body());
+        if (!created) {
+            http::status result = http::status::internal_server_error;
+            if (created.error == CreateSessionError::InvalidOffer) {
+                result = http::status::bad_request;
+            } else if (created.error == CreateSessionError::Disabled) {
+                result = http::status::service_unavailable;
+            } else if (created.error == CreateSessionError::Capacity) {
+                result = http::status::too_many_requests;
+            } else if (created.error == CreateSessionError::GatheringTimeout) {
+                result = http::status::gateway_timeout;
+            }
+            return json_response(result, request.version(),
+                                 "{\"error\":" + json_string(created.message) + "}\n");
+        }
+        Response response{http::status::created, request.version()};
+        response.set(http::field::content_type, "application/sdp");
+        response.set(http::field::cache_control, "no-store");
+        response.set(http::field::location,
+                     std::string(session_prefix) + created.session_id);
+        response.body() = created.answer_sdp;
+        response.prepare_payload();
+        return response;
+    }
+    if (delete_route) {
+        if (!webrtc) {
+            return json_response(http::status::service_unavailable, request.version(),
+                                 "{\"error\":\"WebRTC unavailable\"}\n");
+        }
+        if (!webrtc->close_session(path.substr(session_prefix.size()))) {
+            return json_response(http::status::not_found, request.version(),
+                                 "{\"error\":\"session not found\"}\n");
+        }
+        Response response{http::status::no_content, request.version()};
+        response.prepare_payload();
+        return response;
     }
     if (alert_route(path)) {
         if (!alerts) {

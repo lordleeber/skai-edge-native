@@ -9,6 +9,7 @@
 #include <boost/beast/websocket.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <functional>
@@ -36,6 +37,10 @@ public:
                 std::shared_ptr<EventChannel> events,
                 std::shared_ptr<AlertRepository> alerts,
                 std::shared_ptr<RecordingController> recording,
+                std::shared_ptr<WebRtcManager> webrtc,
+                asio::thread_pool& signaling_pool,
+                std::atomic_size_t& signaling_jobs,
+                std::size_t signaling_limit,
                 std::shared_ptr<StaticFileHandler> static_files,
                 std::function<void(std::shared_ptr<WebSocketSession>)> register_ws,
                 std::function<void(WebSocketSession*)> unregister_ws)
@@ -43,6 +48,9 @@ public:
           api_(std::move(api)), events_(std::move(events)),
           alerts_(std::move(alerts)),
           recording_(std::move(recording)),
+          webrtc_(std::move(webrtc)),
+          signaling_pool_(signaling_pool), signaling_jobs_(signaling_jobs),
+          signaling_limit_(signaling_limit),
           static_files_(std::move(static_files)),
           register_ws_(std::move(register_ws)),
           unregister_ws_(std::move(unregister_ws)) {
@@ -91,7 +99,30 @@ private:
         status.uptime_s = static_cast<std::uint64_t>(
             std::chrono::duration_cast<std::chrono::seconds>(
                 std::chrono::steady_clock::now() - started_).count());
-        send(route_request(parser_.get(), status, *api_, alerts_.get(), recording_.get()));
+        if (path == "/api/v1/webrtc/whep" &&
+            parser_.get().method() == http::verb::post && webrtc_) {
+            return dispatch_whep(parser_.release(), status);
+        }
+        send(route_request(parser_.get(), status, *api_, alerts_.get(),
+                           recording_.get(), webrtc_.get()));
+    }
+
+    void dispatch_whep(Request request, StatusSnapshot status) {
+        if (signaling_jobs_.fetch_add(1) >= signaling_limit_) {
+            signaling_jobs_.fetch_sub(1);
+            return send(json_error(http::status::too_many_requests,
+                                   "signaling queue is full"));
+        }
+        auto self = shared_from_this();
+        asio::post(signaling_pool_, [self, request = std::move(request), status]() mutable {
+            auto response = route_request(request, status, *self->api_, self->alerts_.get(),
+                                          self->recording_.get(), self->webrtc_.get());
+            self->signaling_jobs_.fetch_sub(1);
+            asio::post(self->stream_.get_executor(),
+                       [self, response = std::move(response)]() mutable {
+                           self->send(std::move(response));
+                       });
+        });
     }
 
     Response json_error(http::status result, const char* message) {
@@ -103,12 +134,22 @@ private:
     }
 
     void send(Response response) {
+        constexpr std::string_view prefix = "/api/v1/webrtc/sessions/";
+        const std::string location(response[http::field::location]);
+        if (response.result() == http::status::created &&
+            location.rfind(prefix, 0) == 0) {
+            pending_session_id_ = location.substr(prefix.size());
+        }
         response.keep_alive(false);
         response_ = std::move(response);
         stream_.expires_after(request_timeout);
         http::async_write(stream_, response_,
-                          [self = shared_from_this()](beast::error_code,
+                          [self = shared_from_this()](beast::error_code error,
                                                       std::size_t) {
+                              if (error && !self->pending_session_id_.empty() && self->webrtc_) {
+                                  self->webrtc_->close_session(self->pending_session_id_);
+                              }
+                              self->pending_session_id_.clear();
                               self->close();
                           });
     }
@@ -128,10 +169,15 @@ private:
     std::shared_ptr<EventChannel> events_;
     std::shared_ptr<AlertRepository> alerts_;
     std::shared_ptr<RecordingController> recording_;
+    std::shared_ptr<WebRtcManager> webrtc_;
+    asio::thread_pool& signaling_pool_;
+    std::atomic_size_t& signaling_jobs_;
+    const std::size_t signaling_limit_;
     std::shared_ptr<StaticFileHandler> static_files_;
     std::function<void(std::shared_ptr<WebSocketSession>)> register_ws_;
     std::function<void(WebSocketSession*)> unregister_ws_;
     Response response_;
+    std::string pending_session_id_;
 };
 
 } // namespace
@@ -141,12 +187,16 @@ struct HttpServer::State {
           std::shared_ptr<ApiState> api, std::shared_ptr<EventChannel> events,
           std::shared_ptr<AlertRepository> alerts,
           std::shared_ptr<RecordingController> recording,
+          std::shared_ptr<WebRtcManager> webrtc,
+          std::size_t config_max_peers,
           const std::string& web_root)
         : acceptor(context), shutdown_timer(context), logger(logger),
           status(std::move(status)), api(std::move(api)),
           events(std::move(events)),
           alerts(std::move(alerts)),
           recording(std::move(recording)),
+          webrtc(std::move(webrtc)),
+          signaling_limit(std::max<std::size_t>(1, config_max_peers)),
           static_files(std::make_shared<StaticFileHandler>(web_root)) {}
 
     void accept() {
@@ -156,6 +206,10 @@ struct HttpServer::State {
                                               api, events,
                                               alerts,
                                               recording,
+                                              webrtc,
+                                              signaling_pool,
+                                              signaling_jobs,
+                                              signaling_limit,
                                               static_files,
                                               [this](auto session) {
                                                   sessions.erase(std::remove_if(
@@ -190,6 +244,10 @@ struct HttpServer::State {
     std::shared_ptr<EventChannel> events;
     std::shared_ptr<AlertRepository> alerts;
     std::shared_ptr<RecordingController> recording;
+    std::shared_ptr<WebRtcManager> webrtc;
+    std::atomic_size_t signaling_jobs{0};
+    std::size_t signaling_limit;
+    asio::thread_pool signaling_pool{2};
     std::shared_ptr<StaticFileHandler> static_files;
     std::vector<std::weak_ptr<WebSocketSession>> sessions;
     std::thread worker;
@@ -220,12 +278,14 @@ HttpServer::HttpServer(Logger& logger, std::shared_ptr<RuntimeStatus> status,
                        std::shared_ptr<ApiState> api,
                        std::shared_ptr<EventChannel> events,
                        std::shared_ptr<AlertRepository> alerts,
-                       std::shared_ptr<RecordingController> recording)
+                       std::shared_ptr<RecordingController> recording,
+                       std::shared_ptr<WebRtcManager> webrtc)
     : logger_(logger), status_(status ? std::move(status)
                                      : std::make_shared<RuntimeStatus>()),
       api_(api ? std::move(api) : std::make_shared<ApiState>()),
       events_(events ? std::move(events) : std::make_shared<EventChannel>()),
-      alerts_(std::move(alerts)), recording_(std::move(recording)) {
+      alerts_(std::move(alerts)), recording_(std::move(recording)),
+      webrtc_(std::move(webrtc)) {
     api_->bind_runtime_status(status_);
 }
 
@@ -238,7 +298,7 @@ bool HttpServer::initialize(const Config& config) {
     if (state_) return false;
     api_->configure(config);
     auto next = std::make_unique<State>(logger_, status_, api_, events_, alerts_, recording_,
-                                        config.web.root);
+                                        webrtc_, config.webrtc.max_peers, config.web.root);
     if (!next->static_files->valid()) {
         logger_.log(LogLevel::Error, "web", next->static_files->error());
         return false;
@@ -260,6 +320,7 @@ bool HttpServer::initialize(const Config& config) {
         logger_.log(LogLevel::Error, "web", "cannot listen: " + error.message());
         return false;
     }
+    if (webrtc_) webrtc_->configure(config.webrtc);
     state_ = std::move(next);
     return true;
 }
@@ -274,6 +335,7 @@ bool HttpServer::start() {
 }
 
 void HttpServer::stop() noexcept {
+    if (webrtc_) webrtc_->shutdown();
     if (!state_) return;
     if (!state_->worker.joinable()) {
         beast::error_code ignored;
