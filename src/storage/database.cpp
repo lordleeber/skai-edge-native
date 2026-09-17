@@ -108,6 +108,18 @@ bool Database::open_locked(std::string& error) {
             }
         }
         sqlite3_finalize(statement);
+        if (error.empty() && !execute(connection_, "PRAGMA synchronous = FULL;", error)) {
+            error = "could not set SQLite synchronous policy: " + error;
+        }
+        statement = nullptr;
+        if (error.empty() &&
+            (sqlite3_prepare_v2(connection_, "PRAGMA synchronous;", -1,
+                                &statement, nullptr) != SQLITE_OK ||
+             sqlite3_step(statement) != SQLITE_ROW ||
+             sqlite3_column_int(statement, 0) != 2)) {
+            error = "SQLite synchronous policy is not FULL";
+        }
+        sqlite3_finalize(statement);
     }
     if (!error.empty() || !migrate_locked(error)) {
         sqlite3_close_v2(connection_);

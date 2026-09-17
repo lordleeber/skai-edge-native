@@ -32,8 +32,9 @@ Step 18 adds a lifecycle-managed SQLite database, versioned schema migrations,
 and a serialized alert repository with transactional detection inserts.
 Step 19 adds class/confidence alert rules with consecutive-frame, cooldown, and
 normalized ROI filtering; accepted alerts include the current GPS fix and are
-published through the WebSocket event channel. Snapshot and database writes
-remain Step 20 work.
+published through the WebSocket event channel. Step 20 atomically persists JPG
+snapshots and SQLite metadata, enables alert list/detail queries, and provides
+safe oldest-alert cleanup.
 Encoding and external media transport remain later steps.
 
 ## Build and test

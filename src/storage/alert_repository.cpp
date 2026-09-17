@@ -77,6 +77,32 @@ bool read_detections(sqlite3* connection, AlertEvent& alert, std::string& error)
     return false;
 }
 
+int bounded_limit(std::size_t limit) {
+    return limit > static_cast<std::size_t>(std::numeric_limits<int>::max())
+               ? std::numeric_limits<int>::max() : static_cast<int>(limit);
+}
+
+template <typename Bind>
+std::vector<AlertEvent> query_alerts(sqlite3* connection, const char* sql,
+                                     Bind bind, std::string& error) {
+    std::vector<AlertEvent> alerts;
+    Statement query(connection, sql, error);
+    if (!query.get()) return alerts;
+    bind(query.get());
+    int result = SQLITE_ROW;
+    while ((result = sqlite3_step(query.get())) == SQLITE_ROW) {
+        alerts.push_back(read_alert(query.get()));
+    }
+    if (result != SQLITE_DONE) {
+        error = sqlite3_errmsg(connection);
+        return {};
+    }
+    for (auto& alert : alerts) {
+        if (!read_detections(connection, alert, error)) return {};
+    }
+    return alerts;
+}
+
 } // namespace
 
 AlertRepository::AlertRepository(Database& database) : database_(database) {}
@@ -201,31 +227,86 @@ std::vector<AlertEvent> AlertRepository::find_recent(std::size_t limit,
                                                        std::string& error) const {
     std::lock_guard<std::mutex> lock(database_.mutex_);
     error.clear();
-    std::vector<AlertEvent> alerts;
     auto* connection = database_.connection_;
     if (!connection) {
         error = "database is not open";
-        return alerts;
-    }
-    Statement query(connection,
-        "SELECT id, timestamp_ms, latitude, longitude, altitude_m, gps_valid, gps_source, "
-        "snapshot_path, frame_sequence, model_version FROM alerts "
-        "ORDER BY timestamp_ms DESC, id DESC LIMIT ?;", error);
-    if (!query.get()) return alerts;
-    const auto bounded = limit > static_cast<std::size_t>(std::numeric_limits<int>::max())
-                             ? std::numeric_limits<int>::max()
-                             : static_cast<int>(limit);
-    sqlite3_bind_int(query.get(), 1, bounded);
-    int result = SQLITE_ROW;
-    while ((result = sqlite3_step(query.get())) == SQLITE_ROW) alerts.push_back(read_alert(query.get()));
-    if (result != SQLITE_DONE) {
-        error = sqlite3_errmsg(connection);
         return {};
     }
-    for (auto& alert : alerts) {
-        if (!read_detections(connection, alert, error)) return {};
+    return query_alerts(connection,
+        "SELECT id, timestamp_ms, latitude, longitude, altitude_m, gps_valid, gps_source, "
+        "snapshot_path, frame_sequence, model_version FROM alerts "
+        "ORDER BY timestamp_ms DESC, id DESC LIMIT ?;",
+        [limit](sqlite3_stmt* statement) {
+            sqlite3_bind_int(statement, 1, bounded_limit(limit));
+        }, error);
+}
+
+std::vector<AlertEvent> AlertRepository::find_by_time_range(
+    std::int64_t from_ms, std::int64_t to_ms, std::size_t limit,
+    std::string& error) const {
+    std::lock_guard<std::mutex> lock(database_.mutex_);
+    error.clear();
+    auto* connection = database_.connection_;
+    if (!connection) { error = "database is not open"; return {}; }
+    if (from_ms > to_ms) { error = "from must not exceed to"; return {}; }
+    return query_alerts(connection,
+        "SELECT id, timestamp_ms, latitude, longitude, altitude_m, gps_valid, gps_source, "
+        "snapshot_path, frame_sequence, model_version FROM alerts "
+        "WHERE timestamp_ms >= ? AND timestamp_ms <= ? "
+        "ORDER BY timestamp_ms DESC, id DESC LIMIT ?;",
+        [from_ms, to_ms, limit](sqlite3_stmt* statement) {
+            sqlite3_bind_int64(statement, 1, from_ms);
+            sqlite3_bind_int64(statement, 2, to_ms);
+            sqlite3_bind_int(statement, 3, bounded_limit(limit));
+        }, error);
+}
+
+std::vector<AlertEvent> AlertRepository::find_by_class(
+    const std::string& class_name, std::size_t limit, std::string& error) const {
+    std::lock_guard<std::mutex> lock(database_.mutex_);
+    error.clear();
+    auto* connection = database_.connection_;
+    if (!connection) { error = "database is not open"; return {}; }
+    return query_alerts(connection,
+        "SELECT id, timestamp_ms, latitude, longitude, altitude_m, gps_valid, gps_source, "
+        "snapshot_path, frame_sequence, model_version FROM alerts a "
+        "WHERE EXISTS (SELECT 1 FROM detections d WHERE d.alert_id=a.id AND d.class_name=?) "
+        "ORDER BY timestamp_ms DESC, id DESC LIMIT ?;",
+        [&class_name, limit](sqlite3_stmt* statement) {
+            sqlite3_bind_text(statement, 1, class_name.c_str(), -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int(statement, 2, bounded_limit(limit));
+        }, error);
+}
+
+std::vector<AlertEvent> AlertRepository::find_oldest_excess(
+    std::size_t keep, std::string& error) const {
+    std::lock_guard<std::mutex> lock(database_.mutex_);
+    error.clear();
+    auto* connection = database_.connection_;
+    if (!connection) { error = "database is not open"; return {}; }
+    return query_alerts(connection,
+        "SELECT id, timestamp_ms, latitude, longitude, altitude_m, gps_valid, gps_source, "
+        "snapshot_path, frame_sequence, model_version FROM alerts "
+        "WHERE id NOT IN (SELECT id FROM alerts ORDER BY timestamp_ms DESC, id DESC LIMIT ?) "
+        "ORDER BY timestamp_ms ASC, id ASC;",
+        [keep](sqlite3_stmt* statement) {
+            sqlite3_bind_int(statement, 1, bounded_limit(keep));
+        }, error);
+}
+
+bool AlertRepository::remove(const std::string& id, std::string& error) {
+    std::lock_guard<std::mutex> lock(database_.mutex_);
+    error.clear();
+    auto* connection = database_.connection_;
+    if (!connection) { error = "database is not open"; return false; }
+    Statement statement(connection, "DELETE FROM alerts WHERE id = ?;", error);
+    if (!statement.get()) return false;
+    sqlite3_bind_text(statement.get(), 1, id.c_str(), -1, SQLITE_TRANSIENT);
+    if (sqlite3_step(statement.get()) != SQLITE_DONE) {
+        error = sqlite3_errmsg(connection);
+        return false;
     }
-    return alerts;
+    return sqlite3_changes(connection) == 1;
 }
 
 } // namespace skai

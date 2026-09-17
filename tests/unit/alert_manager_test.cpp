@@ -1,11 +1,16 @@
 #include "skai/alerts/alert_manager.hpp"
+#include "skai/storage/database.hpp"
 
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <filesystem>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <vector>
+
+#include <unistd.h>
 
 namespace {
 
@@ -19,6 +24,21 @@ skai::DetectionResult result(std::uint64_t sequence, int class_id,
         {class_id, confidence, center_x - 5.0f, 40.0f, center_x + 5.0f, 60.0f});
     return value;
 }
+
+class TemporaryDirectory {
+public:
+    TemporaryDirectory() {
+        char pattern[] = "/tmp/skai-alert-test-XXXXXX";
+        if (const auto* path = mkdtemp(pattern)) path_ = path;
+    }
+    ~TemporaryDirectory() {
+        std::error_code error;
+        std::filesystem::remove_all(path_, error);
+    }
+    std::string child(const std::string& name) const { return path_ + '/' + name; }
+private:
+    std::string path_;
+};
 
 } // namespace
 
@@ -135,4 +155,63 @@ TEST(AlertManager, DetectorGenerationChangeClearsPartialStreak) {
                                 12, wall, steady).empty());
     EXPECT_EQ(manager.process(result(3, 0, 0.9f), 100, 100, classes,
                               12, wall, steady).size(), 1U);
+}
+
+TEST(AlertManager, PersistsSnapshotMetadataAndCleansUpConsistently) {
+    TemporaryDirectory temporary;
+    skai::Database database(temporary.child("alerts.db"));
+    std::string error;
+    ASSERT_TRUE(database.open(error)) << error;
+    auto repository = std::make_shared<skai::AlertRepository>(database);
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    skai::AlertManager manager({}, {}, repository, &logger);
+    skai::AlertRuleConfig rule;
+    rule.class_name = "person";
+    rule.consecutive_frames = 1;
+    rule.cooldown_seconds = 0;
+    manager.configure({rule}, temporary.child("snapshots"), "yolo11s.engine");
+    skai::Frame frame;
+    frame.width = 4;
+    frame.height = 3;
+    frame.stride = 12;
+    frame.bgr.assign(36, 127);
+    auto detections = result(42, 0, 0.9f);
+    detections.detections.push_back({0, 0.8f, 1, 1, 3, 2});
+    const auto wall = std::chrono::system_clock::time_point{
+        std::chrono::seconds(86400)};
+
+    const auto alerts = manager.process(detections, 4, 3, classes, 1, &frame,
+                                        wall, std::chrono::steady_clock::now());
+    ASSERT_EQ(alerts.size(), 1U);
+    EXPECT_TRUE(std::filesystem::is_regular_file(alerts[0].snapshot_path));
+    EXPECT_NE(alerts[0].snapshot_path.find("/1970-01-02/"), std::string::npos);
+    const auto stored = repository->find_by_id(alerts[0].id, error);
+    ASSERT_TRUE(stored) << error;
+    EXPECT_EQ(stored->model_version, "yolo11s.engine");
+    EXPECT_EQ(stored->detections.size(), 2U);
+
+    const auto snapshot = alerts[0].snapshot_path;
+    const auto tombstone = snapshot + ".deleting";
+    std::filesystem::rename(snapshot, tombstone);
+    manager.configure({rule}, temporary.child("snapshots"), "yolo11s.engine");
+    EXPECT_TRUE(std::filesystem::exists(snapshot));
+    ASSERT_TRUE(std::filesystem::create_directory(tombstone));
+    EXPECT_FALSE(manager.cleanup_oldest(0, error));
+    EXPECT_TRUE(repository->find_by_id(alerts[0].id, error));
+    std::filesystem::remove(tombstone);
+    ASSERT_TRUE(manager.cleanup_oldest(0, error)) << error;
+    EXPECT_FALSE(std::filesystem::exists(snapshot));
+    EXPECT_FALSE(repository->find_by_id(alerts[0].id, error));
+
+    database.close();
+    EXPECT_TRUE(manager.process(result(43, 0, 0.9f), 4, 3, classes, 1, &frame,
+                                wall, std::chrono::steady_clock::now()).empty());
+    EXPECT_NE(logs.str().find("could not insert alert metadata"), std::string::npos);
+    std::size_t jpg_count = 0;
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(
+             temporary.child("snapshots"))) {
+        if (entry.path().extension() == ".jpg") ++jpg_count;
+    }
+    EXPECT_EQ(jpg_count, 0U);
 }

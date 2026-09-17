@@ -19,6 +19,7 @@ web:
   root: /srv/skai-edge/web
 storage:
   database_path: /tmp/skai-edge-test.db
+  alert_directory: /tmp/skai-edge-alerts
 gps:
   latitude: 25.033964
   longitude: 121.564468
@@ -38,6 +39,7 @@ TEST(Config, ParsesValidSettings) {
     EXPECT_EQ(result.config.web.port, 8080);
     EXPECT_EQ(result.config.web.root, "/srv/skai-edge/web");
     EXPECT_EQ(result.config.storage.database_path, "/tmp/skai-edge-test.db");
+    EXPECT_EQ(result.config.storage.alert_directory, "/tmp/skai-edge-alerts");
     EXPECT_EQ(result.config.webrtc.host_interfaces.size(), 2U);
     EXPECT_EQ(result.config.logging.level, skai::LogLevel::Debug);
 }
@@ -205,6 +207,14 @@ TEST(Config, RejectsEmptyDatabasePath) {
         "video: {rtsp_url: 'rtsp://camera/stream'}\nstorage: {database_path: ''}\n");
     EXPECT_FALSE(result.ok);
     EXPECT_NE(result.error.find("storage.database_path"), std::string::npos);
+}
+
+TEST(Config, RejectsEmptyAlertDirectory) {
+    const auto result = skai::parse_config(
+        "video: {rtsp_url: 'rtsp://camera/stream'}\n"
+        "storage: {alert_directory: ''}\n");
+    EXPECT_FALSE(result.ok);
+    EXPECT_NE(result.error.find("storage.alert_directory"), std::string::npos);
 }
 
 TEST(Config, ValidatesReconnectBackoffCeiling) {

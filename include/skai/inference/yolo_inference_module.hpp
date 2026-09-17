@@ -32,7 +32,13 @@ public:
     void wait() noexcept override;
 
 private:
+    struct AlertWork {
+        DetectionResult detections;
+        Frame snapshot;
+        std::uint64_t generation = 0;
+    };
     void run() noexcept;
+    void persist_alerts() noexcept;
 
     BoundedQueue<Frame>& input_;
     BoundedQueue<Frame>& output_;
@@ -41,11 +47,13 @@ private:
     std::shared_ptr<ApiState> api_;
     std::shared_ptr<EventChannel> events_;
     std::shared_ptr<AlertManager> alerts_;
+    BoundedQueue<AlertWork> alert_queue_{2};
     AnnotationOptions annotation_;
     std::unique_ptr<TensorRtBootstrap> bootstrap_;
     std::unique_ptr<YoloDetector> detector_;
     std::atomic<bool> stopping_{false};
     std::thread worker_;
+    std::thread alert_worker_;
 };
 
 } // namespace skai

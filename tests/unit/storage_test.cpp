@@ -1,5 +1,6 @@
 #include "skai/storage/alert_repository.hpp"
 #include "skai/storage/database.hpp"
+#include "skai/web/router.hpp"
 
 #include <gtest/gtest.h>
 
@@ -180,4 +181,62 @@ TEST(AlertRepository, SerializesConcurrentReadersAndWriter) {
     ASSERT_TRUE(error.empty()) << error;
     EXPECT_EQ(latest.size(), 20U);
     EXPECT_EQ(latest.front().id, "concurrent-19");
+}
+
+TEST(AlertRepository, FiltersAndRemovesOldestAlerts) {
+    TemporaryDatabase temporary;
+    skai::Database database(temporary.path());
+    std::string error;
+    ASSERT_TRUE(database.open(error)) << error;
+    skai::AlertRepository repository(database);
+    auto first = make_alert("first", 1000);
+    first.detections = {{0, "person", 0.9, 1, 2, 3, 4}};
+    auto second = make_alert("second", 2000);
+    second.detections = {{2, "car", 0.8, 5, 6, 7, 8}};
+    ASSERT_TRUE(repository.insert(first, error)) << error;
+    ASSERT_TRUE(repository.insert(second, error)) << error;
+
+    const auto range = repository.find_by_time_range(0, 2500, 1, error);
+    ASSERT_TRUE(error.empty()) << error;
+    ASSERT_EQ(range.size(), 1U);
+    EXPECT_EQ(range[0].id, "second");
+    const auto people = repository.find_by_class("person", 10, error);
+    ASSERT_EQ(people.size(), 1U);
+    EXPECT_EQ(people[0].id, "first");
+    const auto excess = repository.find_oldest_excess(1, error);
+    ASSERT_EQ(excess.size(), 1U);
+    EXPECT_EQ(excess[0].id, "first");
+    EXPECT_TRUE(repository.remove("first", error)) << error;
+    EXPECT_FALSE(repository.find_by_id("first", error));
+}
+
+TEST(HttpRouter, ServesPersistedAlertQueries) {
+    TemporaryDatabase temporary;
+    skai::Database database(temporary.path());
+    std::string error;
+    ASSERT_TRUE(database.open(error)) << error;
+    skai::AlertRepository repository(database);
+    auto alert = make_alert("alert-1", 1700);
+    alert.detections[0].class_name = "traffic light";
+    ASSERT_TRUE(repository.insert(alert, error)) << error;
+    skai::ApiState api;
+
+    const auto list = skai::web::route_request(
+        {boost::beast::http::verb::get, "/api/v1/alerts?class=traffic%20light", 11},
+        {}, api, &repository);
+    EXPECT_EQ(list.result(), boost::beast::http::status::ok);
+    EXPECT_NE(list.body().find("\"id\":\"alert-1\""), std::string::npos);
+    EXPECT_NE(list.body().find("\"class_name\":\"car\""), std::string::npos);
+    const auto item = skai::web::route_request(
+        {boost::beast::http::verb::get, "/api/v1/alerts/alert-1", 11},
+        {}, api, &repository);
+    EXPECT_EQ(item.result(), boost::beast::http::status::ok);
+    const auto missing = skai::web::route_request(
+        {boost::beast::http::verb::get, "/api/v1/alerts/missing", 11},
+        {}, api, &repository);
+    EXPECT_EQ(missing.result(), boost::beast::http::status::not_found);
+    const auto malformed = skai::web::route_request(
+        {boost::beast::http::verb::get, "/api/v1/alerts?class=bad%2", 11},
+        {}, api, &repository);
+    EXPECT_EQ(malformed.result(), boost::beast::http::status::bad_request);
 }

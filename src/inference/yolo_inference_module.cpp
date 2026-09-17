@@ -1,6 +1,8 @@
 #include "skai/inference/yolo_inference_module.hpp"
 
 #include <chrono>
+#include <filesystem>
+#include <optional>
 #include <iomanip>
 #include <limits>
 #include <locale>
@@ -73,10 +75,15 @@ bool YoloInferenceModule::initialize(const Config& config) {
     if (detector_ || worker_.joinable()) return false;
     input_.reset();
     output_.reset();
+    alert_queue_.reset();
     if (status_) status_->clear_detector();
     annotation_.enabled = config.detector.annotate;
     annotation_.show_metrics = true;
-    if (alerts_) alerts_->configure(config.alerts);
+    if (alerts_) {
+        alerts_->configure(config.alerts, config.storage.alert_directory,
+                           std::filesystem::path(config.detector.engine)
+                               .filename().string());
+    }
     YoloPostprocessConfig postprocess;
     postprocess.confidence_threshold = static_cast<float>(config.detector.confidence);
     postprocess.nms_iou_threshold = static_cast<float>(config.detector.nms);
@@ -93,6 +100,7 @@ bool YoloInferenceModule::initialize(const Config& config) {
 bool YoloInferenceModule::start() {
     if (!detector_ || worker_.joinable()) return false;
     stopping_ = false;
+    if (alerts_) alert_worker_ = std::thread(&YoloInferenceModule::persist_alerts, this);
     worker_ = std::thread(&YoloInferenceModule::run, this);
     return true;
 }
@@ -100,10 +108,12 @@ bool YoloInferenceModule::start() {
 void YoloInferenceModule::stop() noexcept {
     stopping_ = true;
     input_.shutdown();
+    alert_queue_.shutdown();
 }
 
 void YoloInferenceModule::wait() noexcept {
     if (worker_.joinable()) worker_.join();
+    if (alert_worker_.joinable()) alert_worker_.join();
     output_.shutdown();
     if (status_) status_->clear_detector();
     detector_.reset();
@@ -157,6 +167,8 @@ void YoloInferenceModule::run() noexcept {
                                      detection.y2});
             }
         }
+        std::optional<AlertWork> alert_work;
+        if (alerts_) alert_work = AlertWork{detections, annotated, permit.generation};
         auto commit = [&] {
             previous = now;
             if (status_) {
@@ -172,8 +184,12 @@ void YoloInferenceModule::run() noexcept {
                                  detection_event_data(detections));
             }
             if (alerts_) {
-                alerts_->process(detections, frame->width, frame->height,
-                                 coco_class_names(), permit.generation);
+                const auto dropped = alert_queue_.stats().dropped;
+                alert_queue_.push(std::move(*alert_work));
+                if (alert_queue_.stats().dropped != dropped) {
+                    logger_.log(LogLevel::Error, "alerts",
+                                "alert persistence queue dropped its oldest frame");
+                }
             }
             output_.push(std::move(annotated));
         };
@@ -182,6 +198,18 @@ void YoloInferenceModule::run() noexcept {
         } else if (!api_->commit_detections(permit, detections.frame_sequence,
                                             std::move(published), commit)) {
             output_.push(std::move(*frame));
+        }
+    }
+}
+
+void YoloInferenceModule::persist_alerts() noexcept {
+    while (auto work = alert_queue_.pop()) {
+        try {
+            alerts_->process(work->detections, work->snapshot.width,
+                             work->snapshot.height, coco_class_names(),
+                             work->generation, &work->snapshot);
+        } catch (const std::exception& failure) {
+            logger_.log(LogLevel::Error, "alerts", failure.what());
         }
     }
 }

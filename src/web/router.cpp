@@ -1,9 +1,11 @@
 #include "skai/web/router.hpp"
 
+#include <charconv>
 #include <iomanip>
 #include <limits>
 #include <locale>
 #include <sstream>
+#include <unordered_map>
 
 namespace skai::web {
 namespace {
@@ -95,6 +97,83 @@ std::string detections_json(const LatestDetectionsDto& latest) {
     return output.str();
 }
 
+std::string alert_json(const AlertEvent& alert) {
+    std::ostringstream output;
+    output.imbue(std::locale::classic());
+    output << std::setprecision(std::numeric_limits<double>::max_digits10)
+           << "{\"id\":" << json_string(alert.id)
+           << ",\"timestamp_ms\":" << alert.timestamp_ms << ",\"gps\":";
+    if (alert.gps) {
+        output << "{\"valid\":" << json_bool(alert.gps->valid)
+               << ",\"source\":" << json_string(alert.gps->source)
+               << ",\"latitude\":" << alert.gps->latitude
+               << ",\"longitude\":" << alert.gps->longitude
+               << ",\"altitude_m\":" << alert.gps->altitude_m << '}';
+    } else output << "null";
+    output << ",\"snapshot_path\":" << json_string(alert.snapshot_path)
+           << ",\"frame_sequence\":" << alert.frame_sequence
+           << ",\"model_version\":";
+    if (alert.model_version) output << json_string(*alert.model_version);
+    else output << "null";
+    output << ",\"detections\":[";
+    for (std::size_t i = 0; i < alert.detections.size(); ++i) {
+        const auto& detection = alert.detections[i];
+        if (i) output << ',';
+        output << "{\"class_id\":" << detection.class_id
+               << ",\"class_name\":" << json_string(detection.class_name)
+               << ",\"confidence\":" << detection.confidence
+               << ",\"box\":[" << detection.x1 << ',' << detection.y1 << ','
+               << detection.x2 << ',' << detection.y2 << "]}";
+    }
+    output << "]}";
+    return output.str();
+}
+
+std::string alerts_json(const std::vector<AlertEvent>& alerts) {
+    std::string result = "{\"available\":true,\"items\":[";
+    for (std::size_t i = 0; i < alerts.size(); ++i) {
+        if (i) result += ',';
+        result += alert_json(alerts[i]);
+    }
+    return result + "]}\n";
+}
+
+bool decode_component(const std::string& encoded, std::string& decoded) {
+    decoded.clear();
+    for (std::size_t i = 0; i < encoded.size(); ++i) {
+        if (encoded[i] != '%') { decoded.push_back(encoded[i]); continue; }
+        if (i + 2 >= encoded.size()) return false;
+        unsigned value = 0;
+        const auto parsed = std::from_chars(encoded.data() + i + 1,
+                                            encoded.data() + i + 3, value, 16);
+        if (parsed.ec != std::errc{} || parsed.ptr != encoded.data() + i + 3) return false;
+        decoded.push_back(static_cast<char>(value));
+        i += 2;
+    }
+    return true;
+}
+
+bool query_parameters(const std::string& target,
+                      std::unordered_map<std::string, std::string>& values) {
+    auto position = target.find('?');
+    while (position != std::string::npos && position + 1 < target.size()) {
+        const auto end = target.find('&', position + 1);
+        const auto equal = target.find('=', position + 1);
+        if (equal == std::string::npos || (end != std::string::npos && equal > end)) break;
+        std::string value;
+        if (!decode_component(target.substr(equal + 1, end - equal - 1), value)) return false;
+        values[target.substr(position + 1, equal - position - 1)] = std::move(value);
+        position = end;
+    }
+    return true;
+}
+
+template <typename Number>
+bool parse_number(const std::string& text, Number& value) {
+    const auto result = std::from_chars(text.data(), text.data() + text.size(), value);
+    return result.ec == std::errc{} && result.ptr == text.data() + text.size();
+}
+
 bool alert_route(const std::string& path) {
     constexpr const char* prefix = "/api/v1/alerts/";
     return path == "/api/v1/alerts" ||
@@ -105,7 +184,7 @@ bool alert_route(const std::string& path) {
 } // namespace
 
 Response route_request(const Request& request, const StatusSnapshot& status,
-                       ApiState& api) {
+                       ApiState& api, AlertRepository* alerts) {
     const std::string target(request.target());
     const auto query = target.find('?');
     const std::string path = target.substr(0, query);
@@ -170,7 +249,56 @@ Response route_request(const Request& request, const StatusSnapshot& status,
              << ",\"satellites_used\":" << fix->satellites_used << "}\n";
         return json_response(http::status::ok, request.version(), body.str());
     }
-    if (alert_route(path) || path == "/api/v1/recordings") {
+    if (alert_route(path)) {
+        if (!alerts) {
+            return json_response(http::status::service_unavailable, request.version(),
+                                 "{\"available\":false,\"items\":[]}\n");
+        }
+        std::string error;
+        if (path != "/api/v1/alerts") {
+            const auto alert = alerts->find_by_id(path.substr(15), error);
+            if (!error.empty()) return json_response(http::status::internal_server_error,
+                request.version(), "{\"error\":" + json_string(error) + "}\n");
+            if (!alert) return json_response(http::status::not_found, request.version(),
+                                             "{\"error\":\"alert not found\"}\n");
+            return json_response(http::status::ok, request.version(), alert_json(*alert) + "\n");
+        }
+        std::unordered_map<std::string, std::string> parameters;
+        if (!query_parameters(target, parameters)) {
+            return json_response(http::status::bad_request, request.version(),
+                                 "{\"error\":\"invalid query encoding\"}\n");
+        }
+        std::size_t limit = 100;
+        if (const auto it = parameters.find("limit"); it != parameters.end()) {
+            if (!parse_number(it->second, limit) || limit == 0 || limit > 1000) {
+                return json_response(http::status::bad_request, request.version(),
+                                     "{\"error\":\"invalid limit\"}\n");
+            }
+        }
+        std::vector<AlertEvent> items;
+        const auto from = parameters.find("from");
+        const auto to = parameters.find("to");
+        const auto class_name = parameters.find("class");
+        if ((from == parameters.end()) != (to == parameters.end()) ||
+            (class_name != parameters.end() && from != parameters.end())) {
+            return json_response(http::status::bad_request, request.version(),
+                                 "{\"error\":\"invalid alert filters\"}\n");
+        }
+        if (from != parameters.end()) {
+            std::int64_t from_ms = 0, to_ms = 0;
+            if (!parse_number(from->second, from_ms) || !parse_number(to->second, to_ms)) {
+                return json_response(http::status::bad_request, request.version(),
+                                     "{\"error\":\"invalid time range\"}\n");
+            }
+            items = alerts->find_by_time_range(from_ms, to_ms, limit, error);
+        } else if (class_name != parameters.end()) {
+            items = alerts->find_by_class(class_name->second, limit, error);
+        } else items = alerts->find_recent(limit, error);
+        if (!error.empty()) return json_response(http::status::internal_server_error,
+            request.version(), "{\"error\":" + json_string(error) + "}\n");
+        return json_response(http::status::ok, request.version(), alerts_json(items));
+    }
+    if (path == "/api/v1/recordings") {
         return json_response(http::status::service_unavailable, request.version(),
                              "{\"available\":false,\"items\":[]}\n");
     }

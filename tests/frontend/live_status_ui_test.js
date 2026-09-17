@@ -59,13 +59,16 @@ function createHarness() {
       latitude: 25.033964, longitude: 121.564468},
     detections: {available: true, frame_sequence: 5, detections: [
       {class_id: 0, class_name: "person", confidence: 0.9}
-    ]}
+    ]},
+    alerts: {available: true, items: [{id: "a-1", detections: [
+      {class_name: "person"}]}]}
   };
   const fetchCalls = [];
   const fetch = async (url) => {
     fetchCalls.push(url);
     const value = url.endsWith("/status") ? snapshots.status
-      : url.endsWith("/gps") ? snapshots.gps : snapshots.detections;
+      : url.endsWith("/gps") ? snapshots.gps
+      : url.includes("/alerts?") ? snapshots.alerts : snapshots.detections;
     return {ok: true, status: 200, statusText: "OK",
       json: async () => structuredClone(value)};
   };
@@ -148,6 +151,7 @@ test("REST bootstrap is resynchronized after the socket opens", async () => {
   assert.equal(harness.elements.get("connection").textContent, "Live");
   assert.equal(harness.elements.get("detector-state").textContent, "Disabled");
   assert.equal(harness.elements.get("gps-state").textContent, "Fixed / simulated");
+  assert.equal(harness.elements.get("alerts").children.length, 1);
   assert.equal(harness.fetchCalls.filter((path) => path.endsWith("/status")).length, 2);
 
   harness.sockets[0].message({type: "status", data: {
@@ -169,6 +173,7 @@ test("newer socket detections win and reconnect clears stale detections", async 
 
   first.close();
   harness.snapshots.detections = {available: false, frame_sequence: 0, detections: []};
+  harness.snapshots.alerts.items.unshift({id: "a-2", detections: [{class_name: "car"}]});
   harness.runTimer(1000);
   assert.equal(harness.sockets.length, 2);
   harness.sockets[1].open();
@@ -176,6 +181,7 @@ test("newer socket detections win and reconnect clears stale detections", async 
 
   assert.equal(harness.elements.get("detections").children[0].children[0].textContent,
     "No detections yet");
+  assert.equal(harness.elements.get("alerts").children.length, 2);
 });
 
 test("a stuck handshake is closed and advances exponential retry", async () => {

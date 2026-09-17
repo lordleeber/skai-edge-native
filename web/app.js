@@ -13,6 +13,7 @@
   let activeSocket = null;
   let latestDetectionSequence = -1;
   let bootstrapPromise;
+  const alertIds = new Set();
 
   async function getJson(path) {
     const controller = new AbortController();
@@ -78,16 +79,23 @@
   }
 
   function addAlert(data, kind = "Alert") {
+    if (data.id && alertIds.has(data.id)) return;
+    if (data.id) alertIds.add(data.id);
     const list = byId("alerts");
     if (list.firstElementChild?.classList.contains("empty")) list.replaceChildren();
     const item = document.createElement("li");
     const title = document.createElement("strong");
     title.textContent = kind;
     const detail = document.createElement("span");
-    detail.textContent = data.message || data.class || "New event";
+    detail.textContent = data.message || data.class ||
+      data.detections?.[0]?.class_name || "New event";
     item.append(title, detail);
     list.prepend(item);
     while (list.children.length > 6) list.lastElementChild.remove();
+  }
+
+  function mergeAlerts(data) {
+    [...(data.items || [])].reverse().forEach((alert) => addAlert(alert));
   }
 
   function stamp() {
@@ -192,7 +200,8 @@
         {status: "unavailable", uptime_s: 0}),
       loadSnapshot("gps", "/api/v1/gps", renderGps, {available: false}),
       loadSnapshot("detection", "/api/v1/detections/latest", renderDetections,
-        {available: false, detections: []})
+        {available: false, detections: []}),
+      getJson("/api/v1/alerts?limit=6").then(mergeAlerts).catch(() => {})
     ]);
   }
 

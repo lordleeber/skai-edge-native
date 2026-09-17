@@ -154,6 +154,8 @@ void validate(const Config& config) {
                 "recording.segment_seconds", "must be positive");
     check_range(!config.storage.database_path.empty(), "storage.database_path",
                 "must not be empty");
+    check_range(!config.storage.alert_directory.empty(), "storage.alert_directory",
+                "must not be empty");
     for (std::size_t index = 0; index < config.alerts.size(); ++index) {
         const auto& rule = config.alerts[index];
         const auto field = "alerts[" + std::to_string(index) + "]";
@@ -236,8 +238,9 @@ Config parse(const YAML::Node& root) {
         read_scalar(section, "segment_seconds", "recording", config.recording.segment_seconds);
     }
     if (const auto section = root["storage"]) {
-        check_keys(section, "storage", {"database_path"});
+        check_keys(section, "storage", {"database_path", "alert_directory"});
         read_scalar(section, "database_path", "storage", config.storage.database_path);
+        read_scalar(section, "alert_directory", "storage", config.storage.alert_directory);
     }
     if (const auto section = root["alerts"]) {
         if (!section.IsSequence()) {

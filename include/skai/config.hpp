@@ -45,6 +45,7 @@ struct RecordingConfig {
 
 struct StorageConfig {
     std::string database_path = "/var/lib/skai-edge/skai-edge.db";
+    std::string alert_directory = "/var/lib/skai-edge/alerts";
 };
 
 struct AlertRoi {
