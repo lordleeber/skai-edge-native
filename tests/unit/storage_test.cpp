@@ -6,14 +6,16 @@
 #include <atomic>
 #include <cmath>
 #include <filesystem>
+#include <memory>
+#include <sstream>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <unistd.h>
 
 namespace {
-
 class TemporaryDatabase {
 public:
     TemporaryDatabase() {
@@ -24,14 +26,11 @@ public:
             path_ = root_ + "/nested/skai-edge.db";
         }
     }
-
     ~TemporaryDatabase() {
         std::error_code error;
         std::filesystem::remove_all(root_, error);
     }
-
     const std::string& path() const { return path_; }
-
 private:
     std::string root_;
     std::string path_;
@@ -76,7 +75,6 @@ TEST(Database, LifecycleClosesAndCanReopenTheDatabase) {
     skai::Config config;
     config.storage.database_path = temporary.path();
     skai::Database database;
-
     ASSERT_TRUE(database.initialize(config));
     EXPECT_TRUE(database.start());
     EXPECT_TRUE(database.is_open());
@@ -87,6 +85,38 @@ TEST(Database, LifecycleClosesAndCanReopenTheDatabase) {
     database.wait();
 }
 
+TEST(Database, LifecycleReloadsConfigOwnedPathButPreservesExplicitPath) {
+    TemporaryDatabase first;
+    TemporaryDatabase second;
+    skai::Config config;
+    config.storage.database_path = first.path();
+    skai::Database configured;
+    ASSERT_TRUE(configured.initialize(config)) << configured.last_error();
+    configured.wait();
+    config.storage.database_path = second.path();
+    ASSERT_TRUE(configured.initialize(config)) << configured.last_error();
+    configured.wait();
+    EXPECT_TRUE(std::filesystem::exists(second.path()));
+    std::filesystem::remove(second.path());
+    skai::Database explicit_path(first.path());
+    ASSERT_TRUE(explicit_path.initialize(config)) << explicit_path.last_error();
+    explicit_path.wait();
+    EXPECT_FALSE(std::filesystem::exists(second.path()));
+}
+
+TEST(Database, ApplicationReportsDetailedStorageInitializationFailure) {
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    skai::Application::Modules modules;
+    modules.storage = std::make_unique<skai::Database>("/dev/null/skai-edge.db");
+    skai::Application application({}, logger, std::move(modules));
+    EXPECT_FALSE(application.initialize());
+    EXPECT_EQ(application.last_error_module(), "storage");
+    EXPECT_FALSE(application.last_error().empty());
+    EXPECT_NE(application.last_error(), "storage.initialize failed");
+    EXPECT_NE(application.last_error().find("database"), std::string::npos);
+}
+
 TEST(AlertRepository, InsertsAndReadsOneAlertWithDetections) {
     TemporaryDatabase temporary;
     skai::Database database(temporary.path());
@@ -94,7 +124,6 @@ TEST(AlertRepository, InsertsAndReadsOneAlertWithDetections) {
     ASSERT_TRUE(database.open(error)) << error;
     skai::AlertRepository repository(database);
     const auto expected = make_alert("alert-1", 1700000000123);
-
     ASSERT_TRUE(repository.insert(expected, error)) << error;
     const auto actual = repository.find_by_id(expected.id, error);
     ASSERT_TRUE(actual.has_value()) << error;
@@ -117,7 +146,6 @@ TEST(AlertRepository, RollsBackAlertWhenDetectionInsertionFails) {
     skai::AlertRepository repository(database);
     auto alert = make_alert("rollback-me", 1700000000124);
     alert.detections[1].class_name.clear();
-
     EXPECT_FALSE(repository.insert(alert, error));
     EXPECT_FALSE(error.empty());
     error.clear();

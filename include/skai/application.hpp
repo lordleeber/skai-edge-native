@@ -22,6 +22,7 @@ public:
     virtual bool start() = 0;
     virtual void stop() noexcept = 0;
     virtual void wait() noexcept = 0;
+    virtual std::string last_error() const { return {}; }
 };
 
 class Application {

@@ -52,7 +52,8 @@ bool execute(sqlite3* connection, const char* sql, std::string& error) {
 
 } // namespace
 
-Database::Database(std::string path) : path_(std::move(path)) {}
+Database::Database(std::string path)
+    : path_(std::move(path)), path_from_config_(path_.empty()) {}
 
 Database::~Database() { close(); }
 
@@ -85,9 +86,30 @@ bool Database::open_locked(std::string& error) {
         return false;
     }
     sqlite3_busy_timeout(connection_, 5000);
-    if (!execute(connection_, "PRAGMA foreign_keys = ON;", error) ||
-        (path_ != ":memory:" && !execute(connection_, "PRAGMA journal_mode = WAL;", error)) ||
-        !migrate_locked(error)) {
+    if (!execute(connection_, "PRAGMA foreign_keys = ON;", error)) {
+        sqlite3_close_v2(connection_);
+        connection_ = nullptr;
+        return false;
+    }
+    if (path_ != ":memory:") {
+        sqlite3_stmt* statement = nullptr;
+        if (sqlite3_prepare_v2(connection_, "PRAGMA journal_mode = WAL;", -1,
+                               &statement, nullptr) != SQLITE_OK) {
+            error = sqlite3_errmsg(connection_);
+        } else if (sqlite3_step(statement) != SQLITE_ROW) {
+            error = sqlite3_errmsg(connection_);
+        } else {
+            const auto* value = sqlite3_column_text(statement, 0);
+            const std::string selected = value
+                ? reinterpret_cast<const char*>(value) : std::string{};
+            if (sqlite3_stricmp(selected.c_str(), "wal") != 0) {
+                error = "could not enable WAL journal mode; SQLite selected '" +
+                        selected + "'";
+            }
+        }
+        sqlite3_finalize(statement);
+    }
+    if (!error.empty() || !migrate_locked(error)) {
         sqlite3_close_v2(connection_);
         connection_ = nullptr;
         return false;
@@ -177,14 +199,22 @@ int Database::schema_version(std::string& error) const {
 
 bool Database::initialize(const Config& config) {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (!path_.empty() && connection_) return false;
-    if (path_.empty()) path_ = config.storage.database_path;
-    std::string error;
-    return open_locked(error);
+    last_error_.clear();
+    if (connection_) {
+        last_error_ = "database is already open";
+        return false;
+    }
+    if (path_from_config_) path_ = config.storage.database_path;
+    return open_locked(last_error_);
 }
 
 bool Database::start() { return is_open(); }
 void Database::stop() noexcept {}
 void Database::wait() noexcept { close(); }
+
+std::string Database::last_error() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return last_error_;
+}
 
 } // namespace skai
