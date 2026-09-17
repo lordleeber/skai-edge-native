@@ -172,6 +172,29 @@ TEST(HttpRouter, ControlsDetectorAndMakesDeferredSubsystemsExplicit) {
     EXPECT_EQ(unsupported.result(), http::status::service_unavailable);
 }
 
+TEST(HttpRouter, ControlsConfiguredRecording) {
+    skai::ApiState api;
+    skai::RecordingController recording;
+    skai::RecordingConfig config;
+    config.enabled = false;
+    recording.configure(config);
+    const skai::RuntimeStatusSnapshot status;
+
+    const auto started = skai::web::route_request(
+        {http::verb::post, "/api/v1/recording/start", 11}, status, api, nullptr,
+        &recording);
+    EXPECT_EQ(started.result(), http::status::ok);
+    EXPECT_NE(started.body().find("\"state\":\"starting\""), std::string::npos);
+    const auto listed = skai::web::route_request(
+        {http::verb::get, "/api/v1/recordings", 11}, status, api, nullptr, &recording);
+    EXPECT_NE(listed.body().find("\"available\":true"), std::string::npos);
+    const auto stopped = skai::web::route_request(
+        {http::verb::post, "/api/v1/recording/stop", 11}, status, api, nullptr,
+        &recording);
+    EXPECT_EQ(stopped.result(), http::status::ok);
+    EXPECT_NE(stopped.body().find("\"state\":\"stopped\""), std::string::npos);
+}
+
 TEST(HttpRouter, DisabledGpsHasNoApiFix) {
     skai::ApiState api;
     skai::Config config;

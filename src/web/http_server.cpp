@@ -35,12 +35,14 @@ public:
                 std::shared_ptr<RuntimeStatus> status, std::shared_ptr<ApiState> api,
                 std::shared_ptr<EventChannel> events,
                 std::shared_ptr<AlertRepository> alerts,
+                std::shared_ptr<RecordingController> recording,
                 std::shared_ptr<StaticFileHandler> static_files,
                 std::function<void(std::shared_ptr<WebSocketSession>)> register_ws,
                 std::function<void(WebSocketSession*)> unregister_ws)
         : stream_(std::move(socket)), started_(started), status_(std::move(status)),
           api_(std::move(api)), events_(std::move(events)),
           alerts_(std::move(alerts)),
+          recording_(std::move(recording)),
           static_files_(std::move(static_files)),
           register_ws_(std::move(register_ws)),
           unregister_ws_(std::move(unregister_ws)) {
@@ -89,7 +91,7 @@ private:
         status.uptime_s = static_cast<std::uint64_t>(
             std::chrono::duration_cast<std::chrono::seconds>(
                 std::chrono::steady_clock::now() - started_).count());
-        send(route_request(parser_.get(), status, *api_, alerts_.get()));
+        send(route_request(parser_.get(), status, *api_, alerts_.get(), recording_.get()));
     }
 
     Response json_error(http::status result, const char* message) {
@@ -125,6 +127,7 @@ private:
     std::shared_ptr<ApiState> api_;
     std::shared_ptr<EventChannel> events_;
     std::shared_ptr<AlertRepository> alerts_;
+    std::shared_ptr<RecordingController> recording_;
     std::shared_ptr<StaticFileHandler> static_files_;
     std::function<void(std::shared_ptr<WebSocketSession>)> register_ws_;
     std::function<void(WebSocketSession*)> unregister_ws_;
@@ -137,11 +140,13 @@ struct HttpServer::State {
     State(Logger& logger, std::shared_ptr<RuntimeStatus> status,
           std::shared_ptr<ApiState> api, std::shared_ptr<EventChannel> events,
           std::shared_ptr<AlertRepository> alerts,
+          std::shared_ptr<RecordingController> recording,
           const std::string& web_root)
         : acceptor(context), shutdown_timer(context), logger(logger),
           status(std::move(status)), api(std::move(api)),
           events(std::move(events)),
           alerts(std::move(alerts)),
+          recording(std::move(recording)),
           static_files(std::make_shared<StaticFileHandler>(web_root)) {}
 
     void accept() {
@@ -150,6 +155,7 @@ struct HttpServer::State {
                 std::make_shared<HttpSession>(std::move(socket), started, status,
                                               api, events,
                                               alerts,
+                                              recording,
                                               static_files,
                                               [this](auto session) {
                                                   sessions.erase(std::remove_if(
@@ -183,6 +189,7 @@ struct HttpServer::State {
     std::shared_ptr<ApiState> api;
     std::shared_ptr<EventChannel> events;
     std::shared_ptr<AlertRepository> alerts;
+    std::shared_ptr<RecordingController> recording;
     std::shared_ptr<StaticFileHandler> static_files;
     std::vector<std::weak_ptr<WebSocketSession>> sessions;
     std::thread worker;
@@ -212,12 +219,13 @@ HttpServer::HttpServer(Logger& logger, std::shared_ptr<RuntimeStatus> status,
 HttpServer::HttpServer(Logger& logger, std::shared_ptr<RuntimeStatus> status,
                        std::shared_ptr<ApiState> api,
                        std::shared_ptr<EventChannel> events,
-                       std::shared_ptr<AlertRepository> alerts)
+                       std::shared_ptr<AlertRepository> alerts,
+                       std::shared_ptr<RecordingController> recording)
     : logger_(logger), status_(status ? std::move(status)
                                      : std::make_shared<RuntimeStatus>()),
       api_(api ? std::move(api) : std::make_shared<ApiState>()),
       events_(events ? std::move(events) : std::make_shared<EventChannel>()),
-      alerts_(std::move(alerts)) {
+      alerts_(std::move(alerts)), recording_(std::move(recording)) {
     api_->bind_runtime_status(status_);
 }
 
@@ -229,7 +237,7 @@ HttpServer::~HttpServer() {
 bool HttpServer::initialize(const Config& config) {
     if (state_) return false;
     api_->configure(config);
-    auto next = std::make_unique<State>(logger_, status_, api_, events_, alerts_,
+    auto next = std::make_unique<State>(logger_, status_, api_, events_, alerts_, recording_,
                                         config.web.root);
     if (!next->static_files->valid()) {
         logger_.log(LogLevel::Error, "web", next->static_files->error());

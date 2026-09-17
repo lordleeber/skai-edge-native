@@ -129,7 +129,7 @@ add_library(skai-web src/web/http_server.cpp src/web/router.cpp
     src/web/static_file_handler.cpp src/web/websocket_session.cpp)
 target_include_directories(skai-web PUBLIC include)
 target_link_libraries(skai-web PUBLIC skai-application skai-events skai-gps
-    skai-storage Boost::system)
+    skai-storage skai-recording Boost::system)
 
 add_library(skai-gstreamer src/video/gstreamer_runtime.cpp)
 target_include_directories(skai-gstreamer PUBLIC include)
@@ -140,6 +140,11 @@ target_include_directories(skai-h264-encoder PUBLIC include)
 target_link_libraries(skai-h264-encoder PUBLIC skai-gstreamer skai-core skai-application
     PkgConfig::GST_VIDEO_APP)
 
+add_library(skai-recording src/video/recording.cpp)
+target_include_directories(skai-recording PUBLIC include)
+target_link_libraries(skai-recording PUBLIC skai-h264-encoder skai-events
+    skai-application PkgConfig::GST_VIDEO_APP)
+
 add_library(skai-rtsp-source src/video/rtsp_source.cpp src/video/rtsp_video_module.cpp)
 target_include_directories(skai-rtsp-source PUBLIC include)
 target_link_libraries(skai-rtsp-source PUBLIC skai-gstreamer skai-config skai-core
@@ -147,7 +152,7 @@ target_link_libraries(skai-rtsp-source PUBLIC skai-gstreamer skai-config skai-co
 
 add_executable(skai-edge src/main.cpp)
 target_link_libraries(skai-edge PRIVATE skai-cli skai-application skai-gstreamer
-    skai-rtsp-source skai-h264-encoder skai-web skai-storage)
+    skai-rtsp-source skai-h264-encoder skai-recording skai-web skai-storage)
 if(TARGET skai-inference-module)
     target_link_libraries(skai-edge PRIVATE skai-inference-module)
     target_compile_definitions(skai-edge PRIVATE SKAI_HAS_YOLO_PIPELINE=1)
