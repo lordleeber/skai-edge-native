@@ -98,3 +98,17 @@ TEST(WebRtcDependency, ConfiguresSkaiIceBeforePeerConnectionGathering) {
     }
     rtc::Cleanup().wait();
 }
+
+TEST(WebRtcDependency, RejectsWhitelistWithoutAnyLocalInterface) {
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    skai::IceRuntimeModule runtime(logger);
+    skai::Config config;
+    config.webrtc.host_interfaces = {"skai-interface-that-does-not-exist"};
+
+    EXPECT_FALSE(runtime.initialize(config));
+    EXPECT_NE(runtime.last_error().find("has no interface present"), std::string::npos);
+    EXPECT_NE(runtime.last_error().find("skai-interface-that-does-not-exist"),
+              std::string::npos);
+    EXPECT_TRUE(logs.str().empty());
+}

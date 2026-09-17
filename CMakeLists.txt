@@ -30,7 +30,7 @@ set(LIBDATACHANNEL_SOURCE_DIR "${PROJECT_SOURCE_DIR}/third_party/libdatachannel"
 if(NOT EXISTS "${SKAI_ICE_SOURCE_DIR}/CMakeLists.txt" OR
         NOT EXISTS "${LIBDATACHANNEL_SOURCE_DIR}/CMakeLists.txt")
     message(FATAL_ERROR
-        "Step 23 dependencies are missing. Run: git submodule update --init --recursive")
+        "Step 23 dependencies are missing. Run: scripts/bootstrap_dependencies.sh")
 endif()
 
 add_subdirectory(third_party/skai-ice EXCLUDE_FROM_ALL)

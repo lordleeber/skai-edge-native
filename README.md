@@ -60,11 +60,19 @@ ctest --test-dir build --output-on-failure
 ./build/skai-edge --rtsp-test --config config/config.example.yaml
 ```
 
-Clone dependencies before configuring a fresh checkout:
+Clone dependencies before configuring a fresh checkout. `skai-ice` is a
+private deployment dependency, so CI runners, new devices, and developers need
+a GitHub token with read access to `lordleeber/skai-ice`:
 
 ```sh
-git submodule update --init --recursive
+SKAI_GITHUB_TOKEN=... ./scripts/bootstrap_dependencies.sh
 ```
+
+The bootstrap script passes the credential as a transient Git HTTP header; it
+does not put the token in `.gitmodules` or a remote URL. Store the token in the
+CI secret manager and expose it only for this command. An already authenticated
+Git environment may omit `SKAI_GITHUB_TOKEN`. Anonymous recursive submodule
+checkout is not a supported build path while `skai-ice` remains private.
 
 Step 23 pins `skai-ice` at `1d61d0e` and libdatachannel v0.22.6 at `0d6adc0`.
 The latter is the exact revision against which `skai-ice`'s vendored
