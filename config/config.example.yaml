@@ -29,6 +29,14 @@ recording:
 storage:
   database_path: /var/lib/skai-edge/skai-edge.db
 
+alerts:
+  - class: person
+    confidence: 0.70
+    consecutive_frames: 3
+    cooldown_seconds: 10
+    # Normalized detection-center region; omit roi to use the full frame.
+    roi: {x1: 0.0, y1: 0.0, x2: 1.0, y2: 1.0}
+
 gps:
   enabled: true
   source: fixed

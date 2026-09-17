@@ -85,7 +85,7 @@ if(TARGET skai-tensorrt)
         add_library(skai-inference-module src/inference/yolo_inference_module.cpp)
         target_include_directories(skai-inference-module PUBLIC include)
         target_link_libraries(skai-inference-module PUBLIC skai-yolo-detector
-            skai-annotator skai-application skai-core skai-events)
+            skai-annotator skai-application skai-core skai-events skai-alerts)
     else()
         message(STATUS "CUDA compiler unavailable; skipping skai-preprocess-cuda")
     endif()
@@ -117,6 +117,11 @@ add_library(skai-gps src/gps/gps_source.cpp src/gps/gps_state.cpp
     src/gps/gps_module.cpp)
 target_include_directories(skai-gps PUBLIC include)
 target_link_libraries(skai-gps PUBLIC skai-application)
+
+add_library(skai-alerts src/alerts/alert_manager.cpp)
+target_include_directories(skai-alerts PUBLIC include)
+target_link_libraries(skai-alerts PUBLIC skai-config skai-events skai-gps
+    skai-yolo-postprocess)
 
 add_library(skai-web src/web/http_server.cpp src/web/router.cpp
     src/web/static_file_handler.cpp src/web/websocket_session.cpp)

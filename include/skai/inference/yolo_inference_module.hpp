@@ -1,5 +1,6 @@
 #pragma once
 
+#include "skai/alerts/alert_manager.hpp"
 #include "skai/application.hpp"
 #include "skai/api_state.hpp"
 #include "skai/core/bounded_queue.hpp"
@@ -22,7 +23,8 @@ public:
                         BoundedQueue<Frame>& annotated_output, Logger& logger,
                         std::shared_ptr<RuntimeStatus> status = {},
                         std::shared_ptr<ApiState> api = {},
-                        std::shared_ptr<EventChannel> events = {});
+                        std::shared_ptr<EventChannel> events = {},
+                        std::shared_ptr<AlertManager> alerts = {});
 
     bool initialize(const Config& config) override;
     bool start() override;
@@ -38,6 +40,7 @@ private:
     std::shared_ptr<RuntimeStatus> status_;
     std::shared_ptr<ApiState> api_;
     std::shared_ptr<EventChannel> events_;
+    std::shared_ptr<AlertManager> alerts_;
     AnnotationOptions annotation_;
     std::unique_ptr<TensorRtBootstrap> bootstrap_;
     std::unique_ptr<YoloDetector> detector_;
