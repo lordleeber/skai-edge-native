@@ -1,0 +1,6 @@
+[submodule "third_party/skai-ice"]
+	path = third_party/skai-ice
+	url = https://github.com/lordleeber/skai-ice.git
+[submodule "third_party/libdatachannel"]
+	path = third_party/libdatachannel
+	url = https://github.com/paullouisageneau/libdatachannel.git
