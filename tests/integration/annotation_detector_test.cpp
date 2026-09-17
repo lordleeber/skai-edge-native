@@ -9,9 +9,11 @@
 
 #include <cuda_runtime_api.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -99,9 +101,11 @@ TEST(AnnotationDetector, RtspPipelinePublishesAnnotationsAndHonorsDisableFlag) {
     events->subscribe([&](const std::string& event) {
         published_events.push_back(event);
     });
+    auto alerts = std::make_shared<skai::AlertManager>(nullptr, events);
     status->set_detector_expected(true);
     status->set_running(true);
-    skai::YoloInferenceModule module(input, output, logger, status, api, events);
+    skai::YoloInferenceModule module(input, output, logger, status, api, events,
+                                     alerts);
     std::string error;
     ASSERT_TRUE(skai::gst::initialize_once(error)) << error;
     skai::test::RtspTestServer server;
@@ -110,8 +114,39 @@ TEST(AnnotationDetector, RtspPipelinePublishesAnnotationsAndHonorsDisableFlag) {
     config.detector.engine = SKAI_YOLO_ENGINE;
     config.detector.confidence = 0.1;
     config.detector.annotate = true;
+    config.alerts.push_back({"umbrella", 0.1, 2, 0, std::nullopt});
     ASSERT_TRUE(module.initialize(config));
     ASSERT_TRUE(module.start());
+    ASSERT_TRUE(input.push(reference_frame()));
+    ASSERT_TRUE(output.pop_for(std::chrono::seconds(2)).has_value()) << logs.str();
+    ASSERT_TRUE(input.push(reference_frame()));
+    ASSERT_TRUE(output.pop_for(std::chrono::seconds(2)).has_value()) << logs.str();
+    const auto alert_event = std::find_if(
+        published_events.begin(), published_events.end(), [](const auto& event) {
+            return event.find("\"type\":\"alert\"") != std::string::npos;
+        });
+    ASSERT_NE(alert_event, published_events.end());
+    EXPECT_NE(alert_event->find("\"class_name\":\"umbrella\""),
+              std::string::npos);
+    const auto alert_count = [&] {
+        return std::count_if(published_events.begin(), published_events.end(),
+                             [](const auto& event) {
+            return event.find("\"type\":\"alert\"") != std::string::npos;
+        });
+    };
+    ASSERT_TRUE(input.push(reference_frame()));
+    ASSERT_TRUE(output.pop_for(std::chrono::seconds(2)).has_value()) << logs.str();
+    const auto alerts_before_toggle = alert_count();
+    api->set_detector_enabled(false);
+    ASSERT_TRUE(input.push(reference_frame()));
+    ASSERT_TRUE(output.pop_for(std::chrono::seconds(2)).has_value()) << logs.str();
+    api->set_detector_enabled(true);
+    ASSERT_TRUE(input.push(reference_frame()));
+    ASSERT_TRUE(output.pop_for(std::chrono::seconds(2)).has_value()) << logs.str();
+    EXPECT_EQ(alert_count(), alerts_before_toggle);
+    ASSERT_TRUE(input.push(reference_frame()));
+    ASSERT_TRUE(output.pop_for(std::chrono::seconds(2)).has_value()) << logs.str();
+    EXPECT_EQ(alert_count(), alerts_before_toggle + 1);
     skai::RtspSource source(input, logger, skai::DecodeMode::Auto, true, status);
     skai::VideoConfig video;
     video.rtsp_url = server.url();
@@ -124,26 +159,27 @@ TEST(AnnotationDetector, RtspPipelinePublishesAnnotationsAndHonorsDisableFlag) {
     EXPECT_GT(annotated->sequence, 0U);
     EXPECT_FALSE(annotated->bgr.empty());
     const auto live_status = status->snapshot();
+    const auto latest = api->latest_detections();
+    source.stop();
+    module.stop();
+    module.wait();
     EXPECT_EQ(live_status.status, "running");
     EXPECT_TRUE(live_status.video_fps.has_value());
     EXPECT_TRUE(live_status.detector_fps.has_value());
     EXPECT_TRUE(live_status.last_inference_ms.has_value());
-    const auto latest = api->latest_detections();
     EXPECT_TRUE(latest.available);
     EXPECT_GE(latest.frame_sequence, second->sequence);
-    ASSERT_FALSE(published_events.empty());
-    EXPECT_NE(published_events.back().find("\"type\":\"detection\""),
-              std::string::npos);
-    EXPECT_NE(published_events.back().find("\"available\":true"),
-              std::string::npos);
-    EXPECT_NE(published_events.back().find("\"detections\":"),
-              std::string::npos);
-    source.stop();
-    module.stop();
-    module.wait();
+    const auto detection_event = std::find_if(
+        published_events.begin(), published_events.end(), [](const auto& event) {
+            return event.find("\"type\":\"detection\"") != std::string::npos;
+        });
+    ASSERT_NE(detection_event, published_events.end());
+    EXPECT_NE(detection_event->find("\"available\":true"), std::string::npos);
+    EXPECT_NE(detection_event->find("\"detections\":"), std::string::npos);
 
     const auto frame = reference_frame();
     const auto original_pixels = frame.bgr;
+    const auto events_before_disable = published_events.size();
     api->set_detector_enabled(false);
     ASSERT_TRUE(module.initialize(config));
     ASSERT_TRUE(module.start());
@@ -153,4 +189,5 @@ TEST(AnnotationDetector, RtspPipelinePublishesAnnotationsAndHonorsDisableFlag) {
     module.wait();
     ASSERT_TRUE(passthrough.has_value()) << logs.str();
     EXPECT_EQ(passthrough->bgr, original_pixels);
+    EXPECT_EQ(published_events.size(), events_before_disable);
 }

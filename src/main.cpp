@@ -10,6 +10,7 @@
 #include "skai/video/rtsp_source.hpp"
 #include "skai/web/http_server.hpp"
 #if SKAI_HAS_YOLO_PIPELINE
+#include "skai/alerts/alert_manager.hpp"
 #include "skai/inference/yolo_inference_module.hpp"
 #endif
 
@@ -96,9 +97,10 @@ int main(int argc, char* argv[]) {
     modules.web = std::make_unique<skai::web::HttpServer>(logger, runtime_status,
                                                           api_state, events);
 #if SKAI_HAS_YOLO_PIPELINE
+    auto alert_manager = std::make_shared<skai::AlertManager>(gps_state, events);
     modules.detector = std::make_unique<skai::YoloInferenceModule>(
         inference_frames, annotated_frames, logger, runtime_status, api_state,
-        events);
+        events, alert_manager);
 #else
     api_state->set_detector_supported(false);
     logger.log(skai::LogLevel::Warning, "detector",

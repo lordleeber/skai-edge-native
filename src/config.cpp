@@ -13,6 +13,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace skai {
 namespace {
@@ -153,6 +154,27 @@ void validate(const Config& config) {
                 "recording.segment_seconds", "must be positive");
     check_range(!config.storage.database_path.empty(), "storage.database_path",
                 "must not be empty");
+    for (std::size_t index = 0; index < config.alerts.size(); ++index) {
+        const auto& rule = config.alerts[index];
+        const auto field = "alerts[" + std::to_string(index) + "]";
+        check_range(!rule.class_name.empty(), field + ".class", "must not be empty");
+        check_range(std::isfinite(rule.confidence) && rule.confidence >= 0 &&
+                        rule.confidence <= 1,
+                    field + ".confidence", "must be between 0 and 1");
+        check_range(rule.consecutive_frames >= 1,
+                    field + ".consecutive_frames", "must be positive");
+        check_range(rule.cooldown_seconds >= 0,
+                    field + ".cooldown_seconds", "must not be negative");
+        if (rule.roi) {
+            const auto& roi = *rule.roi;
+            check_range(std::isfinite(roi.x1) && std::isfinite(roi.y1) &&
+                            std::isfinite(roi.x2) && std::isfinite(roi.y2) &&
+                            roi.x1 >= 0 && roi.y1 >= 0 && roi.x2 <= 1 && roi.y2 <= 1,
+                        field + ".roi", "coordinates must be between 0 and 1");
+            check_range(roi.x1 < roi.x2 && roi.y1 < roi.y2,
+                        field + ".roi", "must have x1 < x2 and y1 < y2");
+        }
+    }
 
     check_range(config.gps.source == "fixed", "gps.source", "must be fixed");
     check_range(std::isfinite(config.gps.latitude) && std::abs(config.gps.latitude) <= 90,
@@ -174,7 +196,7 @@ void validate(const Config& config) {
 
 Config parse(const YAML::Node& root) {
     check_keys(root, "", {"video", "detector", "web", "recording", "storage",
-                           "gps", "webrtc", "logging"});
+                           "alerts", "gps", "webrtc", "logging"});
     if (!root["video"] || !root["video"].IsMap() || !root["video"]["rtsp_url"]) {
         throw std::invalid_argument("video.rtsp_url is required");
     }
@@ -216,6 +238,38 @@ Config parse(const YAML::Node& root) {
     if (const auto section = root["storage"]) {
         check_keys(section, "storage", {"database_path"});
         read_scalar(section, "database_path", "storage", config.storage.database_path);
+    }
+    if (const auto section = root["alerts"]) {
+        if (!section.IsSequence()) {
+            throw std::invalid_argument("alerts must be a sequence");
+        }
+        for (std::size_t index = 0; index < section.size(); ++index) {
+            const auto item = section[index];
+            const auto path = "alerts[" + std::to_string(index) + "]";
+            check_keys(item, path, {"class", "confidence", "consecutive_frames",
+                                    "cooldown_seconds", "roi"});
+            AlertRuleConfig rule;
+            read_scalar(item, "class", path, rule.class_name);
+            read_scalar(item, "confidence", path, rule.confidence);
+            read_scalar(item, "consecutive_frames", path, rule.consecutive_frames);
+            read_scalar(item, "cooldown_seconds", path, rule.cooldown_seconds);
+            if (const auto roi = item["roi"]) {
+                check_keys(roi, path + ".roi", {"x1", "y1", "x2", "y2"});
+                for (const auto* coordinate : {"x1", "y1", "x2", "y2"}) {
+                    if (!roi[coordinate]) {
+                        throw std::invalid_argument(path + ".roi." + coordinate +
+                                                    " is required");
+                    }
+                }
+                AlertRoi value;
+                read_scalar(roi, "x1", path + ".roi", value.x1);
+                read_scalar(roi, "y1", path + ".roi", value.y1);
+                read_scalar(roi, "x2", path + ".roi", value.x2);
+                read_scalar(roi, "y2", path + ".roi", value.y2);
+                rule.roi = value;
+            }
+            config.alerts.push_back(std::move(rule));
+        }
     }
     if (const auto section = root["gps"]) {
         check_keys(section, "gps", {"enabled", "source", "latitude", "longitude", "altitude_m"});

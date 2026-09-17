@@ -50,6 +50,44 @@ TEST(Config, CanDisableDetectorAnnotation) {
     EXPECT_FALSE(result.config.detector.annotate);
 }
 
+TEST(Config, ParsesAlertRulesWithOptionalNormalizedRoi) {
+    const auto result = skai::parse_config(
+        "video: {rtsp_url: 'rtsp://camera/stream'}\n"
+        "alerts:\n"
+        "  - class: person\n"
+        "    confidence: 0.7\n"
+        "    consecutive_frames: 3\n"
+        "    cooldown_seconds: 10\n"
+        "    roi: {x1: 0.1, y1: 0.2, x2: 0.8, y2: 0.9}\n");
+    ASSERT_TRUE(result.ok) << result.error;
+    ASSERT_EQ(result.config.alerts.size(), 1U);
+    const auto& rule = result.config.alerts[0];
+    EXPECT_EQ(rule.class_name, "person");
+    EXPECT_DOUBLE_EQ(rule.confidence, 0.7);
+    EXPECT_EQ(rule.consecutive_frames, 3);
+    EXPECT_EQ(rule.cooldown_seconds, 10);
+    ASSERT_TRUE(rule.roi.has_value());
+    EXPECT_DOUBLE_EQ(rule.roi->x1, 0.1);
+    EXPECT_DOUBLE_EQ(rule.roi->y2, 0.9);
+}
+
+TEST(Config, RejectsInvalidAlertRules) {
+    for (const auto* rule : {
+             "{class: '', confidence: 0.7}",
+             "{class: person, confidence: 1.1}",
+             "{class: person, consecutive_frames: 0}",
+             "{class: person, cooldown_seconds: -1}",
+             "{class: person, roi: {x1: 0, y1: 0, x2: 1}}",
+             "{class: person, roi: {x1: 0.8, y1: 0, x2: 0.2, y2: 1}}",
+             "{class: person, roi: {x1: -0.1, y1: 0, x2: 1, y2: 1}}"}) {
+        const auto result = skai::parse_config(
+            "video: {rtsp_url: 'rtsp://camera/stream'}\nalerts: [" +
+            std::string(rule) + "]\n");
+        EXPECT_FALSE(result.ok) << rule;
+        EXPECT_NE(result.error.find("alerts[0]"), std::string::npos) << rule;
+    }
+}
+
 TEST(Config, RejectsMissingRtspUrl) {
     const auto result = skai::parse_config("video: {transport: tcp}\n");
     EXPECT_FALSE(result.ok);

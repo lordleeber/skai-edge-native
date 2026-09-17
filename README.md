@@ -30,6 +30,10 @@ Application-owned GPS module publishes into shared GPS state consumed by the
 web layer and future alert/persistence modules.
 Step 18 adds a lifecycle-managed SQLite database, versioned schema migrations,
 and a serialized alert repository with transactional detection inserts.
+Step 19 adds class/confidence alert rules with consecutive-frame, cooldown, and
+normalized ROI filtering; accepted alerts include the current GPS fix and are
+published through the WebSocket event channel. Snapshot and database writes
+remain Step 20 work.
 Encoding and external media transport remain later steps.
 
 ## Build and test

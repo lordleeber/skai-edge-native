@@ -63,10 +63,11 @@ YoloInferenceModule::YoloInferenceModule(BoundedQueue<Frame>& input,
                                          Logger& logger,
                                          std::shared_ptr<RuntimeStatus> status,
                                          std::shared_ptr<ApiState> api,
-                                         std::shared_ptr<EventChannel> events)
+                                         std::shared_ptr<EventChannel> events,
+                                         std::shared_ptr<AlertManager> alerts)
     : input_(input), output_(annotated_output), logger_(logger),
       status_(std::move(status)), api_(std::move(api)),
-      events_(std::move(events)) {}
+      events_(std::move(events)), alerts_(std::move(alerts)) {}
 
 bool YoloInferenceModule::initialize(const Config& config) {
     if (detector_ || worker_.joinable()) return false;
@@ -75,6 +76,7 @@ bool YoloInferenceModule::initialize(const Config& config) {
     if (status_) status_->clear_detector();
     annotation_.enabled = config.detector.annotate;
     annotation_.show_metrics = true;
+    if (alerts_) alerts_->configure(config.alerts);
     YoloPostprocessConfig postprocess;
     postprocess.confidence_threshold = static_cast<float>(config.detector.confidence);
     postprocess.nms_iou_threshold = static_cast<float>(config.detector.nms);
@@ -168,6 +170,10 @@ void YoloInferenceModule::run() noexcept {
             if (events_) {
                 events_->publish(EventType::Detection,
                                  detection_event_data(detections));
+            }
+            if (alerts_) {
+                alerts_->process(detections, frame->width, frame->height,
+                                 coco_class_names(), permit.generation);
             }
             output_.push(std::move(annotated));
         };

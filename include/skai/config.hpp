@@ -2,6 +2,7 @@
 
 #include "skai/logging.hpp"
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -46,6 +47,21 @@ struct StorageConfig {
     std::string database_path = "/var/lib/skai-edge/skai-edge.db";
 };
 
+struct AlertRoi {
+    double x1 = 0.0;
+    double y1 = 0.0;
+    double x2 = 1.0;
+    double y2 = 1.0;
+};
+
+struct AlertRuleConfig {
+    std::string class_name;
+    double confidence = 0.7;
+    int consecutive_frames = 1;
+    int cooldown_seconds = 10;
+    std::optional<AlertRoi> roi;
+};
+
 struct GpsConfig {
     bool enabled = true;
     std::string source = "fixed";
@@ -71,6 +87,7 @@ struct Config {
     WebConfig web;
     RecordingConfig recording;
     StorageConfig storage;
+    std::vector<AlertRuleConfig> alerts;
     GpsConfig gps;
     WebrtcConfig webrtc;
     LoggingConfig logging;
