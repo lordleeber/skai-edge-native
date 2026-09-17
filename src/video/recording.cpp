@@ -87,9 +87,9 @@ void RecordingController::set_error(std::string error) {
     status_.last_error = std::move(error);
 }
 
-void RecordingController::add_written(std::size_t bytes) {
+void RecordingController::commit_written(std::uint64_t access_units, std::uint64_t bytes) {
     std::lock_guard<std::mutex> lock(mutex_);
-    ++status_.access_units_written;
+    status_.access_units_written += access_units;
     status_.bytes_written += bytes;
 }
 
@@ -200,11 +200,13 @@ bool RecordingModule::open_pipeline(const EncodedAccessUnit&, std::string& error
 
 void RecordingModule::close_pipeline(bool finalize) noexcept {
     if (!pipeline_) return;
+    bool finalized = false;
     if (finalize && appsrc_) {
         gst_app_src_end_of_stream(GST_APP_SRC(appsrc_));
         while (true) {
             const auto event = pipeline_->poll(std::chrono::milliseconds(50));
-            if (event.type == gst::BusEventType::Eos || event.type == gst::BusEventType::Error) break;
+            if (event.type == gst::BusEventType::Eos) { finalized = true; break; }
+            if (event.type == gst::BusEventType::Error) break;
         }
     }
     if (splitmux_) g_signal_handlers_disconnect_by_data(splitmux_, this);
@@ -212,6 +214,9 @@ void RecordingModule::close_pipeline(bool finalize) noexcept {
     splitmux_ = nullptr;
     pipeline_->stop();
     pipeline_.reset();
+    if (finalized) control_->commit_written(pending_access_units_, pending_bytes_);
+    pending_access_units_ = 0;
+    pending_bytes_ = 0;
     enforce_quota();
 }
 
@@ -237,7 +242,8 @@ bool RecordingModule::write_access_unit(const EncodedAccessUnit& unit, std::stri
         error = "MP4 recorder rejected H.264 access unit";
         return false;
     }
-    control_->add_written(unit.bytes.size());
+    ++pending_access_units_;
+    pending_bytes_ += unit.bytes.size();
     return true;
 }
 

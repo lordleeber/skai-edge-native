@@ -30,7 +30,7 @@ public:
     void set_active(std::string path);
     void set_stopped();
     void set_error(std::string error);
-    void add_written(std::size_t bytes);
+    void commit_written(std::uint64_t access_units, std::uint64_t bytes);
     void add_dropped();
 
 private:

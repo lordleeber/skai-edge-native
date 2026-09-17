@@ -65,15 +65,16 @@ TEST(RecordingModule, FinalizesMp4FromEncodedAccessUnits) {
     ASSERT_TRUE(recorder.start()) << recorder.last_error();
     ASSERT_TRUE(encoder.start({}, error)) << error;
     ASSERT_TRUE(frames.push(frame()));
-    for (int attempt = 0; attempt < 300 &&
-                          control->status().access_units_written == 0; ++attempt) {
+    for (int attempt = 0; attempt < 300 && !control->status().active; ++attempt) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-    ASSERT_GT(control->status().access_units_written, 0U) << logs.str();
+    ASSERT_TRUE(control->status().active) << logs.str();
     frames.shutdown();
     encoder.stop();
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     recorder.wait();
+
+    EXPECT_GT(control->status().access_units_written, 0U);
 
     std::uintmax_t size = 0;
     std::size_t files = 0;
