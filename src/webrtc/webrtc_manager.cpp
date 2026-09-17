@@ -1,0 +1,249 @@
+#include "skai/webrtc/webrtc_manager.hpp"
+
+#include <rtc/rtc.hpp>
+
+#include <algorithm>
+#include <array>
+#include <iomanip>
+#include <random>
+#include <sstream>
+#include <utility>
+#include <vector>
+
+namespace skai {
+
+WebRtcSession::WebRtcSession(std::string id)
+    : id_(std::move(id)), peer_(std::make_shared<rtc::PeerConnection>()),
+      last_activity_(std::chrono::steady_clock::now()) {}
+
+std::shared_ptr<WebRtcSession> WebRtcSession::create(std::string id) {
+    auto session = std::shared_ptr<WebRtcSession>(new WebRtcSession(std::move(id)));
+    const std::weak_ptr<WebRtcSession> weak = session;
+    session->peer_->onLocalDescription([weak](rtc::Description) {
+        if (const auto current = weak.lock()) {
+            std::lock_guard<std::mutex> lock(current->mutex_);
+            current->local_description_ready_ = true;
+            current->last_activity_ = std::chrono::steady_clock::now();
+            current->changed_.notify_all();
+        }
+    });
+    session->peer_->onGatheringStateChange(
+        [weak](rtc::PeerConnection::GatheringState state) {
+            if (state != rtc::PeerConnection::GatheringState::Complete) return;
+            if (const auto current = weak.lock()) {
+                std::lock_guard<std::mutex> lock(current->mutex_);
+                current->gathering_complete_ = true;
+                current->last_activity_ = std::chrono::steady_clock::now();
+                current->changed_.notify_all();
+            }
+        });
+    session->peer_->onStateChange([weak](rtc::PeerConnection::State state) {
+        if (const auto current = weak.lock()) {
+            std::lock_guard<std::mutex> lock(current->mutex_);
+            if (state == rtc::PeerConnection::State::Connected) {
+                current->connected_ = true;
+                current->last_activity_ = std::chrono::steady_clock::now();
+            } else if (state == rtc::PeerConnection::State::Disconnected ||
+                       state == rtc::PeerConnection::State::Failed) {
+                current->failed_ = true;
+            } else if (state == rtc::PeerConnection::State::Closed) {
+                current->closed_ = true;
+            } else {
+                return;
+            }
+            current->changed_.notify_all();
+        }
+    });
+    return session;
+}
+
+WebRtcSession::~WebRtcSession() { close(); }
+
+CreateSessionResult WebRtcSession::accept_offer(
+        std::string_view offer, std::chrono::milliseconds timeout) {
+    try {
+        rtc::Description description(std::string(offer), rtc::Description::Type::Offer);
+        peer_->setRemoteDescription(std::move(description));
+    } catch (const std::invalid_argument& error) {
+        return {CreateSessionError::InvalidOffer, {}, {}, error.what()};
+    } catch (const std::exception& error) {
+        return {CreateSessionError::Internal, {}, {}, error.what()};
+    }
+
+    std::unique_lock<std::mutex> lock(mutex_);
+    const bool ready = changed_.wait_for(lock, timeout, [this] {
+        return (local_description_ready_ && gathering_complete_) || failed_ || closed_;
+    });
+    if (!ready) {
+        lock.unlock();
+        close();
+        return {CreateSessionError::GatheringTimeout, {}, {},
+                "ICE gathering timed out"};
+    }
+    if (failed_ || closed_) {
+        return {CreateSessionError::Internal, {}, {},
+                "PeerConnection closed while creating the answer"};
+    }
+    last_activity_ = std::chrono::steady_clock::now();
+    lock.unlock();
+
+    const auto local = peer_->localDescription();
+    if (!local || local->type() != rtc::Description::Type::Answer) {
+        return {CreateSessionError::Internal, {}, {},
+                "PeerConnection did not produce an SDP answer"};
+    }
+    return {CreateSessionError::None, id_, std::string(*local), {}};
+}
+
+void WebRtcSession::close() noexcept {
+    std::shared_ptr<rtc::PeerConnection> peer;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (closed_) return;
+        closed_ = true;
+        peer = std::move(peer_);
+    }
+    changed_.notify_all();
+    if (!peer) return;
+    try {
+        peer->resetCallbacks();
+        peer->close();
+    } catch (...) {
+    }
+}
+
+bool WebRtcSession::stale(std::chrono::steady_clock::time_point now,
+                          std::chrono::milliseconds timeout) const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return closed_ || failed_ || (!connected_ && now - last_activity_ >= timeout);
+}
+
+WebRtcManager::WebRtcManager(Logger& logger,
+        std::chrono::milliseconds stale_timeout,
+        std::chrono::milliseconds gathering_timeout)
+    : logger_(logger), stale_timeout_(stale_timeout),
+      gathering_timeout_(gathering_timeout) {}
+
+WebRtcManager::~WebRtcManager() { shutdown(); }
+
+void WebRtcManager::configure(const WebrtcConfig& config) {
+    shutdown();
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        enabled_ = config.enabled;
+        max_peers_ = static_cast<std::size_t>(config.max_peers);
+        stopping_ = !enabled_;
+    }
+    if (config.enabled) cleanup_worker_ = std::thread([this] { cleanup_loop(); });
+}
+
+CreateSessionResult WebRtcManager::create_session(std::string_view offer_sdp) {
+    if (offer_sdp.empty()) {
+        return {CreateSessionError::InvalidOffer, {}, {}, "SDP offer is empty"};
+    }
+    cleanup_stale_sessions();
+    std::shared_ptr<WebRtcSession> session;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!enabled_ || stopping_) {
+            return {CreateSessionError::Disabled, {}, {}, "WebRTC is disabled"};
+        }
+        if (sessions_.size() >= max_peers_) {
+            return {CreateSessionError::Capacity, {}, {}, "maximum peer count reached"};
+        }
+        std::string id;
+        do id = make_session_id(); while (sessions_.count(id) != 0);
+        session = WebRtcSession::create(id);
+        sessions_.emplace(id, session);
+    }
+
+    auto result = session->accept_offer(offer_sdp, gathering_timeout_);
+    if (!result) {
+        close_session(session->id());
+        return result;
+    }
+    logger_.log(LogLevel::Info, "webrtc", "created WHEP session " + result.session_id);
+    return result;
+}
+
+bool WebRtcManager::close_session(std::string_view session_id) {
+    std::shared_ptr<WebRtcSession> session;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        const auto found = sessions_.find(std::string(session_id));
+        if (found == sessions_.end()) return false;
+        session = std::move(found->second);
+        sessions_.erase(found);
+    }
+    session->close();
+    logger_.log(LogLevel::Info, "webrtc", "closed WHEP session " + session->id());
+    return true;
+}
+
+std::size_t WebRtcManager::cleanup_stale_sessions() {
+    std::vector<std::shared_ptr<WebRtcSession>> stale;
+    const auto now = std::chrono::steady_clock::now();
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (auto item = sessions_.begin(); item != sessions_.end();) {
+            if (!item->second->stale(now, stale_timeout_)) {
+                ++item;
+                continue;
+            }
+            stale.push_back(std::move(item->second));
+            item = sessions_.erase(item);
+        }
+    }
+    for (const auto& session : stale) session->close();
+    if (!stale.empty()) {
+        logger_.log(LogLevel::Info, "webrtc",
+                    "cleaned " + std::to_string(stale.size()) + " stale session(s)");
+    }
+    return stale.size();
+}
+
+std::size_t WebRtcManager::session_count() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return sessions_.size();
+}
+
+void WebRtcManager::shutdown() noexcept {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        enabled_ = false;
+        stopping_ = true;
+    }
+    wakeup_.notify_all();
+    if (cleanup_worker_.joinable()) cleanup_worker_.join();
+    std::vector<std::shared_ptr<WebRtcSession>> sessions;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (auto& item : sessions_) sessions.push_back(std::move(item.second));
+        sessions_.clear();
+    }
+    for (const auto& session : sessions) session->close();
+}
+
+std::string WebRtcManager::make_session_id() {
+    std::array<unsigned char, 16> bytes{};
+    std::random_device random;
+    for (auto& byte : bytes) byte = static_cast<unsigned char>(random());
+    std::ostringstream output;
+    output << std::hex << std::setfill('0');
+    for (const auto byte : bytes) output << std::setw(2) << static_cast<int>(byte);
+    return output.str();
+}
+
+void WebRtcManager::cleanup_loop() {
+    std::unique_lock<std::mutex> lock(mutex_);
+    const auto interval = std::min(std::chrono::milliseconds(1000),
+        std::max(std::chrono::milliseconds(10), stale_timeout_ / 2));
+    while (!stopping_) {
+        if (wakeup_.wait_for(lock, interval, [this] { return stopping_; })) break;
+        lock.unlock();
+        cleanup_stale_sessions();
+        lock.lock();
+    }
+}
+
+} // namespace skai

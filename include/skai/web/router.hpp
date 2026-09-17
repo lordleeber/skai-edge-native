@@ -6,6 +6,7 @@
 #include "skai/storage/alert_repository.hpp"
 #include "skai/status.hpp"
 #include "skai/video/recording_control.hpp"
+#include "skai/webrtc/webrtc_manager.hpp"
 
 namespace skai::web {
 
@@ -18,6 +19,7 @@ using Response = http::response<http::string_body>;
 
 Response route_request(const Request& request, const StatusSnapshot& status,
                        ApiState& api, AlertRepository* alerts = nullptr,
-                       RecordingController* recording = nullptr);
+                       RecordingController* recording = nullptr,
+                       WebRtcManager* webrtc = nullptr);
 
 } // namespace skai::web
