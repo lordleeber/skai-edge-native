@@ -152,6 +152,10 @@ void validate(const Config& config) {
     check_range(!config.recording.directory.empty(), "recording.directory", "must not be empty");
     check_range(config.recording.segment_seconds >= 1,
                 "recording.segment_seconds", "must be positive");
+    check_range(config.recording.max_storage_mb >= 1,
+                "recording.max_storage_mb", "must be positive");
+    check_range(config.recording.min_free_space_mb <= config.recording.max_storage_mb,
+                "recording.min_free_space_mb", "must not exceed recording.max_storage_mb");
     check_range(!config.storage.database_path.empty(), "storage.database_path",
                 "must not be empty");
     check_range(!config.storage.alert_directory.empty(), "storage.alert_directory",
@@ -232,10 +236,13 @@ Config parse(const YAML::Node& root) {
         read_scalar(section, "root", "web", config.web.root);
     }
     if (const auto section = root["recording"]) {
-        check_keys(section, "recording", {"enabled", "directory", "segment_seconds"});
+        check_keys(section, "recording", {"enabled", "directory", "segment_seconds",
+                                            "max_storage_mb", "min_free_space_mb"});
         read_scalar(section, "enabled", "recording", config.recording.enabled);
         read_scalar(section, "directory", "recording", config.recording.directory);
         read_scalar(section, "segment_seconds", "recording", config.recording.segment_seconds);
+        read_scalar(section, "max_storage_mb", "recording", config.recording.max_storage_mb);
+        read_scalar(section, "min_free_space_mb", "recording", config.recording.min_free_space_mb);
     }
     if (const auto section = root["storage"]) {
         check_keys(section, "storage", {"database_path", "alert_directory"});

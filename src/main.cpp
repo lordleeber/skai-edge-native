@@ -10,6 +10,7 @@
 #include "skai/video/h264_encoder_module.hpp"
 #include "skai/video/rtsp_video_module.hpp"
 #include "skai/video/rtsp_source.hpp"
+#include "skai/video/recording.hpp"
 #include "skai/web/http_server.hpp"
 #if SKAI_HAS_YOLO_PIPELINE
 #include "skai/alerts/alert_manager.hpp"
@@ -98,11 +99,13 @@ int main(int argc, char* argv[]) {
     skai::Application::Modules modules;
     auto database = std::make_unique<skai::Database>();
     auto alert_repository = std::make_shared<skai::AlertRepository>(*database);
+    std::shared_ptr<skai::RecordingController> recording_control;
     modules.storage = std::move(database);
     modules.web = std::make_unique<skai::web::HttpServer>(logger, runtime_status,
                                                           api_state, events,
-                                                          alert_repository);
+                                                          alert_repository, recording_control);
 #if SKAI_HAS_YOLO_PIPELINE
+    recording_control = std::make_shared<skai::RecordingController>();
     auto alert_manager = std::make_shared<skai::AlertManager>(
         gps_state, events, alert_repository, &logger);
     modules.detector = std::make_unique<skai::YoloInferenceModule>(
@@ -110,6 +113,8 @@ int main(int argc, char* argv[]) {
         events, alert_manager);
     modules.encoder = std::make_unique<skai::H264EncoderModule>(
         annotated_frames, encoded_access_units, logger, runtime_status);
+    modules.recording = std::make_unique<skai::RecordingModule>(
+        encoded_access_units, logger, recording_control, events);
 #else
     api_state->set_detector_supported(false);
     logger.log(skai::LogLevel::Warning, "detector",

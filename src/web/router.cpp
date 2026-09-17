@@ -201,7 +201,8 @@ bool alert_route(const std::string& path) {
 } // namespace
 
 Response route_request(const Request& request, const StatusSnapshot& status,
-                       ApiState& api, AlertRepository* alerts) {
+                       ApiState& api, AlertRepository* alerts,
+                       RecordingController* recording) {
     const std::string target(request.target());
     const auto query = target.find('?');
     const std::string path = target.substr(0, query);
@@ -316,6 +317,15 @@ Response route_request(const Request& request, const StatusSnapshot& status,
         return json_response(http::status::ok, request.version(), alerts_json(items));
     }
     if (path == "/api/v1/recordings") {
+        if (recording) {
+            const auto recording_status = recording->status();
+            return json_response(http::status::ok, request.version(),
+                std::string("{\"available\":true,\"state\":") +
+                json_string(recording_status.state) + ",\"active\":" +
+                json_bool(recording_status.active) + ",\"current_path\":" +
+                json_string(recording_status.current_path) + ",\"access_units_written\":" +
+                std::to_string(recording_status.access_units_written) + "}\n");
+        }
         return json_response(http::status::service_unavailable, request.version(),
                              "{\"available\":false,\"items\":[]}\n");
     }
@@ -329,6 +339,20 @@ Response route_request(const Request& request, const StatusSnapshot& status,
         api.set_detector_enabled(enabled);
         return json_response(http::status::ok, request.version(),
                              std::string("{\"enabled\":") + json_bool(enabled) + "}\n");
+    }
+    if (recording) {
+        std::string error;
+        const bool started = path == "/api/v1/recording/start";
+        if ((started ? recording->start(error) : recording->stop(error))) {
+            const auto recording_status = recording->status();
+            return json_response(http::status::ok, request.version(),
+                std::string("{\"state\":") + json_string(recording_status.state) +
+                ",\"active\":" + json_bool(recording_status.active) +
+                ",\"current_path\":" + json_string(recording_status.current_path) +
+                ",\"last_error\":" + json_string(recording_status.last_error) + "}\n");
+        }
+        return json_response(http::status::service_unavailable, request.version(),
+                             "{\"error\":" + json_string(error) + "}\n");
     }
     return json_response(http::status::not_implemented, request.version(),
                          "{\"available\":false,\"error\":\"recording not implemented\"}\n");
