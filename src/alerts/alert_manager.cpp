@@ -1,7 +1,12 @@
 #include "skai/alerts/alert_manager.hpp"
 
+#include <opencv2/core/mat.hpp>
+#include <opencv2/imgcodecs.hpp>
+
 #include <algorithm>
 #include <cmath>
+#include <ctime>
+#include <filesystem>
 #include <iomanip>
 #include <limits>
 #include <locale>
@@ -75,12 +80,19 @@ std::string event_data(const AlertEvent& event) {
 } // namespace
 
 AlertManager::AlertManager(std::shared_ptr<GpsState> gps,
-                           std::shared_ptr<EventChannel> events)
-    : gps_(std::move(gps)), events_(std::move(events)) {}
+                           std::shared_ptr<EventChannel> events,
+                           std::shared_ptr<AlertRepository> repository,
+                           Logger* logger)
+    : gps_(std::move(gps)), events_(std::move(events)),
+      repository_(std::move(repository)), logger_(logger) {}
 
-void AlertManager::configure(std::vector<AlertRuleConfig> rules) {
+void AlertManager::configure(std::vector<AlertRuleConfig> rules,
+                             std::string snapshot_directory,
+                             std::string model_version) {
     rules_.clear();
     detector_generation_.reset();
+    snapshot_directory_ = std::move(snapshot_directory);
+    model_version_ = std::move(model_version);
     rules_.reserve(rules.size());
     for (auto& rule : rules) rules_.push_back({std::move(rule), 0, std::nullopt});
 }
@@ -89,6 +101,7 @@ std::vector<AlertEvent> AlertManager::process(
     const DetectionResult& result, int frame_width, int frame_height,
     const std::vector<std::string>& class_names,
     std::uint64_t detector_generation,
+    const Frame* snapshot_frame,
     std::chrono::system_clock::time_point wall_time,
     std::chrono::steady_clock::time_point monotonic_time) {
     if (!detector_generation_ || *detector_generation_ != detector_generation) {
@@ -129,13 +142,105 @@ std::vector<AlertEvent> AlertManager::process(
                    std::to_string(rule_index) + '-' + std::to_string(next_id_++);
         alert.frame_sequence = result.frame_sequence;
         alert.gps = gps_ ? gps_->latest() : std::nullopt;
+        if (!model_version_.empty()) alert.model_version = model_version_;
         alert.detections = std::move(matching);
+        if (repository_) {
+            std::string error;
+            if (!snapshot_frame || !persist(*snapshot_frame, alert, error)) {
+                report_error(snapshot_frame ? error : "snapshot frame is unavailable");
+                continue;
+            }
+        }
         state.consecutive = 0;
         state.last_alert = monotonic_time;
         if (events_) events_->publish(EventType::Alert, event_data(alert));
         alerts.push_back(std::move(alert));
     }
     return alerts;
+}
+
+bool AlertManager::persist(const Frame& frame, AlertEvent& alert,
+                           std::string& error) {
+    error.clear();
+    if (snapshot_directory_.empty() || frame.width <= 0 || frame.height <= 0 ||
+        frame.stride < frame.width * 3 ||
+        frame.bgr.size() < static_cast<std::size_t>(frame.stride) * frame.height) {
+        error = "invalid snapshot directory or frame";
+        return false;
+    }
+    const std::time_t seconds = static_cast<std::time_t>(alert.timestamp_ms / 1000);
+    std::tm utc{};
+    gmtime_r(&seconds, &utc);
+    char date[11]{};
+    std::strftime(date, sizeof(date), "%Y-%m-%d", &utc);
+    const auto directory = std::filesystem::path(snapshot_directory_) / date;
+    std::error_code filesystem_error;
+    std::filesystem::create_directories(directory, filesystem_error);
+    if (filesystem_error) {
+        error = "could not create alert directory: " + filesystem_error.message();
+        return false;
+    }
+    const auto final_path = directory / (alert.id + ".jpg");
+    const auto temporary_path = directory / (alert.id + ".tmp.jpg");
+    try {
+        const cv::Mat image(frame.height, frame.width, CV_8UC3,
+                            const_cast<std::uint8_t*>(frame.bgr.data()), frame.stride);
+        if (!cv::imwrite(temporary_path.string(), image,
+                         {cv::IMWRITE_JPEG_QUALITY, 90})) {
+            std::filesystem::remove(temporary_path, filesystem_error);
+            error = "could not encode alert snapshot";
+            return false;
+        }
+    } catch (const cv::Exception& failure) {
+        std::filesystem::remove(temporary_path, filesystem_error);
+        error = "could not encode alert snapshot: " + std::string(failure.what());
+        return false;
+    }
+    std::filesystem::rename(temporary_path, final_path, filesystem_error);
+    if (filesystem_error) {
+        std::error_code ignored;
+        std::filesystem::remove(temporary_path, ignored);
+        error = "could not publish alert snapshot: " + filesystem_error.message();
+        return false;
+    }
+    alert.snapshot_path = final_path.string();
+    std::string database_error;
+    if (repository_->insert(alert, database_error)) return true;
+    std::filesystem::remove(final_path, filesystem_error);
+    error = "could not insert alert metadata: " + database_error;
+    if (filesystem_error) error += "; snapshot cleanup failed: " + filesystem_error.message();
+    return false;
+}
+
+bool AlertManager::cleanup_oldest(std::size_t keep, std::string& error) {
+    error.clear();
+    if (!repository_) { error = "alert repository is unavailable"; return false; }
+    const auto alerts = repository_->find_oldest_excess(keep, error);
+    if (!error.empty()) return false;
+    const auto root = std::filesystem::absolute(snapshot_directory_).lexically_normal();
+    for (const auto& alert : alerts) {
+        const auto path = std::filesystem::absolute(alert.snapshot_path).lexically_normal();
+        const auto mismatch = std::mismatch(root.begin(), root.end(), path.begin(), path.end());
+        if (mismatch.first != root.end()) {
+            error = "snapshot path is outside alert directory";
+            return false;
+        }
+        if (!repository_->remove(alert.id, error)) {
+            if (error.empty()) error = "alert disappeared during cleanup";
+            return false;
+        }
+        std::error_code filesystem_error;
+        if (!std::filesystem::remove(path, filesystem_error) || filesystem_error) {
+            error = "could not remove alert snapshot: " +
+                    (filesystem_error ? filesystem_error.message() : "file is missing");
+            return false;
+        }
+    }
+    return true;
+}
+
+void AlertManager::report_error(const std::string& error) const {
+    if (logger_) logger_->log(LogLevel::Error, "alerts", error);
 }
 
 } // namespace skai

@@ -12,7 +12,7 @@ find_package(PkgConfig REQUIRED)
 pkg_check_modules(GSTREAMER REQUIRED IMPORTED_TARGET gstreamer-1.0)
 pkg_check_modules(GST_VIDEO_APP REQUIRED IMPORTED_TARGET
     gstreamer-app-1.0 gstreamer-video-1.0 gstreamer-rtsp-1.0)
-find_package(OpenCV REQUIRED COMPONENTS core imgproc)
+find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs)
 find_package(Boost 1.74 REQUIRED COMPONENTS system)
 find_package(SQLite3 REQUIRED)
 
@@ -121,13 +121,15 @@ target_link_libraries(skai-gps PUBLIC skai-application)
 add_library(skai-alerts src/alerts/alert_manager.cpp)
 target_include_directories(skai-alerts PUBLIC include)
 target_link_libraries(skai-alerts PUBLIC skai-config skai-events skai-gps
-    skai-yolo-postprocess)
+    skai-yolo-postprocess skai-storage)
+target_include_directories(skai-alerts PRIVATE ${OpenCV_INCLUDE_DIRS})
+target_link_libraries(skai-alerts PRIVATE ${OpenCV_LIBS})
 
 add_library(skai-web src/web/http_server.cpp src/web/router.cpp
     src/web/static_file_handler.cpp src/web/websocket_session.cpp)
 target_include_directories(skai-web PUBLIC include)
 target_link_libraries(skai-web PUBLIC skai-application skai-events skai-gps
-    Boost::system)
+    skai-storage Boost::system)
 
 add_library(skai-gstreamer src/video/gstreamer_runtime.cpp)
 target_include_directories(skai-gstreamer PUBLIC include)

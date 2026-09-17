@@ -5,6 +5,7 @@
 #include "skai/gps/gps_state.hpp"
 #include "skai/logging.hpp"
 #include "skai/storage/database.hpp"
+#include "skai/storage/alert_repository.hpp"
 #include "skai/video/gstreamer_runtime.hpp"
 #include "skai/video/rtsp_video_module.hpp"
 #include "skai/video/rtsp_source.hpp"
@@ -93,11 +94,15 @@ int main(int argc, char* argv[]) {
     auto gps_state = std::make_shared<skai::GpsState>();
     auto api_state = std::make_shared<skai::ApiState>(runtime_status, gps_state);
     skai::Application::Modules modules;
-    modules.storage = std::make_unique<skai::Database>();
+    auto database = std::make_unique<skai::Database>();
+    auto alert_repository = std::make_shared<skai::AlertRepository>(*database);
+    modules.storage = std::move(database);
     modules.web = std::make_unique<skai::web::HttpServer>(logger, runtime_status,
-                                                          api_state, events);
+                                                          api_state, events,
+                                                          alert_repository);
 #if SKAI_HAS_YOLO_PIPELINE
-    auto alert_manager = std::make_shared<skai::AlertManager>(gps_state, events);
+    auto alert_manager = std::make_shared<skai::AlertManager>(
+        gps_state, events, alert_repository, &logger);
     modules.detector = std::make_unique<skai::YoloInferenceModule>(
         inference_frames, annotated_frames, logger, runtime_status, api_state,
         events, alert_manager);

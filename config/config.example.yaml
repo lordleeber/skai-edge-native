@@ -28,6 +28,7 @@ recording:
 
 storage:
   database_path: /var/lib/skai-edge/skai-edge.db
+  alert_directory: /var/lib/skai-edge/alerts
 
 alerts:
   - class: person

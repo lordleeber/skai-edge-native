@@ -14,6 +14,15 @@ public:
                                           std::string& error) const;
     std::vector<AlertEvent> find_recent(std::size_t limit,
                                          std::string& error) const;
+    std::vector<AlertEvent> find_by_time_range(std::int64_t from_ms,
+                                                std::int64_t to_ms,
+                                                std::string& error) const;
+    std::vector<AlertEvent> find_by_class(const std::string& class_name,
+                                           std::size_t limit,
+                                           std::string& error) const;
+    std::vector<AlertEvent> find_oldest_excess(std::size_t keep,
+                                                std::string& error) const;
+    bool remove(const std::string& id, std::string& error);
 private:
     Database& database_;
 };

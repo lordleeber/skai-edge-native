@@ -1,6 +1,7 @@
 #include "skai/inference/yolo_inference_module.hpp"
 
 #include <chrono>
+#include <filesystem>
 #include <iomanip>
 #include <limits>
 #include <locale>
@@ -76,7 +77,11 @@ bool YoloInferenceModule::initialize(const Config& config) {
     if (status_) status_->clear_detector();
     annotation_.enabled = config.detector.annotate;
     annotation_.show_metrics = true;
-    if (alerts_) alerts_->configure(config.alerts);
+    if (alerts_) {
+        alerts_->configure(config.alerts, config.storage.alert_directory,
+                           std::filesystem::path(config.detector.engine)
+                               .filename().string());
+    }
     YoloPostprocessConfig postprocess;
     postprocess.confidence_threshold = static_cast<float>(config.detector.confidence);
     postprocess.nms_iou_threshold = static_cast<float>(config.detector.nms);
@@ -173,7 +178,7 @@ void YoloInferenceModule::run() noexcept {
             }
             if (alerts_) {
                 alerts_->process(detections, frame->width, frame->height,
-                                 coco_class_names(), permit.generation);
+                                 coco_class_names(), permit.generation, &annotated);
             }
             output_.push(std::move(annotated));
         };
