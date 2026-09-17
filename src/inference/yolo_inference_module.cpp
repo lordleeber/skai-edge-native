@@ -173,7 +173,7 @@ void YoloInferenceModule::run() noexcept {
             }
             if (alerts_) {
                 alerts_->process(detections, frame->width, frame->height,
-                                 coco_class_names());
+                                 coco_class_names(), permit.generation);
             }
             output_.push(std::move(annotated));
         };

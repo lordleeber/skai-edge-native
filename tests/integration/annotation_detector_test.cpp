@@ -114,9 +114,11 @@ TEST(AnnotationDetector, RtspPipelinePublishesAnnotationsAndHonorsDisableFlag) {
     config.detector.engine = SKAI_YOLO_ENGINE;
     config.detector.confidence = 0.1;
     config.detector.annotate = true;
-    config.alerts.push_back({"umbrella", 0.1, 1, 0, std::nullopt});
+    config.alerts.push_back({"umbrella", 0.1, 2, 0, std::nullopt});
     ASSERT_TRUE(module.initialize(config));
     ASSERT_TRUE(module.start());
+    ASSERT_TRUE(input.push(reference_frame()));
+    ASSERT_TRUE(output.pop_for(std::chrono::seconds(2)).has_value()) << logs.str();
     ASSERT_TRUE(input.push(reference_frame()));
     ASSERT_TRUE(output.pop_for(std::chrono::seconds(2)).has_value()) << logs.str();
     const auto alert_event = std::find_if(
@@ -126,6 +128,25 @@ TEST(AnnotationDetector, RtspPipelinePublishesAnnotationsAndHonorsDisableFlag) {
     ASSERT_NE(alert_event, published_events.end());
     EXPECT_NE(alert_event->find("\"class_name\":\"umbrella\""),
               std::string::npos);
+    const auto alert_count = [&] {
+        return std::count_if(published_events.begin(), published_events.end(),
+                             [](const auto& event) {
+            return event.find("\"type\":\"alert\"") != std::string::npos;
+        });
+    };
+    ASSERT_TRUE(input.push(reference_frame()));
+    ASSERT_TRUE(output.pop_for(std::chrono::seconds(2)).has_value()) << logs.str();
+    const auto alerts_before_toggle = alert_count();
+    api->set_detector_enabled(false);
+    ASSERT_TRUE(input.push(reference_frame()));
+    ASSERT_TRUE(output.pop_for(std::chrono::seconds(2)).has_value()) << logs.str();
+    api->set_detector_enabled(true);
+    ASSERT_TRUE(input.push(reference_frame()));
+    ASSERT_TRUE(output.pop_for(std::chrono::seconds(2)).has_value()) << logs.str();
+    EXPECT_EQ(alert_count(), alerts_before_toggle);
+    ASSERT_TRUE(input.push(reference_frame()));
+    ASSERT_TRUE(output.pop_for(std::chrono::seconds(2)).has_value()) << logs.str();
+    EXPECT_EQ(alert_count(), alerts_before_toggle + 1);
     skai::RtspSource source(input, logger, skai::DecodeMode::Auto, true, status);
     skai::VideoConfig video;
     video.rtsp_url = server.url();

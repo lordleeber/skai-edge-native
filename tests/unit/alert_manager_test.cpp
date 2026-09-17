@@ -34,15 +34,15 @@ TEST(AlertManager, RequiresClassConfidenceAndConsecutiveFrames) {
     const auto steady = std::chrono::steady_clock::time_point{std::chrono::seconds(100)};
 
     EXPECT_TRUE(manager.process(result(1, 0, 0.80f), 100, 100, classes,
-                                wall, steady).empty());
+                                0, wall, steady).empty());
     EXPECT_TRUE(manager.process(result(2, 1, 0.90f), 100, 100, classes,
-                                wall, steady).empty());
+                                0, wall, steady).empty());
     EXPECT_TRUE(manager.process(result(3, 0, 0.69f), 100, 100, classes,
-                                wall, steady).empty());
+                                0, wall, steady).empty());
     EXPECT_TRUE(manager.process(result(4, 0, 0.80f), 100, 100, classes,
-                                wall, steady).empty());
+                                0, wall, steady).empty());
     const auto alerts = manager.process(result(5, 0, 0.90f), 100, 100, classes,
-                                        wall, steady);
+                                        0, wall, steady);
     ASSERT_EQ(alerts.size(), 1U);
     EXPECT_EQ(alerts[0].frame_sequence, 5U);
     ASSERT_EQ(alerts[0].detections.size(), 1U);
@@ -62,9 +62,9 @@ TEST(AlertManager, FiltersByNormalizedRoiUsingBoxCenter) {
     const auto steady = std::chrono::steady_clock::now();
 
     EXPECT_TRUE(manager.process(result(1, 0, 0.9f, 75.0f), 100, 100, classes,
-                                wall, steady).empty());
+                                0, wall, steady).empty());
     const auto alerts = manager.process(result(2, 0, 0.9f, 25.0f), 100, 100,
-                                        classes, wall, steady);
+                                        classes, 0, wall, steady);
     EXPECT_EQ(alerts.size(), 1U);
 }
 
@@ -85,12 +85,13 @@ TEST(AlertManager, EnforcesCooldownAndPublishesGpsAlertEvent) {
     const auto wall = std::chrono::system_clock::time_point{std::chrono::seconds(100)};
     const auto steady = std::chrono::steady_clock::time_point{std::chrono::seconds(100)};
 
-    auto first = manager.process(result(7, 0, 0.9f), 100, 100, classes, wall, steady);
+    auto first = manager.process(result(7, 0, 0.9f), 100, 100, classes,
+                                 0, wall, steady);
     EXPECT_TRUE(manager.process(result(8, 0, 0.9f), 100, 100, classes,
-                                wall + std::chrono::seconds(5),
+                                0, wall + std::chrono::seconds(5),
                                 steady + std::chrono::seconds(5)).empty());
     auto second = manager.process(result(9, 0, 0.9f), 100, 100, classes,
-                                  wall + std::chrono::seconds(10),
+                                  0, wall + std::chrono::seconds(10),
                                   steady + std::chrono::seconds(10));
     ASSERT_EQ(first.size(), 1U);
     ASSERT_EQ(second.size(), 1U);
@@ -112,8 +113,26 @@ TEST(AlertManager, ReconfigureClearsConsecutiveAndCooldownState) {
     const auto steady = std::chrono::steady_clock::now();
     manager.configure({rule});
     EXPECT_TRUE(manager.process(result(1, 0, 0.9f), 100, 100, classes,
-                                wall, steady).empty());
+                                0, wall, steady).empty());
     manager.configure({rule});
     EXPECT_TRUE(manager.process(result(2, 0, 0.9f), 100, 100, classes,
-                                wall, steady).empty());
+                                0, wall, steady).empty());
+}
+
+TEST(AlertManager, DetectorGenerationChangeClearsPartialStreak) {
+    skai::AlertRuleConfig rule;
+    rule.class_name = "person";
+    rule.consecutive_frames = 2;
+    rule.cooldown_seconds = 0;
+    skai::AlertManager manager;
+    manager.configure({rule});
+    const auto wall = std::chrono::system_clock::now();
+    const auto steady = std::chrono::steady_clock::now();
+
+    EXPECT_TRUE(manager.process(result(1, 0, 0.9f), 100, 100, classes,
+                                10, wall, steady).empty());
+    EXPECT_TRUE(manager.process(result(2, 0, 0.9f), 100, 100, classes,
+                                12, wall, steady).empty());
+    EXPECT_EQ(manager.process(result(3, 0, 0.9f), 100, 100, classes,
+                              12, wall, steady).size(), 1U);
 }

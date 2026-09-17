@@ -80,6 +80,7 @@ AlertManager::AlertManager(std::shared_ptr<GpsState> gps,
 
 void AlertManager::configure(std::vector<AlertRuleConfig> rules) {
     rules_.clear();
+    detector_generation_.reset();
     rules_.reserve(rules.size());
     for (auto& rule : rules) rules_.push_back({std::move(rule), 0, std::nullopt});
 }
@@ -87,8 +88,13 @@ void AlertManager::configure(std::vector<AlertRuleConfig> rules) {
 std::vector<AlertEvent> AlertManager::process(
     const DetectionResult& result, int frame_width, int frame_height,
     const std::vector<std::string>& class_names,
+    std::uint64_t detector_generation,
     std::chrono::system_clock::time_point wall_time,
     std::chrono::steady_clock::time_point monotonic_time) {
+    if (!detector_generation_ || *detector_generation_ != detector_generation) {
+        for (auto& state : rules_) state.consecutive = 0;
+        detector_generation_ = detector_generation;
+    }
     std::vector<AlertEvent> alerts;
     for (std::size_t rule_index = 0; rule_index < rules_.size(); ++rule_index) {
         auto& state = rules_[rule_index];
