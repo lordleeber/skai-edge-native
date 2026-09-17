@@ -9,11 +9,11 @@ add_executable(skai-unit-tests unit/command_line_test.cpp unit/config_test.cpp
     unit/rtsp_recovery_test.cpp unit/tensor_layout_test.cpp
     unit/preprocess_reference_test.cpp unit/yolo_postprocess_test.cpp
     unit/annotator_test.cpp unit/http_router_test.cpp unit/event_channel_test.cpp
-    unit/gps_source_test.cpp)
+    unit/gps_source_test.cpp unit/storage_test.cpp)
 target_link_libraries(skai-unit-tests PRIVATE skai-cli skai-config skai-logging
     skai-application skai-core skai-tensor-layout skai-preprocess-reference
     skai-yolo-postprocess skai-annotator skai-web
-    skai-events skai-gps
+    skai-events skai-gps skai-storage
     GTest::gtest_main)
 target_compile_definitions(skai-unit-tests PRIVATE
     SKAI_INVALID_CONFIG="${PROJECT_SOURCE_DIR}/tests/fixtures/config.invalid.yaml")

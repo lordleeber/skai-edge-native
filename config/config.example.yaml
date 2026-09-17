@@ -26,6 +26,9 @@ recording:
   directory: recordings
   segment_seconds: 300
 
+storage:
+  database_path: /var/lib/skai-edge/skai-edge.db
+
 gps:
   enabled: true
   source: fixed

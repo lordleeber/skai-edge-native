@@ -4,6 +4,7 @@
 #include "skai/gps/gps_module.hpp"
 #include "skai/gps/gps_state.hpp"
 #include "skai/logging.hpp"
+#include "skai/storage/database.hpp"
 #include "skai/video/gstreamer_runtime.hpp"
 #include "skai/video/rtsp_video_module.hpp"
 #include "skai/video/rtsp_source.hpp"
@@ -91,6 +92,7 @@ int main(int argc, char* argv[]) {
     auto gps_state = std::make_shared<skai::GpsState>();
     auto api_state = std::make_shared<skai::ApiState>(runtime_status, gps_state);
     skai::Application::Modules modules;
+    modules.storage = std::make_unique<skai::Database>();
     modules.web = std::make_unique<skai::web::HttpServer>(logger, runtime_status,
                                                           api_state, events);
 #if SKAI_HAS_YOLO_PIPELINE

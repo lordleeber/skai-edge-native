@@ -22,11 +22,13 @@ public:
     virtual bool start() = 0;
     virtual void stop() noexcept = 0;
     virtual void wait() noexcept = 0;
+    virtual std::string last_error() const { return {}; }
 };
 
 class Application {
 public:
     struct Modules {
+        std::unique_ptr<LifecycleModule> storage;
         std::unique_ptr<LifecycleModule> web;
         std::unique_ptr<LifecycleModule> detector;
         std::unique_ptr<LifecycleModule> video;

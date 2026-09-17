@@ -51,7 +51,8 @@ bool Application::initialize() {
                     ? "using built-in defaults" : "configuration validated");
 
     const ModuleRef ordered[] = {
-        {"web", modules_.web.get()}, {"detector", modules_.detector.get()},
+        {"storage", modules_.storage.get()}, {"web", modules_.web.get()},
+        {"detector", modules_.detector.get()},
         {"video", modules_.video.get()}, {"gps", modules_.gps.get()}};
     for (const auto& item : ordered) {
         if (!item.module) continue;
@@ -59,7 +60,9 @@ bool Application::initialize() {
             active_.push_back(item);
             continue;
         }
-        last_error_ = std::string(item.name) + ".initialize failed";
+        const auto detail = item.module->last_error();
+        last_error_ = detail.empty() ? std::string(item.name) + ".initialize failed"
+                                     : detail;
         last_error_module_ = item.name;
         for (auto it = active_.rbegin(); it != active_.rend(); ++it) it->module->stop();
         for (auto it = active_.rbegin(); it != active_.rend(); ++it) it->module->wait();

@@ -17,6 +17,8 @@ detector:
 web:
   port: 8080
   root: /srv/skai-edge/web
+storage:
+  database_path: /tmp/skai-edge-test.db
 gps:
   latitude: 25.033964
   longitude: 121.564468
@@ -35,6 +37,7 @@ TEST(Config, ParsesValidSettings) {
     EXPECT_EQ(result.config.video.latency_ms, 100);
     EXPECT_EQ(result.config.web.port, 8080);
     EXPECT_EQ(result.config.web.root, "/srv/skai-edge/web");
+    EXPECT_EQ(result.config.storage.database_path, "/tmp/skai-edge-test.db");
     EXPECT_EQ(result.config.webrtc.host_interfaces.size(), 2U);
     EXPECT_EQ(result.config.logging.level, skai::LogLevel::Debug);
 }
@@ -157,6 +160,13 @@ TEST(Config, RejectsEmptyWebRoot) {
         "video: {rtsp_url: 'rtsp://camera/stream'}\nweb: {root: ''}\n");
     EXPECT_FALSE(result.ok);
     EXPECT_NE(result.error.find("web.root"), std::string::npos);
+}
+
+TEST(Config, RejectsEmptyDatabasePath) {
+    const auto result = skai::parse_config(
+        "video: {rtsp_url: 'rtsp://camera/stream'}\nstorage: {database_path: ''}\n");
+    EXPECT_FALSE(result.ok);
+    EXPECT_NE(result.error.find("storage.database_path"), std::string::npos);
 }
 
 TEST(Config, ValidatesReconnectBackoffCeiling) {

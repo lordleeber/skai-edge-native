@@ -28,6 +28,8 @@ Step 17 provides a fixed-position GPS source; its API and UI always identify
 the coordinates as fixed/simulated rather than live receiver data. The
 Application-owned GPS module publishes into shared GPS state consumed by the
 web layer and future alert/persistence modules.
+Step 18 adds a lifecycle-managed SQLite database, versioned schema migrations,
+and a serialized alert repository with transactional detection inserts.
 Encoding and external media transport remain later steps.
 
 ## Build and test
@@ -38,7 +40,7 @@ GStreamer development packages (`libgstreamer1.0-dev`,
 `libgstreamer-plugins-base1.0-dev`), and GStreamer plugins from the base, good, ugly
 (H.264), libav (software H.264/H.265 decode), and bad (optional H.265) sets,
 OpenCV development files (`libopencv-dev`), then install GoogleTest
-(`libgtest-dev`) and the test-only RTSP server
+(`libgtest-dev`), SQLite (`libsqlite3-dev`), and the test-only RTSP server
 development package (`libgstrtspserver-1.0-dev`) to run tests. Node.js 18+ is
 used only for dependency-free browser-state tests; no npm packages or frontend
 build step are required:

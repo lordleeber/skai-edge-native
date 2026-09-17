@@ -73,6 +73,8 @@ skai::Application::Modules modules(std::vector<std::string>& events,
                                    const std::string& failing_init = {},
                                    const std::string& failing_start = {}) {
     skai::Application::Modules result;
+    result.storage = std::make_unique<RecordingModule>("storage", events, joins,
+                                                        failing_init == "storage", failing_start == "storage");
     result.web = std::make_unique<RecordingModule>("web", events, joins,
                                                     failing_init == "web", failing_start == "web");
     result.detector = std::make_unique<RecordingModule>("detector", events, joins,
@@ -99,11 +101,11 @@ TEST(Application, StartsInDependencyOrderAndStopsInReverseOrder) {
     app.wait();
 
     EXPECT_EQ(events, (std::vector<std::string>{
-        "web.initialize", "detector.initialize", "video.initialize", "gps.initialize",
-        "web.start", "detector.start", "video.start", "gps.start",
+        "storage.initialize", "web.initialize", "detector.initialize", "video.initialize", "gps.initialize",
+        "storage.start", "web.start", "detector.start", "video.start", "gps.start",
         "gps.stop", "video.stop", "detector.stop", "web.stop",
-        "gps.wait", "video.wait", "detector.wait", "web.wait"}));
-    EXPECT_EQ(joins, 4);
+        "storage.stop", "gps.wait", "video.wait", "detector.wait", "web.wait", "storage.wait"}));
+    EXPECT_EQ(joins, 5);
 }
 
 TEST(Application, RepeatedStartStopJoinsAllWorkers) {
@@ -121,7 +123,7 @@ TEST(Application, RepeatedStartStopJoinsAllWorkers) {
         app.wait();
         app.wait();
     }
-    EXPECT_EQ(joins, 80);
+    EXPECT_EQ(joins, 100);
 }
 
 TEST(Application, FailedInitializationCleansUpInitializedModules) {
@@ -135,9 +137,9 @@ TEST(Application, FailedInitializationCleansUpInitializedModules) {
     EXPECT_NE(app.last_error().find("video"), std::string::npos);
     EXPECT_EQ(app.last_error_module(), "video");
     EXPECT_EQ(events, (std::vector<std::string>{
-        "web.initialize", "detector.initialize", "video.initialize",
-        "detector.stop", "web.stop",
-        "detector.wait", "web.wait"}));
+        "storage.initialize", "web.initialize", "detector.initialize", "video.initialize",
+        "detector.stop", "web.stop", "storage.stop",
+        "detector.wait", "web.wait", "storage.wait"}));
     EXPECT_EQ(joins, 0);
 }
 
@@ -153,11 +155,11 @@ TEST(Application, FailedStartStopsAndJoinsAllInitializedModules) {
     EXPECT_NE(app.last_error().find("video"), std::string::npos);
     EXPECT_EQ(app.last_error_module(), "video");
     EXPECT_EQ(events, (std::vector<std::string>{
-        "web.initialize", "detector.initialize", "video.initialize", "gps.initialize",
-        "web.start", "detector.start", "video.start",
+        "storage.initialize", "web.initialize", "detector.initialize", "video.initialize", "gps.initialize",
+        "storage.start", "web.start", "detector.start", "video.start",
         "gps.stop", "video.stop", "detector.stop", "web.stop",
-        "gps.wait", "video.wait", "detector.wait", "web.wait"}));
-    EXPECT_EQ(joins, 2);
+        "storage.stop", "gps.wait", "video.wait", "detector.wait", "web.wait", "storage.wait"}));
+    EXPECT_EQ(joins, 3);
 }
 
 TEST(Application, InvalidConfigPreventsModuleInitialization) {
@@ -187,7 +189,7 @@ TEST(Application, WaitBlocksUntilStop) {
         app.stop();
         EXPECT_EQ(waiting.wait_for(std::chrono::seconds(1)), std::future_status::ready);
     }
-    EXPECT_EQ(joins, 4);
+    EXPECT_EQ(joins, 5);
 }
 
 TEST(Application, DestructorStopsAndJoinsActiveWorkers) {
@@ -200,5 +202,5 @@ TEST(Application, DestructorStopsAndJoinsActiveWorkers) {
         ASSERT_TRUE(app.initialize());
         ASSERT_TRUE(app.start());
     }
-    EXPECT_EQ(joins, 4);
+    EXPECT_EQ(joins, 5);
 }
