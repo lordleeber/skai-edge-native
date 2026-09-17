@@ -16,6 +16,48 @@ find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs)
 find_package(Boost 1.74 REQUIRED COMPONENTS system)
 find_package(SQLite3 REQUIRED)
 
+set(SKAI_ICE_BUILD_SERVICE OFF CACHE BOOL "" FORCE)
+set(SKAI_ICE_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(NO_EXAMPLES ON CACHE BOOL "" FORCE)
+set(NO_TESTS ON CACHE BOOL "" FORCE)
+set(NO_WEBSOCKET ON CACHE BOOL "" FORCE)
+set(TEST_APPS OFF CACHE BOOL "" FORCE)
+set(USE_SYSTEM_JUICE ON CACHE BOOL "" FORCE)
+
+set(SKAI_ICE_SOURCE_DIR "${PROJECT_SOURCE_DIR}/third_party/skai-ice")
+set(LIBDATACHANNEL_SOURCE_DIR "${PROJECT_SOURCE_DIR}/third_party/libdatachannel")
+if(NOT EXISTS "${SKAI_ICE_SOURCE_DIR}/CMakeLists.txt" OR
+        NOT EXISTS "${LIBDATACHANNEL_SOURCE_DIR}/CMakeLists.txt")
+    message(FATAL_ERROR
+        "Step 23 dependencies are missing. Run: scripts/bootstrap_dependencies.sh")
+endif()
+
+add_subdirectory(third_party/skai-ice EXCLUDE_FROM_ALL)
+if(NOT TARGET LibJuice::LibJuice OR NOT TARGET skai_ice::skai_ice)
+    message(FATAL_ERROR "Pinned skai-ice must provide LibJuice::LibJuice and skai_ice::skai_ice")
+endif()
+
+# libdatachannel's install export cannot include the application-owned skai_ice
+# target. This application does not install vendored dependency targets.
+function(install)
+    if(CMAKE_CURRENT_SOURCE_DIR MATCHES "/third_party/libdatachannel(/|$)")
+        return()
+    endif()
+    _install(${ARGN})
+endfunction()
+
+add_subdirectory(third_party/libdatachannel EXCLUDE_FROM_ALL)
+if(NOT TARGET LibDataChannel::LibDataChannel)
+    message(FATAL_ERROR "Pinned libdatachannel must provide LibDataChannel::LibDataChannel")
+endif()
+if(TARGET juice OR TARGET juice-static)
+    message(FATAL_ERROR "libdatachannel built a duplicate libjuice; USE_SYSTEM_JUICE must remain ON")
+endif()
+if(TARGET skai-ice-server)
+    message(FATAL_ERROR "skai-ice-server must not be embedded in skai-edge")
+endif()
+
 add_library(skai-core INTERFACE)
 target_include_directories(skai-core INTERFACE include)
 target_link_libraries(skai-core INTERFACE Threads::Threads)
@@ -109,6 +151,10 @@ add_library(skai-application src/application.cpp)
 target_include_directories(skai-application PUBLIC include)
 target_link_libraries(skai-application PUBLIC skai-config skai-logging Threads::Threads)
 
+add_library(skai-webrtc-runtime src/webrtc/ice_runtime_module.cpp)
+target_include_directories(skai-webrtc-runtime PUBLIC include)
+target_link_libraries(skai-webrtc-runtime PUBLIC skai-application skai_ice::skai_ice)
+
 add_library(skai-storage src/storage/database.cpp src/storage/alert_repository.cpp)
 target_include_directories(skai-storage PUBLIC include)
 target_link_libraries(skai-storage PUBLIC skai-application skai-gps SQLite::SQLite3)
@@ -152,7 +198,8 @@ target_link_libraries(skai-rtsp-source PUBLIC skai-gstreamer skai-config skai-co
 
 add_executable(skai-edge src/main.cpp)
 target_link_libraries(skai-edge PRIVATE skai-cli skai-application skai-gstreamer
-    skai-rtsp-source skai-h264-encoder skai-recording skai-web skai-storage)
+    skai-rtsp-source skai-h264-encoder skai-recording skai-web skai-storage
+    skai-webrtc-runtime LibDataChannel::LibDataChannel)
 if(TARGET skai-inference-module)
     target_link_libraries(skai-edge PRIVATE skai-inference-module)
     target_compile_definitions(skai-edge PRIVATE SKAI_HAS_YOLO_PIPELINE=1)

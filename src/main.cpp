@@ -12,6 +12,7 @@
 #include "skai/video/rtsp_source.hpp"
 #include "skai/video/recording.hpp"
 #include "skai/web/http_server.hpp"
+#include "skai/webrtc/ice_runtime_module.hpp"
 #if SKAI_HAS_YOLO_PIPELINE
 #include "skai/alerts/alert_manager.hpp"
 #include "skai/inference/yolo_inference_module.hpp"
@@ -101,6 +102,7 @@ int main(int argc, char* argv[]) {
     auto alert_repository = std::make_shared<skai::AlertRepository>(*database);
     std::shared_ptr<skai::RecordingController> recording_control;
     modules.storage = std::move(database);
+    modules.webrtc = std::make_unique<skai::IceRuntimeModule>(logger);
     modules.web = std::make_unique<skai::web::HttpServer>(logger, runtime_status,
                                                           api_state, events,
                                                           alert_repository, recording_control);

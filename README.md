@@ -34,8 +34,9 @@ Step 19 adds class/confidence alert rules with consecutive-frame, cooldown, and
 normalized ROI filtering; accepted alerts include the current GPS fix and are
 published through the WebSocket event channel. Step 20 atomically persists JPG
 snapshots and SQLite metadata, enables alert list/detail queries, and provides
-safe oldest-alert cleanup.
-Encoding and external media transport remain later steps.
+safe oldest-alert cleanup. Steps 21 and 22 connect bounded H.264 encoding and
+segmented MP4 recording. Step 23 embeds the pinned `skai-ice` and
+libdatachannel pair used by the upcoming WHEP transport.
 
 ## Build and test
 
@@ -58,6 +59,29 @@ ctest --test-dir build --output-on-failure
 ./build/skai-edge --config config/config.example.yaml
 ./build/skai-edge --rtsp-test --config config/config.example.yaml
 ```
+
+Clone dependencies before configuring a fresh checkout. `skai-ice` is a
+private deployment dependency, so CI runners, new devices, and developers need
+a GitHub token with read access to `lordleeber/skai-ice`:
+
+```sh
+SKAI_GITHUB_TOKEN=... ./scripts/bootstrap_dependencies.sh
+```
+
+The bootstrap script passes the credential as a transient Git HTTP header; it
+does not put the token in `.gitmodules` or a remote URL. Store the token in the
+CI secret manager and expose it only for this command. An already authenticated
+Git environment may omit `SKAI_GITHUB_TOKEN`. Anonymous recursive submodule
+checkout is not a supported build path while `skai-ice` remains private.
+
+Step 23 pins `skai-ice` at `1d61d0e` and libdatachannel v0.22.6 at `0d6adc0`.
+The latter is the exact revision against which `skai-ice`'s vendored
+`juice/juice.h` ABI was validated. Update these two gitlinks together and run
+the `webrtc` CTest label whenever the libjuice ABI changes. The parent build
+forces `USE_SYSTEM_JUICE=ON`, so `LibJuice::LibJuice` always resolves to
+`skai-ice`; the nested libjuice checkout is never compiled. It also disables
+the standalone `skai-ice-server`, tests, examples, and WebSocket support, so
+`cpp-httplib` is not part of the `skai-edge` runtime.
 
 For an executable-only build without GoogleTest or the RTSP-server fixture:
 

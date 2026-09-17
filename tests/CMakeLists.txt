@@ -48,6 +48,11 @@ add_executable(skai-recording-tests unit/recording_test.cpp)
 target_link_libraries(skai-recording-tests PRIVATE skai-recording GTest::gtest_main)
 gtest_discover_tests(skai-recording-tests PROPERTIES TIMEOUT 20)
 
+add_executable(skai-webrtc-tests integration/webrtc_dependency_test.cpp)
+target_link_libraries(skai-webrtc-tests PRIVATE skai-webrtc-runtime
+    LibDataChannel::LibDataChannel GTest::gtest_main)
+gtest_discover_tests(skai-webrtc-tests PROPERTIES LABELS webrtc TIMEOUT 15)
+
 if(TARGET skai-tensorrt)
     add_executable(skai-tensorrt-tests integration/tensorrt_engine_test.cpp)
     target_include_directories(skai-tensorrt-tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
