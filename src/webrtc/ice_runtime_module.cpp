@@ -36,6 +36,14 @@ bool IceRuntimeModule::initialize(const Config& config) {
     skai_ice_set_host_interfaces(interface_names.data(),
                                  static_cast<int>(interface_names.size()));
     skai_ice_set_log_verbosity(config.webrtc.ice_log_verbosity);
+    skai_ice::SetIceLogSink([this](int detail, const std::string& message) {
+        const bool failure = message.find("FAILED") != std::string::npos ||
+                             message.find("failed") != std::string::npos ||
+                             message.find("error") != std::string::npos;
+        logger_.log(failure ? LogLevel::Error
+                            : detail > 1 ? LogLevel::Debug : LogLevel::Info,
+                    "ice", message);
+    });
 
     std::ostringstream message;
     message << (config.webrtc.enabled ? "configured" : "disabled")
@@ -48,6 +56,10 @@ bool IceRuntimeModule::initialize(const Config& config) {
     message << "] ice_log_verbosity=" << config.webrtc.ice_log_verbosity;
     logger_.log(LogLevel::Info, "webrtc", message.str());
     return true;
+}
+
+void IceRuntimeModule::stop() noexcept {
+    skai_ice::SetIceLogSink({});
 }
 
 } // namespace skai

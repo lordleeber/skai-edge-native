@@ -312,6 +312,8 @@ TEST(HttpServer, WebSocketBroadcastsEventsToMultipleClients) {
         EXPECT_NE(status_event.find("\"webrtc\":{\"enabled\":false"),
                   std::string::npos);
         EXPECT_NE(status_event.find("\"lan_only\":true"), std::string::npos);
+        EXPECT_NE(status_event.find("\"signaling_errors\":0"), std::string::npos);
+        EXPECT_NE(status_event.find("\"recently_closed\":[]"), std::string::npos);
         const auto gps = read_websocket(*client);
         EXPECT_NE(gps.find("\"type\":\"gps\""), std::string::npos);
         EXPECT_NE(gps.find("\"source\":\"fixed\""), std::string::npos);

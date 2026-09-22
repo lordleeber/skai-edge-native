@@ -2,6 +2,7 @@
 
 #include <rtc/rtc.hpp>
 #include <rtc/plihandler.hpp>
+#include <rtc/rtp.hpp>
 
 #include <arpa/inet.h>
 #include <ifaddrs.h>
@@ -13,6 +14,7 @@
 #include <iomanip>
 #include <random>
 #include <sstream>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -86,23 +88,75 @@ std::string endpoint_address(const std::string& endpoint) {
     return colon == std::string::npos ? endpoint : endpoint.substr(0, colon);
 }
 
-class PacketCounter final : public rtc::MediaHandler {
+class CountingNackResponder final : public rtc::MediaHandler {
 public:
-    PacketCounter(std::atomic<std::uint64_t>& bytes,
-                  std::atomic<std::uint64_t>& packets)
-        : bytes_(bytes), packets_(packets) {}
+    CountingNackResponder(std::atomic<std::uint64_t>& bytes,
+                          std::atomic<std::uint64_t>& packets,
+                          std::atomic<std::uint64_t>& retransmissions)
+        : bytes_(bytes), packet_count_(packets), retransmissions_(retransmissions) {}
 
     void outgoing(rtc::message_vector& messages,
                   const rtc::message_callback&) override {
         std::uint64_t bytes = 0;
-        for (const auto& message : messages) bytes += message->size();
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (const auto& message : messages) {
+            bytes += message->size();
+            if (message->type == rtc::Message::Control ||
+                message->size() < sizeof(rtc::RtpHeader)) continue;
+            const auto sequence =
+                reinterpret_cast<const rtc::RtpHeader*>(message->data())->seqNumber();
+            if (packets_.find(sequence) == packets_.end()) order_.push_back(sequence);
+            packets_[sequence] = message;
+            while (order_.size() > 512) {
+                packets_.erase(order_.front());
+                order_.pop_front();
+            }
+        }
         bytes_.fetch_add(bytes, std::memory_order_relaxed);
-        packets_.fetch_add(messages.size(), std::memory_order_relaxed);
+        packet_count_.fetch_add(messages.size(), std::memory_order_relaxed);
+    }
+
+    void incoming(rtc::message_vector& messages,
+                  const rtc::message_callback& send) override {
+        for (const auto& message : messages) {
+            if (message->type != rtc::Message::Control) continue;
+            std::size_t offset = 0;
+            while (offset + sizeof(rtc::RtcpNack) <= message->size()) {
+                auto* nack = reinterpret_cast<rtc::RtcpNack*>(
+                    message->data() + offset);
+                const auto length = nack->header.header.lengthInBytes();
+                if (length == 0 || offset + length > message->size()) break;
+                offset += length;
+                if (nack->header.header.payloadType() != 205 ||
+                    nack->header.header.reportCount() != 1) continue;
+                for (unsigned int index = 0; index < nack->getSeqNoCount(); ++index) {
+                    for (const auto sequence : nack->parts[index].getSequenceNumbers()) {
+                        rtc::message_ptr retransmission;
+                        {
+                            std::lock_guard<std::mutex> lock(mutex_);
+                            const auto found = packets_.find(sequence);
+                            if (found != packets_.end()) {
+                                retransmission = rtc::make_message(*found->second);
+                            }
+                        }
+                        if (!retransmission) continue;
+                        bytes_.fetch_add(retransmission->size(), std::memory_order_relaxed);
+                        packet_count_.fetch_add(1, std::memory_order_relaxed);
+                        retransmissions_.fetch_add(1, std::memory_order_relaxed);
+                        send(std::move(retransmission));
+                    }
+                }
+            }
+        }
     }
 
 private:
     std::atomic<std::uint64_t>& bytes_;
-    std::atomic<std::uint64_t>& packets_;
+    std::atomic<std::uint64_t>& packet_count_;
+    std::atomic<std::uint64_t>& retransmissions_;
+    std::mutex mutex_;
+    std::deque<std::uint16_t> order_;
+    std::unordered_map<std::uint16_t, rtc::message_ptr> packets_;
 };
 
 } // namespace
@@ -158,8 +212,11 @@ std::shared_ptr<WebRtcSession> WebRtcSession::create(
             } else if (state == rtc::PeerConnection::State::Disconnected ||
                        state == rtc::PeerConnection::State::Failed) {
                 current->failed_ = true;
-                current->last_error_ = state == rtc::PeerConnection::State::Failed
-                    ? "PeerConnection failed" : "PeerConnection disconnected";
+                if (current->failure_stage_.empty()) {
+                    current->failure_stage_ = "peer_connection";
+                    current->last_error_ = state == rtc::PeerConnection::State::Failed
+                        ? "PeerConnection failed" : "PeerConnection disconnected";
+                }
             } else if (state == rtc::PeerConnection::State::Closed) {
                 current->closed_ = true;
             } else {
@@ -175,8 +232,12 @@ std::shared_ptr<WebRtcSession> WebRtcSession::create(
             if (state == rtc::PeerConnection::IceState::Failed ||
                 state == rtc::PeerConnection::IceState::Disconnected) {
                 current->failed_ = true;
-                current->last_error_ = state == rtc::PeerConnection::IceState::Failed
-                    ? "ICE connectivity failed" : "ICE disconnected";
+                if (current->failure_stage_.empty() ||
+                    current->failure_stage_ == "peer_connection") {
+                    current->failure_stage_ = "ice";
+                    current->last_error_ = state == rtc::PeerConnection::IceState::Failed
+                        ? "ICE connectivity failed" : "ICE disconnected";
+                }
             }
             current->changed_.notify_all();
         }
@@ -241,14 +302,14 @@ CreateSessionResult WebRtcSession::accept_offer(
                 rtc::NalUnit::Separator::StartSequence, rtp_config_);
             sender_reporter_ = std::make_shared<rtc::RtcpSrReporter>(rtp_config_);
             packetizer->addToChain(sender_reporter_);
-            packetizer->addToChain(std::make_shared<rtc::RtcpNackResponder>());
+            packetizer->addToChain(
+                std::make_shared<CountingNackResponder>(
+                    bytes_sent_, packets_sent_, packets_retransmitted_));
             packetizer->addToChain(std::make_shared<rtc::PliHandler>([weak = weak_from_this()] {
                 if (const auto current = weak.lock()) {
                     current->keyframe_events_.fetch_add(1, std::memory_order_relaxed);
                 }
             }));
-            packetizer->addToChain(
-                std::make_shared<PacketCounter>(bytes_sent_, packets_sent_));
             video_track_->setMediaHandler(packetizer);
             video_track_->onError([weak = weak_from_this()](std::string error) {
                 if (const auto current = weak.lock()) {
@@ -273,8 +334,6 @@ CreateSessionResult WebRtcSession::accept_offer(
         return (local_description_ready_ && gathering_complete_) || failed_ || closed_;
     });
     if (!ready) {
-        lock.unlock();
-        close();
         return {CreateSessionError::GatheringTimeout, {}, {},
                 "ICE gathering timed out"};
     }
@@ -295,6 +354,8 @@ CreateSessionResult WebRtcSession::accept_offer(
         return {CreateSessionError::Internal, {}, {},
                 "PeerConnection closed while creating the answer"};
     }
+    answer_ready_ = true;
+    connection_wait_started_ = std::chrono::steady_clock::now();
     return {CreateSessionError::None, id_, std::string(*local), {}};
 }
 
@@ -414,11 +475,18 @@ void WebRtcSession::media_loop() noexcept {
 }
 
 void WebRtcSession::record_media_error(std::string error) noexcept {
+    record_failure("media", std::move(error));
+    if (media_errors_) media_errors_->fetch_add(1, std::memory_order_relaxed);
+}
+
+void WebRtcSession::record_failure(std::string stage, std::string error,
+                                   bool preserve_specific) noexcept {
     try {
         std::lock_guard<std::mutex> lock(mutex_);
+        if (preserve_specific && !failure_stage_.empty()) return;
+        failure_stage_ = std::move(stage);
         last_error_ = std::move(error);
         failed_ = true;
-        if (media_errors_) media_errors_->fetch_add(1, std::memory_order_relaxed);
     } catch (...) {
     }
 }
@@ -434,6 +502,7 @@ WebRtcPeerDiagnostics WebRtcSession::diagnostics() const {
         result.ice_state = ice_state_;
         result.local_candidate = local_candidate_;
         result.local_interface = local_interface_;
+        result.failure_stage = failure_stage_;
         result.close_reason = close_reason_;
         result.last_error = last_error_;
         connected_at = connected_at_;
@@ -441,6 +510,8 @@ WebRtcPeerDiagnostics WebRtcSession::diagnostics() const {
     }
     result.bytes_sent = bytes_sent_.load(std::memory_order_relaxed);
     result.packets_sent = packets_sent_.load(std::memory_order_relaxed);
+    result.packets_retransmitted =
+        packets_retransmitted_.load(std::memory_order_relaxed);
     result.media_queue_drops = media_queue_.stats().dropped;
     result.keyframe_events = keyframe_events_.load(std::memory_order_relaxed);
     if (connected_at != std::chrono::steady_clock::time_point{}) {
@@ -472,9 +543,12 @@ std::string WebRtcSession::stale_reason(
         std::chrono::steady_clock::time_point now,
         std::chrono::milliseconds timeout) const {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (failed_) return last_error_.empty() ? "peer_failed" : last_error_;
+    if (failed_) return failure_stage_.empty() ? "peer_failure"
+                                               : failure_stage_ + "_failure";
     if (closed_) return close_reason_.empty() ? "peer_closed" : close_reason_;
-    if (!connected_ && now - last_activity_ >= timeout) return "connection_timeout";
+    if (answer_ready_ && !connected_ && now - connection_wait_started_ >= timeout) {
+        return "connection_timeout";
+    }
     return {};
 }
 
@@ -528,13 +602,10 @@ CreateSessionResult WebRtcManager::create_session(std::string_view offer_sdp) {
 
     auto result = session->accept_offer(offer_sdp, gathering_timeout_);
     if (!result) {
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            ++signaling_errors_;
-        }
         std::shared_ptr<WebRtcSession> failed;
         {
             std::lock_guard<std::mutex> lock(mutex_);
+            ++signaling_errors_;
             const auto found = sessions_.find(session->id());
             if (found != sessions_.end()) {
                 failed = std::move(found->second);
@@ -543,7 +614,10 @@ CreateSessionResult WebRtcManager::create_session(std::string_view offer_sdp) {
                 last_close_reason_ = "signaling_failure";
             }
         }
-        if (failed) failed->close_with_reason("signaling_failure");
+        if (failed) {
+            failed->record_failure("signaling", result.message, true);
+            remember_closed(failed, "signaling_failure");
+        }
         return result;
     }
     std::unique_ptr<EncodedAccessUnit> initial_keyframe;
@@ -577,7 +651,7 @@ bool WebRtcManager::close_session(std::string_view session_id) {
         ++sessions_closed_;
         last_close_reason_ = "client_delete";
     }
-    session->close_with_reason("client_delete");
+    remember_closed(session, "client_delete");
     logger_.log(LogLevel::Info, "webrtc", "closed WHEP session " + session->id());
     return true;
 }
@@ -600,7 +674,7 @@ std::size_t WebRtcManager::cleanup_stale_sessions() {
         }
     }
     for (const auto& entry : stale) {
-        entry.first->close_with_reason(entry.second);
+        remember_closed(entry.first, entry.second);
     }
     if (!stale.empty()) {
         logger_.log(LogLevel::Info, "webrtc",
@@ -626,6 +700,7 @@ WebRtcDiagnostics WebRtcManager::diagnostics() const {
         result.signaling_errors = signaling_errors_;
         result.media_errors = media_errors_.load(std::memory_order_relaxed);
         result.last_close_reason = last_close_reason_;
+        result.recently_closed.assign(recently_closed_.begin(), recently_closed_.end());
         sessions.reserve(sessions_.size());
         for (const auto& item : sessions_) sessions.push_back(item.second);
     }
@@ -667,7 +742,21 @@ void WebRtcManager::shutdown() noexcept {
         sessions_.clear();
         latest_keyframe_.reset();
     }
-    for (const auto& session : sessions) session->close_with_reason("service_shutdown");
+    for (const auto& session : sessions) remember_closed(session, "service_shutdown");
+}
+
+void WebRtcManager::remember_closed(
+        const std::shared_ptr<WebRtcSession>& session,
+        const std::string& reason) noexcept {
+    if (!session) return;
+    session->close_with_reason(reason);
+    try {
+        auto snapshot = session->diagnostics();
+        std::lock_guard<std::mutex> lock(mutex_);
+        recently_closed_.push_back(std::move(snapshot));
+        while (recently_closed_.size() > 16) recently_closed_.pop_front();
+    } catch (...) {
+    }
 }
 
 std::string WebRtcManager::make_session_id() {

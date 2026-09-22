@@ -36,8 +36,27 @@ Response json_response(http::status result, unsigned version, std::string body) 
     return response;
 }
 
-std::string webrtc_json(const WebRtcDiagnostics& diagnostics) {
+} // namespace
+
+std::string webrtc_diagnostics_json(const WebRtcDiagnostics& diagnostics) {
     std::ostringstream output;
+    const auto write_peer = [&output](const WebRtcPeerDiagnostics& peer) {
+        output << "{\"session_id\":" << json_string(peer.session_id)
+               << ",\"peer_state\":" << json_string(peer.peer_state)
+               << ",\"ice_state\":" << json_string(peer.ice_state)
+               << ",\"local_candidate\":" << json_string(peer.local_candidate)
+               << ",\"local_interface\":" << json_string(peer.local_interface)
+               << ",\"selected_interface\":" << json_string(peer.selected_interface)
+               << ",\"connection_age_s\":" << peer.connection_age_s
+               << ",\"bytes_sent\":" << peer.bytes_sent
+               << ",\"packets_sent\":" << peer.packets_sent
+               << ",\"packets_retransmitted\":" << peer.packets_retransmitted
+               << ",\"media_queue_drops\":" << peer.media_queue_drops
+               << ",\"keyframe_events\":" << peer.keyframe_events
+               << ",\"failure_stage\":" << json_string(peer.failure_stage)
+               << ",\"close_reason\":" << json_string(peer.close_reason)
+               << ",\"last_error\":" << json_string(peer.last_error) << '}';
+    };
     output << "{\"enabled\":" << json_bool(diagnostics.enabled)
            << ",\"lan_only\":" << json_bool(diagnostics.lan_only)
            << ",\"max_peers\":" << diagnostics.max_peers
@@ -49,25 +68,19 @@ std::string webrtc_json(const WebRtcDiagnostics& diagnostics) {
            << ",\"last_close_reason\":"
            << json_string(diagnostics.last_close_reason) << ",\"peers\":[";
     for (std::size_t index = 0; index < diagnostics.peers.size(); ++index) {
-        const auto& peer = diagnostics.peers[index];
         if (index) output << ',';
-        output << "{\"session_id\":" << json_string(peer.session_id)
-               << ",\"peer_state\":" << json_string(peer.peer_state)
-               << ",\"ice_state\":" << json_string(peer.ice_state)
-               << ",\"local_candidate\":" << json_string(peer.local_candidate)
-               << ",\"local_interface\":" << json_string(peer.local_interface)
-               << ",\"selected_interface\":" << json_string(peer.selected_interface)
-               << ",\"connection_age_s\":" << peer.connection_age_s
-               << ",\"bytes_sent\":" << peer.bytes_sent
-               << ",\"packets_sent\":" << peer.packets_sent
-               << ",\"media_queue_drops\":" << peer.media_queue_drops
-               << ",\"keyframe_events\":" << peer.keyframe_events
-               << ",\"close_reason\":" << json_string(peer.close_reason)
-               << ",\"last_error\":" << json_string(peer.last_error) << '}';
+        write_peer(diagnostics.peers[index]);
+    }
+    output << "],\"recently_closed\":[";
+    for (std::size_t index = 0; index < diagnostics.recently_closed.size(); ++index) {
+        if (index) output << ',';
+        write_peer(diagnostics.recently_closed[index]);
     }
     output << "]}";
     return output.str();
 }
+
+namespace {
 
 std::string status_json(const StatusSnapshot& status, bool detector_enabled,
                         WebRtcManager* webrtc) {
@@ -103,7 +116,7 @@ std::string status_json(const StatusSnapshot& status, bool detector_enabled,
                << ",\"last_error\":" << json_string(encoder.last_error) << '}';
     }
     output << ",\"webrtc\":";
-    if (webrtc) output << webrtc_json(webrtc->diagnostics());
+    if (webrtc) output << webrtc_diagnostics_json(webrtc->diagnostics());
     else output << "null";
     output << "}\n";
     return output.str();
@@ -288,7 +301,7 @@ Response route_request(const Request& request, const StatusSnapshot& status,
         const auto diagnostics = webrtc ? webrtc->diagnostics() : WebRtcDiagnostics{};
         return json_response(http::status::ok, request.version(),
                              std::string("{\"webrtc\":") +
-                                 webrtc_json(diagnostics) + "}\n");
+                                 webrtc_diagnostics_json(diagnostics) + "}\n");
     }
     if (path == "/api/v1/config") {
         PublicConfigDto config;

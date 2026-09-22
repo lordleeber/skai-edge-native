@@ -11,10 +11,11 @@ namespace skai {
 class IceRuntimeModule final : public LifecycleModule {
 public:
     explicit IceRuntimeModule(Logger& logger) : logger_(logger) {}
+    ~IceRuntimeModule() override { stop(); }
 
     bool initialize(const Config& config) override;
     bool start() override { return true; }
-    void stop() noexcept override {}
+    void stop() noexcept override;
     void wait() noexcept override {}
     std::string last_error() const override { return last_error_; }
 

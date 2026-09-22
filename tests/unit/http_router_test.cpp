@@ -77,6 +77,7 @@ TEST(HttpRouter, ExposesLanOnlyWebrtcDiagnosticsInStatusAndMetrics) {
     EXPECT_EQ(metrics.result(), http::status::ok);
     EXPECT_NE(metrics.body().find("\"sessions_created\":0"), std::string::npos);
     EXPECT_NE(metrics.body().find("\"signaling_errors\":0"), std::string::npos);
+    EXPECT_NE(metrics.body().find("\"recently_closed\":[]"), std::string::npos);
 }
 
 TEST(HttpRouter, RejectsUnknownRoutesAndUnsupportedMethods) {

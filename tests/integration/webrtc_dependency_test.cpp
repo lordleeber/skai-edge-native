@@ -96,6 +96,8 @@ TEST(WebRtcDependency, ConfiguresSkaiIceBeforePeerConnectionGathering) {
         EXPECT_TRUE(selected_address_found);
         EXPECT_TRUE(channel != nullptr);
     }
+    EXPECT_NE(logs.str().find("module=ice"), std::string::npos);
+    EXPECT_NE(logs.str().find("gather: host candidate"), std::string::npos);
     rtc::Cleanup().wait();
 }
 

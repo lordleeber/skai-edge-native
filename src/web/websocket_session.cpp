@@ -1,4 +1,5 @@
 #include "websocket_session.hpp"
+#include "skai/web/router.hpp"
 
 #include <boost/asio/post.hpp>
 
@@ -194,25 +195,7 @@ std::string WebSocketSession::status_data() const {
     if (!webrtc_) {
         output << "null";
     } else {
-        const auto diagnostics = webrtc_->diagnostics();
-        output << "{\"enabled\":" << (diagnostics.enabled ? "true" : "false")
-               << ",\"lan_only\":true,\"max_peers\":" << diagnostics.max_peers
-               << ",\"active_peers\":" << diagnostics.peers.size()
-               << ",\"peers\":[";
-        for (std::size_t index = 0; index < diagnostics.peers.size(); ++index) {
-            if (index) output << ',';
-            const auto& peer = diagnostics.peers[index];
-            output << "{\"session_id\":\"" << peer.session_id
-                   << "\",\"peer_state\":\"" << peer.peer_state
-                   << "\",\"ice_state\":\"" << peer.ice_state
-                   << "\",\"local_interface\":\"" << peer.local_interface
-                   << "\",\"selected_interface\":\"" << peer.selected_interface
-                   << "\",\"connection_age_s\":" << peer.connection_age_s
-                   << ",\"bytes_sent\":" << peer.bytes_sent
-                   << ",\"packets_sent\":" << peer.packets_sent
-                   << ",\"media_queue_drops\":" << peer.media_queue_drops << '}';
-        }
-        output << "]}";
+        output << webrtc_diagnostics_json(webrtc_->diagnostics());
     }
     output << '}';
     return output.str();
