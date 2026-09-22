@@ -39,6 +39,7 @@ bool IceRuntimeModule::initialize(const Config& config) {
 
     std::ostringstream message;
     message << (config.webrtc.enabled ? "configured" : "disabled")
+            << " mode=lan-only"
             << " host interfaces=[";
     for (std::size_t index = 0; index < config.webrtc.host_interfaces.size(); ++index) {
         if (index != 0) message << ',';

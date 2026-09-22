@@ -226,8 +226,50 @@ TEST(WebRtcManager, DeliversAnnexBAccessUnitsOverTheNegotiatedH264Track) {
     }
     EXPECT_GT(received_bytes, 0U) << logs.str();
     lock.unlock();
+    const auto diagnostics = manager.diagnostics();
+    ASSERT_EQ(diagnostics.peers.size(), 1U);
+    EXPECT_EQ(diagnostics.peers[0].peer_state, "connected");
+    EXPECT_TRUE(diagnostics.peers[0].ice_state == "connected" ||
+                diagnostics.peers[0].ice_state == "completed");
+    EXPECT_EQ(diagnostics.peers[0].local_interface, "lo");
+    EXPECT_FALSE(diagnostics.peers[0].local_candidate.empty());
+    EXPECT_GT(diagnostics.peers[0].bytes_sent, 0U);
+    EXPECT_GT(diagnostics.peers[0].packets_sent, 0U);
     EXPECT_TRUE(manager.close_session(created.session_id));
     EXPECT_EQ(manager.session_count(), 0U);
+    const auto closed = manager.diagnostics();
+    EXPECT_EQ(closed.sessions_created, 1U);
+    EXPECT_EQ(closed.sessions_closed, 1U);
+    EXPECT_EQ(closed.last_close_reason, "client_delete");
+}
+
+TEST(WebRtcManager, SupportsTwoViewersAndRepeatedSessionCleanup) {
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    auto config = loopback_config(logger);
+    config.webrtc.max_peers = 2;
+    skai::WebRtcManager manager(logger);
+    manager.configure(config.webrtc);
+    const auto offer = make_browser_offer().sdp;
+
+    const auto first = manager.create_session(offer);
+    const auto second = manager.create_session(offer);
+    ASSERT_TRUE(first) << first.message;
+    ASSERT_TRUE(second) << second.message;
+    EXPECT_EQ(manager.diagnostics().peers.size(), 2U);
+    EXPECT_EQ(manager.create_session(offer).error, skai::CreateSessionError::Capacity);
+    EXPECT_TRUE(manager.close_session(first.session_id));
+    EXPECT_TRUE(manager.close_session(second.session_id));
+
+    for (int cycle = 0; cycle < 5; ++cycle) {
+        const auto created = manager.create_session(offer);
+        ASSERT_TRUE(created) << "cycle " << cycle << ": " << created.message;
+        ASSERT_TRUE(manager.close_session(created.session_id));
+        EXPECT_EQ(manager.session_count(), 0U);
+    }
+    const auto diagnostics = manager.diagnostics();
+    EXPECT_EQ(diagnostics.sessions_created, 7U);
+    EXPECT_EQ(diagnostics.sessions_closed, 7U);
 }
 
 TEST(WebRtcManager, KeepsRtpTimeMovingWhenEncoderPtsRestarts) {
@@ -354,6 +396,9 @@ TEST(WebRtcManager, ReapsStaleSessions) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     EXPECT_EQ(manager.session_count(), 0U);
+    const auto diagnostics = manager.diagnostics();
+    EXPECT_EQ(diagnostics.sessions_closed, 1U);
+    EXPECT_EQ(diagnostics.last_close_reason, "connection_timeout");
 }
 
 TEST(WhepHttpApi, CreatesAndDeletesSessionWithoutWebSocket) {

@@ -25,6 +25,7 @@ WebSocketSession::WebSocketSession(beast::tcp_stream stream,
                                    std::shared_ptr<RuntimeStatus> status,
                                    std::shared_ptr<ApiState> api,
                                    std::shared_ptr<EventChannel> events,
+                                   std::shared_ptr<WebRtcManager> webrtc,
                                    std::function<void(
                                        std::shared_ptr<WebSocketSession>)>
                                        register_session,
@@ -32,7 +33,7 @@ WebSocketSession::WebSocketSession(beast::tcp_stream stream,
                                        unregister_session)
     : stream_(std::move(stream)), status_timer_(stream_.get_executor()),
       started_(started), status_(std::move(status)), api_(std::move(api)),
-      events_(std::move(events)),
+      events_(std::move(events)), webrtc_(std::move(webrtc)),
       register_session_(std::move(register_session)),
       unregister_session_(std::move(unregister_session)) {}
 
@@ -188,6 +189,30 @@ std::string WebSocketSession::status_data() const {
                << ",\"access_units_dropped\":" << encoder.access_units_dropped
                << ",\"last_access_unit_age_ms\":"
                << encoder.last_access_unit_age_ms << '}';
+    }
+    output << ",\"webrtc\":";
+    if (!webrtc_) {
+        output << "null";
+    } else {
+        const auto diagnostics = webrtc_->diagnostics();
+        output << "{\"enabled\":" << (diagnostics.enabled ? "true" : "false")
+               << ",\"lan_only\":true,\"max_peers\":" << diagnostics.max_peers
+               << ",\"active_peers\":" << diagnostics.peers.size()
+               << ",\"peers\":[";
+        for (std::size_t index = 0; index < diagnostics.peers.size(); ++index) {
+            if (index) output << ',';
+            const auto& peer = diagnostics.peers[index];
+            output << "{\"session_id\":\"" << peer.session_id
+                   << "\",\"peer_state\":\"" << peer.peer_state
+                   << "\",\"ice_state\":\"" << peer.ice_state
+                   << "\",\"local_interface\":\"" << peer.local_interface
+                   << "\",\"selected_interface\":\"" << peer.selected_interface
+                   << "\",\"connection_age_s\":" << peer.connection_age_s
+                   << ",\"bytes_sent\":" << peer.bytes_sent
+                   << ",\"packets_sent\":" << peer.packets_sent
+                   << ",\"media_queue_drops\":" << peer.media_queue_drops << '}';
+        }
+        output << "]}";
     }
     output << '}';
     return output.str();

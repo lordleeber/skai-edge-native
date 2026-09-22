@@ -50,6 +50,8 @@ gps:
 webrtc:
   enabled: true
   max_peers: 2
+  connection_timeout_ms: 15000
+  media_queue_capacity: 8
   # Replace these with interface names reported by `ip link` on the device.
   # Startup fails if none of the configured names exists.
   host_interfaces: [eth0, wlan0]

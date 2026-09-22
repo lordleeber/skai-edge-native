@@ -1,7 +1,11 @@
 #include "skai/webrtc/webrtc_manager.hpp"
 
 #include <rtc/rtc.hpp>
+#include <rtc/plihandler.hpp>
 
+#include <arpa/inet.h>
+#include <ifaddrs.h>
+#include <net/if.h>
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -45,14 +49,75 @@ std::uint32_t random_ssrc() {
            static_cast<std::uint32_t>(random());
 }
 
+template <typename State>
+std::string state_name(State state) {
+    std::ostringstream output;
+    output << state;
+    return output.str();
+}
+
+std::string interface_for_address(const std::string& address) {
+    ifaddrs* interfaces = nullptr;
+    if (getifaddrs(&interfaces) != 0) return {};
+    std::string result;
+    for (auto* item = interfaces; item && result.empty(); item = item->ifa_next) {
+        if (!item->ifa_addr) continue;
+        char text[INET6_ADDRSTRLEN]{};
+        const void* source = nullptr;
+        if (item->ifa_addr->sa_family == AF_INET) {
+            source = &reinterpret_cast<sockaddr_in*>(item->ifa_addr)->sin_addr;
+        } else if (item->ifa_addr->sa_family == AF_INET6) {
+            source = &reinterpret_cast<sockaddr_in6*>(item->ifa_addr)->sin6_addr;
+        }
+        if (source && inet_ntop(item->ifa_addr->sa_family, source, text, sizeof(text)) &&
+            address == text) result = item->ifa_name;
+    }
+    freeifaddrs(interfaces);
+    return result;
+}
+
+std::string endpoint_address(const std::string& endpoint) {
+    if (endpoint.empty()) return {};
+    if (endpoint.front() == '[') {
+        const auto close = endpoint.find(']');
+        return close == std::string::npos ? std::string{} : endpoint.substr(1, close - 1);
+    }
+    const auto colon = endpoint.rfind(':');
+    return colon == std::string::npos ? endpoint : endpoint.substr(0, colon);
+}
+
+class PacketCounter final : public rtc::MediaHandler {
+public:
+    PacketCounter(std::atomic<std::uint64_t>& bytes,
+                  std::atomic<std::uint64_t>& packets)
+        : bytes_(bytes), packets_(packets) {}
+
+    void outgoing(rtc::message_vector& messages,
+                  const rtc::message_callback&) override {
+        std::uint64_t bytes = 0;
+        for (const auto& message : messages) bytes += message->size();
+        bytes_.fetch_add(bytes, std::memory_order_relaxed);
+        packets_.fetch_add(messages.size(), std::memory_order_relaxed);
+    }
+
+private:
+    std::atomic<std::uint64_t>& bytes_;
+    std::atomic<std::uint64_t>& packets_;
+};
+
 } // namespace
 
-WebRtcSession::WebRtcSession(std::string id)
+WebRtcSession::WebRtcSession(std::string id, std::size_t queue_capacity,
+                             std::atomic<std::uint64_t>* media_errors)
     : id_(std::move(id)), peer_(std::make_shared<rtc::PeerConnection>()),
-      last_activity_(std::chrono::steady_clock::now()) {}
+      media_queue_(queue_capacity), last_activity_(std::chrono::steady_clock::now()),
+      media_errors_(media_errors) {}
 
-std::shared_ptr<WebRtcSession> WebRtcSession::create(std::string id) {
-    auto session = std::shared_ptr<WebRtcSession>(new WebRtcSession(std::move(id)));
+std::shared_ptr<WebRtcSession> WebRtcSession::create(
+        std::string id, std::size_t queue_capacity,
+        std::atomic<std::uint64_t>* media_errors) {
+    auto session = std::shared_ptr<WebRtcSession>(
+        new WebRtcSession(std::move(id), queue_capacity, media_errors));
     const std::weak_ptr<WebRtcSession> weak = session;
     session->peer_->onLocalDescription([weak](rtc::Description) {
         if (const auto current = weak.lock()) {
@@ -60,6 +125,16 @@ std::shared_ptr<WebRtcSession> WebRtcSession::create(std::string id) {
             current->local_description_ready_ = true;
             current->last_activity_ = std::chrono::steady_clock::now();
             current->changed_.notify_all();
+        }
+    });
+    session->peer_->onLocalCandidate([weak](rtc::Candidate candidate) {
+        if (const auto current = weak.lock()) {
+            candidate.resolve(rtc::Candidate::ResolveMode::Simple);
+            std::lock_guard<std::mutex> lock(current->mutex_);
+            current->local_candidate_ = std::string(candidate);
+            if (const auto address = candidate.address()) {
+                current->local_interface_ = interface_for_address(*address);
+            }
         }
     });
     session->peer_->onGatheringStateChange(
@@ -75,16 +150,33 @@ std::shared_ptr<WebRtcSession> WebRtcSession::create(std::string id) {
     session->peer_->onStateChange([weak](rtc::PeerConnection::State state) {
         if (const auto current = weak.lock()) {
             std::lock_guard<std::mutex> lock(current->mutex_);
+            current->peer_state_ = state_name(state);
             if (state == rtc::PeerConnection::State::Connected) {
                 current->connected_ = true;
+                current->connected_at_ = std::chrono::steady_clock::now();
                 current->last_activity_ = std::chrono::steady_clock::now();
             } else if (state == rtc::PeerConnection::State::Disconnected ||
                        state == rtc::PeerConnection::State::Failed) {
                 current->failed_ = true;
+                current->last_error_ = state == rtc::PeerConnection::State::Failed
+                    ? "PeerConnection failed" : "PeerConnection disconnected";
             } else if (state == rtc::PeerConnection::State::Closed) {
                 current->closed_ = true;
             } else {
                 return;
+            }
+            current->changed_.notify_all();
+        }
+    });
+    session->peer_->onIceStateChange([weak](rtc::PeerConnection::IceState state) {
+        if (const auto current = weak.lock()) {
+            std::lock_guard<std::mutex> lock(current->mutex_);
+            current->ice_state_ = state_name(state);
+            if (state == rtc::PeerConnection::IceState::Failed ||
+                state == rtc::PeerConnection::IceState::Disconnected) {
+                current->failed_ = true;
+                current->last_error_ = state == rtc::PeerConnection::IceState::Failed
+                    ? "ICE connectivity failed" : "ICE disconnected";
             }
             current->changed_.notify_all();
         }
@@ -150,7 +242,19 @@ CreateSessionResult WebRtcSession::accept_offer(
             sender_reporter_ = std::make_shared<rtc::RtcpSrReporter>(rtp_config_);
             packetizer->addToChain(sender_reporter_);
             packetizer->addToChain(std::make_shared<rtc::RtcpNackResponder>());
+            packetizer->addToChain(std::make_shared<rtc::PliHandler>([weak = weak_from_this()] {
+                if (const auto current = weak.lock()) {
+                    current->keyframe_events_.fetch_add(1, std::memory_order_relaxed);
+                }
+            }));
+            packetizer->addToChain(
+                std::make_shared<PacketCounter>(bytes_sent_, packets_sent_));
             video_track_->setMediaHandler(packetizer);
+            video_track_->onError([weak = weak_from_this()](std::string error) {
+                if (const auto current = weak.lock()) {
+                    current->record_media_error(std::move(error));
+                }
+            });
             video_added = true;
         }
         if (!video_added) {
@@ -194,13 +298,17 @@ CreateSessionResult WebRtcSession::accept_offer(
     return {CreateSessionError::None, id_, std::string(*local), {}};
 }
 
-void WebRtcSession::close() noexcept {
+void WebRtcSession::close() noexcept { close_with_reason("session_closed"); }
+
+void WebRtcSession::close_with_reason(std::string reason) noexcept {
     std::shared_ptr<rtc::PeerConnection> peer;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (cleanup_started_) return;
         cleanup_started_ = true;
         closed_ = true;
+        peer_state_ = "closed";
+        if (close_reason_.empty()) close_reason_ = std::move(reason);
         media_running_ = false;
         peer = std::move(peer_);
     }
@@ -290,24 +398,93 @@ void WebRtcSession::media_loop() noexcept {
             sender_reporter_->setNeedsToReport();
         }
         try {
-            track->send(reinterpret_cast<const std::byte*>(unit->bytes.data()),
-                        unit->bytes.size());
+            if (!track->send(reinterpret_cast<const std::byte*>(unit->bytes.data()),
+                             unit->bytes.size())) {
+                record_media_error("media track rejected an access unit");
+                media_running_ = false;
+            }
+        } catch (const std::exception& error) {
+            record_media_error(error.what());
+            media_running_ = false;
         } catch (...) {
+            record_media_error("unknown media delivery error");
             media_running_ = false;
         }
     }
 }
 
-bool WebRtcSession::stale(std::chrono::steady_clock::time_point now,
-                          std::chrono::milliseconds timeout) const {
+void WebRtcSession::record_media_error(std::string error) noexcept {
+    try {
+        std::lock_guard<std::mutex> lock(mutex_);
+        last_error_ = std::move(error);
+        failed_ = true;
+        if (media_errors_) media_errors_->fetch_add(1, std::memory_order_relaxed);
+    } catch (...) {
+    }
+}
+
+WebRtcPeerDiagnostics WebRtcSession::diagnostics() const {
+    WebRtcPeerDiagnostics result;
+    std::shared_ptr<rtc::PeerConnection> peer;
+    std::chrono::steady_clock::time_point connected_at;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        result.session_id = id_;
+        result.peer_state = peer_state_;
+        result.ice_state = ice_state_;
+        result.local_candidate = local_candidate_;
+        result.local_interface = local_interface_;
+        result.close_reason = close_reason_;
+        result.last_error = last_error_;
+        connected_at = connected_at_;
+        peer = peer_;
+    }
+    result.bytes_sent = bytes_sent_.load(std::memory_order_relaxed);
+    result.packets_sent = packets_sent_.load(std::memory_order_relaxed);
+    result.media_queue_drops = media_queue_.stats().dropped;
+    result.keyframe_events = keyframe_events_.load(std::memory_order_relaxed);
+    if (connected_at != std::chrono::steady_clock::time_point{}) {
+        result.connection_age_s = static_cast<std::uint64_t>(
+            std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::steady_clock::now() - connected_at).count());
+    }
+    try {
+        rtc::Candidate local;
+        rtc::Candidate remote;
+        if (peer && peer->getSelectedCandidatePair(&local, &remote)) {
+            result.local_candidate = std::string(local);
+            if (const auto address = local.address()) {
+                result.selected_interface = interface_for_address(*address);
+            }
+        } else if (peer) {
+            if (const auto local_address = peer->localAddress()) {
+                if (result.local_candidate.empty()) result.local_candidate = *local_address;
+                result.selected_interface =
+                    interface_for_address(endpoint_address(*local_address));
+            }
+        }
+    } catch (...) {
+    }
+    return result;
+}
+
+std::string WebRtcSession::stale_reason(
+        std::chrono::steady_clock::time_point now,
+        std::chrono::milliseconds timeout) const {
     std::lock_guard<std::mutex> lock(mutex_);
-    return closed_ || failed_ || (!connected_ && now - last_activity_ >= timeout);
+    if (failed_) return last_error_.empty() ? "peer_failed" : last_error_;
+    if (closed_) return close_reason_.empty() ? "peer_closed" : close_reason_;
+    if (!connected_ && now - last_activity_ >= timeout) return "connection_timeout";
+    return {};
 }
 
 WebRtcManager::WebRtcManager(Logger& logger,
         std::chrono::milliseconds stale_timeout,
         std::chrono::milliseconds gathering_timeout)
-    : logger_(logger), stale_timeout_(stale_timeout),
+    : logger_(logger),
+      connection_timeout_(stale_timeout.count() > 0 ? stale_timeout
+                                                     : std::chrono::seconds(15)),
+      timeout_overridden_(stale_timeout.count() > 0),
       gathering_timeout_(gathering_timeout) {}
 
 WebRtcManager::~WebRtcManager() { shutdown(); }
@@ -318,6 +495,11 @@ void WebRtcManager::configure(const WebrtcConfig& config) {
         std::lock_guard<std::mutex> lock(mutex_);
         enabled_ = config.enabled;
         max_peers_ = static_cast<std::size_t>(config.max_peers);
+        media_queue_capacity_ = static_cast<std::size_t>(config.media_queue_capacity);
+        if (!timeout_overridden_) {
+            connection_timeout_ =
+                std::chrono::milliseconds(config.connection_timeout_ms);
+        }
         stopping_ = !enabled_;
     }
     if (config.enabled) cleanup_worker_ = std::thread([this] { cleanup_loop(); });
@@ -339,13 +521,29 @@ CreateSessionResult WebRtcManager::create_session(std::string_view offer_sdp) {
         }
         std::string id;
         do id = make_session_id(); while (sessions_.count(id) != 0);
-        session = WebRtcSession::create(id);
+        session = WebRtcSession::create(id, media_queue_capacity_, &media_errors_);
         sessions_.emplace(id, session);
+        ++sessions_created_;
     }
 
     auto result = session->accept_offer(offer_sdp, gathering_timeout_);
     if (!result) {
-        close_session(session->id());
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            ++signaling_errors_;
+        }
+        std::shared_ptr<WebRtcSession> failed;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            const auto found = sessions_.find(session->id());
+            if (found != sessions_.end()) {
+                failed = std::move(found->second);
+                sessions_.erase(found);
+                ++sessions_closed_;
+                last_close_reason_ = "signaling_failure";
+            }
+        }
+        if (failed) failed->close_with_reason("signaling_failure");
         return result;
     }
     std::unique_ptr<EncodedAccessUnit> initial_keyframe;
@@ -376,27 +574,34 @@ bool WebRtcManager::close_session(std::string_view session_id) {
         if (found == sessions_.end()) return false;
         session = std::move(found->second);
         sessions_.erase(found);
+        ++sessions_closed_;
+        last_close_reason_ = "client_delete";
     }
-    session->close();
+    session->close_with_reason("client_delete");
     logger_.log(LogLevel::Info, "webrtc", "closed WHEP session " + session->id());
     return true;
 }
 
 std::size_t WebRtcManager::cleanup_stale_sessions() {
-    std::vector<std::shared_ptr<WebRtcSession>> stale;
+    std::vector<std::pair<std::shared_ptr<WebRtcSession>, std::string>> stale;
     const auto now = std::chrono::steady_clock::now();
     {
         std::lock_guard<std::mutex> lock(mutex_);
         for (auto item = sessions_.begin(); item != sessions_.end();) {
-            if (!item->second->stale(now, stale_timeout_)) {
+            const auto reason = item->second->stale_reason(now, connection_timeout_);
+            if (reason.empty()) {
                 ++item;
                 continue;
             }
-            stale.push_back(std::move(item->second));
+            stale.emplace_back(std::move(item->second), reason);
             item = sessions_.erase(item);
+            ++sessions_closed_;
+            last_close_reason_ = reason;
         }
     }
-    for (const auto& session : stale) session->close();
+    for (const auto& entry : stale) {
+        entry.first->close_with_reason(entry.second);
+    }
     if (!stale.empty()) {
         logger_.log(LogLevel::Info, "webrtc",
                     "cleaned " + std::to_string(stale.size()) + " stale session(s)");
@@ -407,6 +612,26 @@ std::size_t WebRtcManager::cleanup_stale_sessions() {
 std::size_t WebRtcManager::session_count() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return sessions_.size();
+}
+
+WebRtcDiagnostics WebRtcManager::diagnostics() const {
+    WebRtcDiagnostics result;
+    std::vector<std::shared_ptr<WebRtcSession>> sessions;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        result.enabled = enabled_ && !stopping_;
+        result.max_peers = max_peers_;
+        result.sessions_created = sessions_created_;
+        result.sessions_closed = sessions_closed_;
+        result.signaling_errors = signaling_errors_;
+        result.media_errors = media_errors_.load(std::memory_order_relaxed);
+        result.last_close_reason = last_close_reason_;
+        sessions.reserve(sessions_.size());
+        for (const auto& item : sessions_) sessions.push_back(item.second);
+    }
+    result.peers.reserve(sessions.size());
+    for (const auto& session : sessions) result.peers.push_back(session->diagnostics());
+    return result;
 }
 
 void WebRtcManager::publish_access_unit(const EncodedAccessUnit& unit) noexcept {
@@ -435,10 +660,14 @@ void WebRtcManager::shutdown() noexcept {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         for (auto& item : sessions_) sessions.push_back(std::move(item.second));
+        if (!sessions.empty()) {
+            sessions_closed_ += sessions.size();
+            last_close_reason_ = "service_shutdown";
+        }
         sessions_.clear();
         latest_keyframe_.reset();
     }
-    for (const auto& session : sessions) session->close();
+    for (const auto& session : sessions) session->close_with_reason("service_shutdown");
 }
 
 std::string WebRtcManager::make_session_id() {
@@ -454,7 +683,7 @@ std::string WebRtcManager::make_session_id() {
 void WebRtcManager::cleanup_loop() {
     std::unique_lock<std::mutex> lock(mutex_);
     const auto interval = std::min(std::chrono::milliseconds(1000),
-        std::max(std::chrono::milliseconds(10), stale_timeout_ / 2));
+        std::max(std::chrono::milliseconds(10), connection_timeout_ / 2));
     while (!stopping_) {
         if (wakeup_.wait_for(lock, interval, [this] { return stopping_; })) break;
         lock.unlock();

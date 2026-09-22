@@ -7,6 +7,7 @@
 #include <boost/beast/http.hpp>
 
 #include <memory>
+#include <sstream>
 #include <string>
 
 namespace http = boost::beast::http;
@@ -50,6 +51,32 @@ TEST(HttpRouter, ServesHealthAndRuntimeStatusJson) {
               std::string::npos);
     EXPECT_NE(response.body().find("\"encoder\":{\"frames_submitted\":7"),
               std::string::npos);
+}
+
+TEST(HttpRouter, ExposesLanOnlyWebrtcDiagnosticsInStatusAndMetrics) {
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    skai::WebRtcManager manager(logger);
+    skai::WebrtcConfig config;
+    config.enabled = false;
+    manager.configure(config);
+    skai::ApiState api;
+
+    const auto status = skai::web::route_request(
+        {http::verb::get, "/api/v1/status", 11}, {}, api, nullptr, nullptr,
+        &manager);
+    EXPECT_EQ(status.result(), http::status::ok);
+    EXPECT_NE(status.body().find("\"webrtc\":{\"enabled\":false"),
+              std::string::npos);
+    EXPECT_NE(status.body().find("\"lan_only\":true"), std::string::npos);
+    EXPECT_NE(status.body().find("\"active_peers\":0"), std::string::npos);
+
+    const auto metrics = skai::web::route_request(
+        {http::verb::get, "/api/v1/metrics", 11}, {}, api, nullptr, nullptr,
+        &manager);
+    EXPECT_EQ(metrics.result(), http::status::ok);
+    EXPECT_NE(metrics.body().find("\"sessions_created\":0"), std::string::npos);
+    EXPECT_NE(metrics.body().find("\"signaling_errors\":0"), std::string::npos);
 }
 
 TEST(HttpRouter, RejectsUnknownRoutesAndUnsupportedMethods) {
