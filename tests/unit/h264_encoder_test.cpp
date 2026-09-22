@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <atomic>
 #include <memory>
 #include <sstream>
 #include <thread>
@@ -38,6 +39,19 @@ bool starts_with_annex_b_start_code(const std::vector<std::uint8_t>& bytes) {
            (bytes[2] == 1 || (bytes[2] == 0 && bytes[3] == 1));
 }
 
+bool contains_nal_type(const std::vector<std::uint8_t>& bytes, std::uint8_t type) {
+    for (std::size_t index = 0; index + 4 < bytes.size(); ++index) {
+        const bool long_start = bytes[index] == 0 && bytes[index + 1] == 0 &&
+                                bytes[index + 2] == 0 && bytes[index + 3] == 1;
+        const bool short_start = bytes[index] == 0 && bytes[index + 1] == 0 &&
+                                 bytes[index + 2] == 1;
+        const auto header = index + (long_start ? 4 : 3);
+        if ((long_start || short_start) && header < bytes.size() &&
+            (bytes[header] & 0x1f) == type) return true;
+    }
+    return false;
+}
+
 } // namespace
 
 TEST(H264Encoder, RejectsInvalidConfigurationBeforeStartingWorker) {
@@ -61,7 +75,13 @@ TEST(H264Encoder, EncodesBoundedAnnexBAccessUnitsAndReportsMetrics) {
     std::ostringstream logs;
     skai::Logger logger(logs);
     auto status = std::make_shared<skai::RuntimeStatus>();
-    skai::H264Encoder encoder(input, output, logger, status);
+    std::atomic_size_t fanout_count{0};
+    skai::EncodedAccessUnit fanned_out;
+    skai::H264Encoder encoder(input, output, logger, status,
+        [&](const skai::EncodedAccessUnit& unit) {
+            fanned_out = unit;
+            ++fanout_count;
+        });
     ASSERT_TRUE(encoder.start({}, error)) << error;
 
     ASSERT_TRUE(input.push(frame(41, 33'000'000)));
@@ -70,6 +90,12 @@ TEST(H264Encoder, EncodesBoundedAnnexBAccessUnitsAndReportsMetrics) {
     EXPECT_NE(unit->pts_ns, 0U);
     EXPECT_TRUE(unit->keyframe);
     EXPECT_TRUE(starts_with_annex_b_start_code(unit->bytes));
+    EXPECT_TRUE(contains_nal_type(unit->bytes, 7));
+    EXPECT_TRUE(contains_nal_type(unit->bytes, 8));
+    EXPECT_TRUE(contains_nal_type(unit->bytes, 5));
+    EXPECT_EQ(fanout_count, 1U);
+    EXPECT_EQ(fanned_out.sequence, unit->sequence);
+    EXPECT_EQ(fanned_out.bytes, unit->bytes);
     ASSERT_TRUE(status->snapshot().encoder.has_value());
     EXPECT_GE(status->snapshot().encoder->access_units_encoded, 1U);
 

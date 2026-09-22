@@ -17,6 +17,7 @@
 #include <sstream>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace {
 
@@ -98,6 +99,18 @@ skai::Config loopback_config(skai::Logger& logger) {
     return config;
 }
 
+skai::EncodedAccessUnit h264_keyframe(std::uint64_t pts_ns) {
+    skai::EncodedAccessUnit unit;
+    unit.pts_ns = pts_ns;
+    unit.keyframe = true;
+    unit.bytes = {
+        0, 0, 0, 1, 0x67, 0x42, 0xe0, 0x1f, 0x95, 0xa8, 0x14, 0x01,
+        0x6e, 0x9b, 0x80,
+        0, 0, 0, 1, 0x68, 0xce, 0x3c, 0x80,
+        0, 0, 0, 1, 0x65, 0x88, 0x84, 0x00};
+    return unit;
+}
+
 } // namespace
 
 TEST(WebRtcManager, CreatesUniqueAnswersEnforcesCapacityAndClosesSessions) {
@@ -126,6 +139,7 @@ TEST(WebRtcManager, CreatesUniqueAnswersEnforcesCapacityAndClosesSessions) {
     EXPECT_NE(first.answer_sdp.find("a=ice-ufrag:"), std::string::npos);
     EXPECT_NE(first.answer_sdp.find("a=candidate:"), std::string::npos);
     EXPECT_NE(first.answer_sdp.find("a=sendonly"), std::string::npos);
+    EXPECT_NE(first.answer_sdp.find("profile-level-id=42e01f"), std::string::npos);
     EXPECT_EQ(manager.session_count(), 1U);
 
     auto blocked_offer = make_browser_offer(rtc::Description::Direction::SendRecv);
@@ -142,6 +156,48 @@ TEST(WebRtcManager, CreatesUniqueAnswersEnforcesCapacityAndClosesSessions) {
     EXPECT_EQ(manager.session_count(), 0U);
     EXPECT_EQ(manager.create_session(blocked_offer.sdp).error,
               skai::CreateSessionError::Disabled);
+}
+
+TEST(WebRtcManager, DeliversAnnexBAccessUnitsOverTheNegotiatedH264Track) {
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    auto config = loopback_config(logger);
+    skai::WebRtcManager manager(logger);
+    manager.configure(config.webrtc);
+
+    auto browser = make_browser_offer();
+    browser.track->setMediaHandler(std::make_shared<rtc::H264RtpDepacketizer>(
+        rtc::NalUnit::Separator::StartSequence));
+    std::mutex mutex;
+    std::condition_variable changed;
+    std::size_t received_bytes = 0;
+    browser.track->onFrame([&](rtc::binary data, rtc::FrameInfo) {
+        {
+            std::lock_guard<std::mutex> lock(mutex);
+            received_bytes += data.size();
+        }
+        changed.notify_all();
+    });
+
+    const auto created = manager.create_session(browser.sdp);
+    ASSERT_TRUE(created) << created.message << '\n' << logs.str();
+    browser.peer->setRemoteDescription(
+        rtc::Description(created.answer_sdp, rtc::Description::Type::Answer));
+
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    std::uint64_t pts_ns = 0;
+    std::unique_lock<std::mutex> lock(mutex);
+    while (received_bytes == 0 && std::chrono::steady_clock::now() < deadline) {
+        lock.unlock();
+        manager.publish_access_unit(h264_keyframe(pts_ns));
+        pts_ns += 33'333'333;
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        lock.lock();
+    }
+    EXPECT_GT(received_bytes, 0U) << logs.str();
+    lock.unlock();
+    EXPECT_TRUE(manager.close_session(created.session_id));
+    EXPECT_EQ(manager.session_count(), 0U);
 }
 
 TEST(WebRtcManager, ReapsStaleSessions) {

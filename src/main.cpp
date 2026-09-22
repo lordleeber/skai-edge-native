@@ -117,7 +117,10 @@ int main(int argc, char* argv[]) {
         inference_frames, annotated_frames, logger, runtime_status, api_state,
         events, alert_manager);
     modules.encoder = std::make_unique<skai::H264EncoderModule>(
-        annotated_frames, encoded_access_units, logger, runtime_status);
+        annotated_frames, encoded_access_units, logger, runtime_status,
+        [webrtc_manager](const skai::EncodedAccessUnit& unit) {
+            webrtc_manager->publish_access_unit(unit);
+        });
     modules.recording = std::make_unique<skai::RecordingModule>(
         encoded_access_units, logger, recording_control, events);
 #else

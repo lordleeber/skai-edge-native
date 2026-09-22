@@ -91,8 +91,10 @@ std::string serialize_h264_encoder_metrics(const H264EncoderMetrics& metrics) {
 
 H264Encoder::H264Encoder(BoundedQueue<Frame>& input,
                          BoundedQueue<EncodedAccessUnit>& output,
-                         Logger& logger, std::shared_ptr<RuntimeStatus> status)
-    : input_(input), output_(output), logger_(logger), status_(std::move(status)) {}
+                         Logger& logger, std::shared_ptr<RuntimeStatus> status,
+                         AccessUnitSink access_unit_sink)
+    : input_(input), output_(output), logger_(logger), status_(std::move(status)),
+      access_unit_sink_(std::move(access_unit_sink)) {}
 
 H264Encoder::~H264Encoder() { stop(); }
 
@@ -183,7 +185,7 @@ bool H264Encoder::open_pipeline(const Frame& first_frame, std::string& error) {
         GST_TYPE_FRACTION, config_.fps_num, config_.fps_den, nullptr);
     GstCaps* encoded_caps = gst_caps_new_simple(
         "video/x-h264", "stream-format", G_TYPE_STRING, "byte-stream", "alignment",
-        G_TYPE_STRING, "au", nullptr);
+        G_TYPE_STRING, "au", "profile", G_TYPE_STRING, "constrained-baseline", nullptr);
     g_object_set(source, "caps", raw_caps, "is-live", TRUE, "format", GST_FORMAT_TIME,
                  "block", FALSE, "max-buffers", 2ULL, "max-bytes", 0ULL,
                  "max-time", 0ULL, "leaky-type", 0, nullptr);
@@ -319,6 +321,16 @@ bool H264Encoder::capture_sample(GstSample* sample) {
     unit.bytes.assign(mapped.data, mapped.data + mapped.size);
     gst_buffer_unmap(buffer, &mapped);
     if (unit.bytes.empty()) return false;
+    if (access_unit_sink_) {
+        try {
+            access_unit_sink_(unit);
+        } catch (const std::exception& exception) {
+            logger_.log(LogLevel::Error, "encoder",
+                        "encoded access-unit sink failed: " + std::string(exception.what()));
+        } catch (...) {
+            logger_.log(LogLevel::Error, "encoder", "encoded access-unit sink failed");
+        }
+    }
     output_.push(std::move(unit));
     {
         std::lock_guard<std::mutex> lock(metrics_mutex_);

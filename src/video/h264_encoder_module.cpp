@@ -7,7 +7,7 @@ bool H264EncoderModule::initialize(const Config&) {
     encoded_access_units_.reset();
     if (status_) status_->clear_encoder();
     encoder_ = std::make_unique<H264Encoder>(annotated_frames_, encoded_access_units_,
-                                             logger_, status_);
+                                             logger_, status_, access_unit_sink_);
     last_error_.clear();
     return true;
 }

@@ -13,6 +13,10 @@
   let activeSocket = null;
   let latestDetectionSequence = -1;
   let bootstrapPromise;
+  let activePeer = null;
+  let activeWhepLocation = "";
+  let videoRetryTimer = 0;
+  let videoGeneration = 0;
   const alertIds = new Set();
 
   async function getJson(path) {
@@ -223,8 +227,95 @@
     }
   }
 
+  function waitForIceGathering(pc) {
+    if (pc.iceGatheringState === "complete") return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const timeout = window.setTimeout(() => {
+        pc.removeEventListener("icegatheringstatechange", changed);
+        reject(new Error("ICE gathering timed out"));
+      }, connectionAttemptTimeoutMs);
+      function changed() {
+        if (pc.iceGatheringState !== "complete") return;
+        window.clearTimeout(timeout);
+        pc.removeEventListener("icegatheringstatechange", changed);
+        resolve();
+      }
+      pc.addEventListener("icegatheringstatechange", changed);
+    });
+  }
+
+  function closeVideoSession(removeRemote = true) {
+    ++videoGeneration;
+    window.clearTimeout(videoRetryTimer);
+    const location = activeWhepLocation;
+    activeWhepLocation = "";
+    if (activePeer) activePeer.close();
+    activePeer = null;
+    byId("live-video").srcObject = null;
+    byId("video-placeholder").classList.toggle("hidden", false);
+    if (removeRemote && location) {
+      fetch(location, {method: "DELETE", keepalive: true}).catch(() => {});
+    }
+  }
+
+  function retryVideo(generation) {
+    if (generation !== videoGeneration) return;
+    setText("live-stream-state", "Reconnecting");
+    videoRetryTimer = window.setTimeout(connectVideo, 2000);
+  }
+
+  async function connectVideo() {
+    closeVideoSession();
+    const generation = videoGeneration;
+    setText("live-stream-state", "Connecting");
+    const pc = new RTCPeerConnection();
+    activePeer = pc;
+    pc.addTransceiver("video", {direction: "recvonly"});
+    pc.addEventListener("track", (event) => {
+      if (generation !== videoGeneration) return;
+      byId("live-video").srcObject = event.streams[0] || new MediaStream([event.track]);
+      byId("video-placeholder").classList.toggle("hidden", true);
+      setText("live-stream-state", "Live");
+    });
+    pc.addEventListener("connectionstatechange", () => {
+      if (generation !== videoGeneration) return;
+      if (["failed", "disconnected", "closed"].includes(pc.connectionState)) {
+        closeVideoSession();
+        retryVideo(videoGeneration);
+      }
+    });
+    try {
+      await pc.setLocalDescription(await pc.createOffer());
+      await waitForIceGathering(pc);
+      const response = await fetch("/api/v1/webrtc/whep", {
+        method: "POST",
+        headers: {"Content-Type": "application/sdp"},
+        body: pc.localDescription.sdp
+      });
+      if (!response.ok) throw new Error(`WHEP ${response.status}`);
+      const location = response.headers.get("Location");
+      const answer = await response.text();
+      if (generation !== videoGeneration) {
+        if (location) fetch(location, {method: "DELETE", keepalive: true}).catch(() => {});
+        return;
+      }
+      activeWhepLocation = location || "";
+      await pc.setRemoteDescription({type: "answer", sdp: answer});
+    } catch {
+      if (generation !== videoGeneration) return;
+      closeVideoSession();
+      retryVideo(videoGeneration);
+    }
+  }
+
   byId("record-start").addEventListener("click", () => recording("start"));
   byId("record-stop").addEventListener("click", () => recording("stop"));
   bootstrapPromise = initialLoad();
   connect();
+  if (typeof RTCPeerConnection !== "undefined") {
+    connectVideo();
+    window.addEventListener("pagehide", () => closeVideoSession());
+  } else {
+    setText("live-stream-state", "Unsupported");
+  }
 })();
