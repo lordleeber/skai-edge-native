@@ -64,7 +64,28 @@ TEST(H264Encoder, RejectsInvalidConfigurationBeforeStartingWorker) {
 
     EXPECT_FALSE(encoder.start({0, 30, 30, 1}, error));
     EXPECT_NE(error.find("positive"), std::string::npos);
+    EXPECT_FALSE(encoder.start({14'001, 30, 30, 1}, error));
+    EXPECT_NE(error.find("Level 3.1"), std::string::npos);
     EXPECT_FALSE(output.is_shutdown());
+}
+
+TEST(H264Encoder, RejectsFramesOutsideConstrainedBaselineLevel31) {
+    std::string error;
+    ASSERT_TRUE(skai::gst::initialize_once(error)) << error;
+    skai::BoundedQueue<skai::Frame> input(1);
+    skai::BoundedQueue<skai::EncodedAccessUnit> output(1);
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    skai::H264Encoder encoder(input, output, logger);
+    ASSERT_TRUE(encoder.start({}, error));
+    ASSERT_TRUE(input.push(frame(1, 0, 1920, 1080)));
+    for (int attempt = 0; attempt < 100 && encoder.metrics().frames_rejected == 0; ++attempt) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    encoder.stop();
+    EXPECT_EQ(encoder.metrics().frames_rejected, 1U);
+    EXPECT_NE(encoder.metrics().last_error.find("Level 3.1"), std::string::npos);
+    EXPECT_EQ(output.stats().pushed, 0U);
 }
 
 TEST(H264Encoder, EncodesBoundedAnnexBAccessUnitsAndReportsMetrics) {
@@ -96,16 +117,20 @@ TEST(H264Encoder, EncodesBoundedAnnexBAccessUnitsAndReportsMetrics) {
     EXPECT_EQ(fanout_count, 1U);
     EXPECT_EQ(fanned_out.sequence, unit->sequence);
     EXPECT_EQ(fanned_out.bytes, unit->bytes);
+    for (int attempt = 0; attempt < 100; ++attempt) {
+        const auto snapshot = status->snapshot();
+        if (snapshot.encoder && snapshot.encoder->access_units_encoded >= 1) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
     ASSERT_TRUE(status->snapshot().encoder.has_value());
     EXPECT_GE(status->snapshot().encoder->access_units_encoded, 1U);
 
-    ASSERT_TRUE(input.push(frame(42, 66'000'000)));
-    ASSERT_TRUE(input.push(frame(43, 99'000'000)));
-    ASSERT_TRUE(input.push(frame(44, 132'000'000)));
-    ASSERT_TRUE(input.push(frame(45, 165'000'000)));
-    for (int attempt = 0; attempt < 300 &&
-                          encoder.metrics().access_units_encoded < 4; ++attempt) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    for (std::uint64_t sequence = 42; sequence <= 45; ++sequence) {
+        ASSERT_TRUE(input.push(frame(sequence, (sequence - 41) * 33'000'000)));
+        for (int attempt = 0; attempt < 300 &&
+                encoder.metrics().access_units_encoded < sequence - 40; ++attempt) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
     }
     encoder.stop();
 

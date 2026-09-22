@@ -24,8 +24,25 @@ bool valid_config(const H264EncoderConfig& config, std::string& error) {
         error = "H.264 encoder bitrate, keyframe interval, and frame rate must be positive";
         return false;
     }
-    if (config.bitrate_kbps > 2'048'000) {
-        error = "H.264 encoder bitrate exceeds x264enc's supported maximum";
+    constexpr int level_3_1_max_bitrate_kbps = 14'000;
+    if (config.bitrate_kbps > level_3_1_max_bitrate_kbps) {
+        error = "H.264 encoder bitrate exceeds constrained-baseline Level 3.1";
+        return false;
+    }
+    return true;
+}
+
+bool level_3_1_supports(const Frame& frame, const H264EncoderConfig& config,
+                        std::string& error) {
+    constexpr std::int64_t max_macroblocks_per_frame = 3'600;
+    constexpr std::int64_t max_macroblocks_per_second = 108'000;
+    const auto macroblocks_wide = (static_cast<std::int64_t>(frame.width) + 15) / 16;
+    const auto macroblocks_high = (static_cast<std::int64_t>(frame.height) + 15) / 16;
+    const auto macroblocks = macroblocks_wide * macroblocks_high;
+    if (macroblocks > max_macroblocks_per_frame ||
+        macroblocks * config.fps_num >
+            max_macroblocks_per_second * config.fps_den) {
+        error = "encoder frame dimensions and rate exceed constrained-baseline Level 3.1";
         return false;
     }
     return true;
@@ -161,6 +178,7 @@ H264EncoderMetrics H264Encoder::metrics() const {
 }
 
 bool H264Encoder::open_pipeline(const Frame& first_frame, std::string& error) {
+    if (!level_3_1_supports(first_frame, config_, error)) return false;
     pipeline_ = gst::Pipeline::create_empty(logger_, error);
     if (!pipeline_) return false;
 
@@ -185,7 +203,8 @@ bool H264Encoder::open_pipeline(const Frame& first_frame, std::string& error) {
         GST_TYPE_FRACTION, config_.fps_num, config_.fps_den, nullptr);
     GstCaps* encoded_caps = gst_caps_new_simple(
         "video/x-h264", "stream-format", G_TYPE_STRING, "byte-stream", "alignment",
-        G_TYPE_STRING, "au", "profile", G_TYPE_STRING, "constrained-baseline", nullptr);
+        G_TYPE_STRING, "au", "profile", G_TYPE_STRING, "constrained-baseline",
+        "level", G_TYPE_STRING, "3.1", nullptr);
     g_object_set(source, "caps", raw_caps, "is-live", TRUE, "format", GST_FORMAT_TIME,
                  "block", FALSE, "max-buffers", 2ULL, "max-bytes", 0ULL,
                  "max-time", 0ULL, "leaky-type", 0, nullptr);

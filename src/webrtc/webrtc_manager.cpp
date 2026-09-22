@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <charconv>
 #include <iomanip>
 #include <random>
 #include <sstream>
@@ -23,9 +24,15 @@ bool is_compatible_h264(const rtc::Description::Media::RtpMap* map) {
     for (auto parameters : map->fmtps) {
         std::transform(parameters.begin(), parameters.end(), parameters.begin(),
                        [](unsigned char value) { return std::tolower(value); });
+        constexpr std::size_t value_offset = 17;
         const auto profile = parameters.find("profile-level-id=42");
-        if (profile != std::string::npos &&
-            parameters.find("packetization-mode=1") != std::string::npos) {
+        if (profile == std::string::npos ||
+            profile + value_offset + 6 > parameters.size() ||
+            parameters.find("packetization-mode=1") == std::string::npos) continue;
+        const auto* level_begin = parameters.data() + profile + value_offset + 4;
+        unsigned int level = 0;
+        const auto parsed = std::from_chars(level_begin, level_begin + 2, level, 16);
+        if (parsed.ec == std::errc{} && parsed.ptr == level_begin + 2 && level <= 0x1f) {
             return true;
         }
     }
@@ -234,10 +241,19 @@ void WebRtcSession::enqueue(const EncodedAccessUnit& unit) noexcept {
 
 void WebRtcSession::media_loop() noexcept {
     bool waiting_for_keyframe = true;
-    std::uint64_t first_pts_ns = 0;
+    bool timestamp_initialized = false;
+    std::uint64_t last_pts_ns = 0;
+    std::uint32_t rtp_timestamp = 0;
+    std::uint32_t last_timestamp_step = 3'000;
+    std::size_t observed_queue_drops = 0;
     while (media_running_) {
         auto unit = media_queue_.pop_for(std::chrono::milliseconds(100));
         if (!unit) continue;
+        const auto queue_drops = media_queue_.stats().dropped;
+        if (queue_drops != observed_queue_drops) {
+            observed_queue_drops = queue_drops;
+            waiting_for_keyframe = true;
+        }
         if (waiting_for_keyframe && !unit->keyframe) continue;
         std::shared_ptr<rtc::Track> track;
         {
@@ -250,15 +266,24 @@ void WebRtcSession::media_loop() noexcept {
         if (!media_running_ || !track || !track->isOpen()) continue;
         if (waiting_for_keyframe) {
             waiting_for_keyframe = false;
-            first_pts_ns = unit->pts_ns;
         }
-        const auto elapsed_ns = unit->pts_ns >= first_pts_ns
-                                    ? unit->pts_ns - first_pts_ns : 0;
-        const auto elapsed_timestamp =
-            (elapsed_ns / 1'000'000'000ULL) * 90'000ULL +
-            ((elapsed_ns % 1'000'000'000ULL) * 90'000ULL) / 1'000'000'000ULL;
-        rtp_config_->timestamp = rtp_config_->startTimestamp +
-            static_cast<std::uint32_t>(elapsed_timestamp);
+        if (!timestamp_initialized) {
+            timestamp_initialized = true;
+            rtp_timestamp = rtp_config_->startTimestamp;
+        } else {
+            std::uint32_t step = last_timestamp_step;
+            if (unit->pts_ns > last_pts_ns) {
+                const auto delta_ns = unit->pts_ns - last_pts_ns;
+                const auto converted =
+                    (delta_ns / 1'000'000'000ULL) * 90'000ULL +
+                    ((delta_ns % 1'000'000'000ULL) * 90'000ULL) / 1'000'000'000ULL;
+                step = static_cast<std::uint32_t>(std::max<std::uint64_t>(1, converted));
+                if (step <= 90'000) last_timestamp_step = step;
+            }
+            rtp_timestamp += step;
+        }
+        last_pts_ns = unit->pts_ns;
+        rtp_config_->timestamp = rtp_timestamp;
         if (sender_reporter_ &&
             rtp_config_->timestampToSeconds(
                 rtp_config_->timestamp - sender_reporter_->lastReportedTimestamp()) > 1.0) {

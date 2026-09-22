@@ -308,14 +308,27 @@
     }
   }
 
-  byId("record-start").addEventListener("click", () => recording("start"));
-  byId("record-stop").addEventListener("click", () => recording("stop"));
-  bootstrapPromise = initialLoad();
-  connect();
-  if (typeof RTCPeerConnection !== "undefined") {
+  async function initializeVideo() {
+    if (typeof RTCPeerConnection === "undefined") {
+      setText("live-stream-state", "Unsupported");
+      return;
+    }
+    try {
+      const config = await getJson("/api/v1/config");
+      if (config.webrtc?.enabled === false) {
+        setText("live-stream-state", "Disabled");
+        return;
+      }
+    } catch {
+      setText("live-stream-state", "Unavailable");
+      return;
+    }
     connectVideo();
     window.addEventListener("pagehide", () => closeVideoSession());
-  } else {
-    setText("live-stream-state", "Unsupported");
   }
+
+  byId("record-start").addEventListener("click", () => recording("start"));
+  byId("record-stop").addEventListener("click", () => recording("stop"));
+  bootstrapPromise = Promise.all([initialLoad(), initializeVideo()]);
+  connect();
 })();

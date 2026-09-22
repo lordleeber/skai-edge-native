@@ -35,7 +35,7 @@ class Element {
   insertCell() { const cell = new Element(); this.append(cell); return cell; }
 }
 
-function createHarness({withRtc = false} = {}) {
+function createHarness({withRtc = false, webrtcEnabled = true} = {}) {
   const elements = new Map();
   const element = (id) => {
     if (!elements.has(id)) elements.set(id, new Element());
@@ -61,7 +61,8 @@ function createHarness({withRtc = false} = {}) {
       {class_id: 0, class_name: "person", confidence: 0.9}
     ]},
     alerts: {available: true, items: [{id: "a-1", detections: [
-      {class_name: "person"}]}]}
+      {class_name: "person"}]}]},
+    config: {webrtc: {enabled: webrtcEnabled}}
   };
   const fetchCalls = [];
   const fetchRequests = [];
@@ -74,6 +75,7 @@ function createHarness({withRtc = false} = {}) {
     }
     if (options.method === "DELETE") return {ok: true, status: 204};
     const value = url.endsWith("/status") ? snapshots.status
+      : url.endsWith("/config") ? snapshots.config
       : url.endsWith("/gps") ? snapshots.gps
       : url.includes("/alerts?") ? snapshots.alerts : snapshots.detections;
     return {ok: true, status: 200, statusText: "OK",
@@ -160,7 +162,7 @@ function createHarness({withRtc = false} = {}) {
 }
 
 async function flush() {
-  for (let index = 0; index < 12; ++index) await Promise.resolve();
+  for (let index = 0; index < 30; ++index) await Promise.resolve();
 }
 
 function detectionFrame(harness) {
@@ -235,4 +237,13 @@ test("browser negotiates the WHEP video track with a completed local SDP", async
   assert.equal(request.options.headers["Content-Type"], "application/sdp");
   assert.equal(request.options.body, "offer-sdp");
   assert.equal(harness.peers[0].remoteDescription.sdp, "answer-sdp");
+});
+
+test("disabled WebRTC does not create or retry WHEP sessions", async () => {
+  const harness = createHarness({withRtc: true, webrtcEnabled: false});
+  await flush();
+
+  assert.equal(harness.fetchCalls.includes("/api/v1/webrtc/whep"), false);
+  assert.equal(harness.elements.get("live-stream-state").textContent, "Disabled");
+  assert.equal(harness.hasTimer(2000), false);
 });
