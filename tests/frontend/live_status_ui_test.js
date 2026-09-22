@@ -35,7 +35,7 @@ class Element {
   insertCell() { const cell = new Element(); this.append(cell); return cell; }
 }
 
-function createHarness() {
+function createHarness({withRtc = false, webrtcEnabled = true} = {}) {
   const elements = new Map();
   const element = (id) => {
     if (!elements.has(id)) elements.set(id, new Element());
@@ -61,12 +61,21 @@ function createHarness() {
       {class_id: 0, class_name: "person", confidence: 0.9}
     ]},
     alerts: {available: true, items: [{id: "a-1", detections: [
-      {class_name: "person"}]}]}
+      {class_name: "person"}]}]},
+    config: {webrtc: {enabled: webrtcEnabled}}
   };
   const fetchCalls = [];
-  const fetch = async (url) => {
+  const fetchRequests = [];
+  const fetch = async (url, options = {}) => {
     fetchCalls.push(url);
+    fetchRequests.push({url, options});
+    if (url === "/api/v1/webrtc/whep") {
+      return {ok: true, status: 201, headers: {get: () => "/api/v1/webrtc/sessions/test"},
+        text: async () => "answer-sdp"};
+    }
+    if (options.method === "DELETE") return {ok: true, status: 204};
     const value = url.endsWith("/status") ? snapshots.status
+      : url.endsWith("/config") ? snapshots.config
       : url.endsWith("/gps") ? snapshots.gps
       : url.includes("/alerts?") ? snapshots.alerts : snapshots.detections;
     return {ok: true, status: 200, statusText: "OK",
@@ -105,6 +114,23 @@ function createHarness() {
     }
   }
 
+  class MockPeerConnection {
+    static instances = [];
+    constructor() {
+      this.iceGatheringState = "complete";
+      this.connectionState = "new";
+      this.listeners = new Map();
+      MockPeerConnection.instances.push(this);
+    }
+    addTransceiver() {}
+    addEventListener(type, callback) { this.listeners.set(type, callback); }
+    removeEventListener() {}
+    async createOffer() { return {type: "offer", sdp: "offer-sdp"}; }
+    async setLocalDescription(description) { this.localDescription = description; }
+    async setRemoteDescription(description) { this.remoteDescription = description; }
+    close() { this.connectionState = "closed"; }
+  }
+
   const context = {
     AbortController,
     console,
@@ -113,13 +139,16 @@ function createHarness() {
     location: {protocol: "http:", host: "edge.test"},
     structuredClone,
     WebSocket: MockWebSocket,
-    window: timerApi
+    window: {...timerApi, addEventListener() {}}
   };
+  if (withRtc) context.RTCPeerConnection = MockPeerConnection;
   vm.runInNewContext(appSource, context, {filename: "app.js"});
 
   return {
     elements,
     fetchCalls,
+    fetchRequests,
+    peers: MockPeerConnection.instances,
     snapshots,
     sockets: MockWebSocket.instances,
     runTimer(delay) {
@@ -133,7 +162,7 @@ function createHarness() {
 }
 
 async function flush() {
-  for (let index = 0; index < 12; ++index) await Promise.resolve();
+  for (let index = 0; index < 30; ++index) await Promise.resolve();
 }
 
 function detectionFrame(harness) {
@@ -196,4 +225,25 @@ test("a stuck handshake is closed and advances exponential retry", async () => {
   assert.equal(harness.sockets.length, 2);
   harness.runTimer(8000);
   assert.ok(harness.hasTimer(2000));
+});
+
+test("browser negotiates the WHEP video track with a completed local SDP", async () => {
+  const harness = createHarness({withRtc: true});
+  await flush();
+
+  const request = harness.fetchRequests.find(({url}) => url === "/api/v1/webrtc/whep");
+  assert.ok(request);
+  assert.equal(request.options.method, "POST");
+  assert.equal(request.options.headers["Content-Type"], "application/sdp");
+  assert.equal(request.options.body, "offer-sdp");
+  assert.equal(harness.peers[0].remoteDescription.sdp, "answer-sdp");
+});
+
+test("disabled WebRTC does not create or retry WHEP sessions", async () => {
+  const harness = createHarness({withRtc: true, webrtcEnabled: false});
+  await flush();
+
+  assert.equal(harness.fetchCalls.includes("/api/v1/webrtc/whep"), false);
+  assert.equal(harness.elements.get("live-stream-state").textContent, "Disabled");
+  assert.equal(harness.hasTimer(2000), false);
 });

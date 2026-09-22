@@ -1,8 +1,11 @@
 #pragma once
 
 #include "skai/config.hpp"
+#include "skai/core/bounded_queue.hpp"
 #include "skai/logging.hpp"
+#include "skai/video/encoded_access_unit.hpp"
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
@@ -13,7 +16,12 @@
 #include <thread>
 #include <unordered_map>
 
-namespace rtc { class PeerConnection; }
+namespace rtc {
+class PeerConnection;
+class RtcpSrReporter;
+class RtpPacketizationConfig;
+class Track;
+}
 
 namespace skai {
 
@@ -50,9 +58,18 @@ private:
                                      std::chrono::milliseconds timeout);
     bool stale(std::chrono::steady_clock::time_point now,
                std::chrono::milliseconds timeout) const;
+    bool activate_media(const EncodedAccessUnit* initial_keyframe);
+    void enqueue(const EncodedAccessUnit& unit) noexcept;
+    void media_loop() noexcept;
 
     std::string id_;
     std::shared_ptr<rtc::PeerConnection> peer_;
+    std::shared_ptr<rtc::Track> video_track_;
+    std::shared_ptr<rtc::RtpPacketizationConfig> rtp_config_;
+    std::shared_ptr<rtc::RtcpSrReporter> sender_reporter_;
+    BoundedQueue<EncodedAccessUnit> media_queue_{8};
+    std::thread media_worker_;
+    std::atomic<bool> media_running_{false};
     mutable std::mutex mutex_;
     std::condition_variable changed_;
     std::chrono::steady_clock::time_point last_activity_;
@@ -61,6 +78,7 @@ private:
     bool connected_ = false;
     bool failed_ = false;
     bool closed_ = false;
+    bool cleanup_started_ = false;
 };
 
 class WebRtcManager {
@@ -78,6 +96,7 @@ public:
     bool close_session(std::string_view session_id);
     std::size_t cleanup_stale_sessions();
     std::size_t session_count() const;
+    void publish_access_unit(const EncodedAccessUnit& unit) noexcept;
     void shutdown() noexcept;
 
 private:
@@ -90,6 +109,7 @@ private:
     mutable std::mutex mutex_;
     std::condition_variable wakeup_;
     std::unordered_map<std::string, std::shared_ptr<WebRtcSession>> sessions_;
+    std::unique_ptr<EncodedAccessUnit> latest_keyframe_;
     std::thread cleanup_worker_;
     std::size_t max_peers_ = 0;
     bool enabled_ = false;

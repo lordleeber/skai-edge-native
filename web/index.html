@@ -19,11 +19,11 @@
     <section class="hero panel" aria-labelledby="live-title">
       <div class="section-heading">
         <div><p class="eyebrow">CAMERA 01</p><h2 id="live-title">Live video</h2></div>
-        <span class="tag">Stream placeholder</span>
+        <span class="tag" id="live-stream-state">Connecting</span>
       </div>
       <div class="video-frame">
-        <video id="live-video" controls muted playsinline aria-label="Live camera video"></video>
-        <div class="video-placeholder"><span>LIVE</span><p>WebRTC stream will appear here</p></div>
+        <video id="live-video" autoplay controls muted playsinline aria-label="Live camera video"></video>
+        <div class="video-placeholder" id="video-placeholder"><span>LIVE</span><p>Connecting to WebRTC stream</p></div>
       </div>
     </section>
 

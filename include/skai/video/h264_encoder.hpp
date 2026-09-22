@@ -3,6 +3,7 @@
 #include "skai/core/bounded_queue.hpp"
 #include "skai/logging.hpp"
 #include "skai/status.hpp"
+#include "skai/video/encoded_access_unit.hpp"
 #include "skai/video/frame.hpp"
 #include "skai/video/gstreamer_runtime.hpp"
 
@@ -13,6 +14,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -20,15 +22,6 @@
 #include <vector>
 
 namespace skai {
-
-// One complete H.264 access unit in Annex-B (byte-stream) format.  This is the
-// hand-off format for both the recording and WebRTC branches.
-struct EncodedAccessUnit {
-    std::uint64_t sequence = 0;
-    std::uint64_t pts_ns = 0;
-    bool keyframe = false;
-    std::vector<std::uint8_t> bytes;
-};
 
 struct H264EncoderConfig {
     int bitrate_kbps = 2'000;
@@ -57,8 +50,11 @@ std::string serialize_h264_encoder_metrics(const H264EncoderMetrics& metrics);
 // is slow, so recording or WebRTC can never stall capture/inference.
 class H264Encoder {
 public:
+    using AccessUnitSink = std::function<void(const EncodedAccessUnit&)>;
+
     H264Encoder(BoundedQueue<Frame>& input, BoundedQueue<EncodedAccessUnit>& output,
-                Logger& logger, std::shared_ptr<RuntimeStatus> status = {});
+                Logger& logger, std::shared_ptr<RuntimeStatus> status = {},
+                AccessUnitSink access_unit_sink = {});
     ~H264Encoder();
 
     H264Encoder(const H264Encoder&) = delete;
@@ -87,6 +83,7 @@ private:
     BoundedQueue<EncodedAccessUnit>& output_;
     Logger& logger_;
     std::shared_ptr<RuntimeStatus> status_;
+    AccessUnitSink access_unit_sink_;
     H264EncoderConfig config_;
     std::unique_ptr<gst::Pipeline> pipeline_;
     GstElement* appsrc_ = nullptr; // borrowed from pipeline_; worker-only

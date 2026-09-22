@@ -18,9 +18,11 @@ class H264EncoderModule final : public LifecycleModule {
 public:
     H264EncoderModule(BoundedQueue<Frame>& annotated_frames,
                       BoundedQueue<EncodedAccessUnit>& encoded_access_units,
-                      Logger& logger, std::shared_ptr<RuntimeStatus> status = {})
+                      Logger& logger, std::shared_ptr<RuntimeStatus> status = {},
+                      H264Encoder::AccessUnitSink access_unit_sink = {})
         : annotated_frames_(annotated_frames), encoded_access_units_(encoded_access_units),
-          logger_(logger), status_(std::move(status)) {}
+          logger_(logger), status_(std::move(status)),
+          access_unit_sink_(std::move(access_unit_sink)) {}
 
     bool initialize(const Config& config) override;
     bool start() override;
@@ -33,6 +35,7 @@ private:
     BoundedQueue<EncodedAccessUnit>& encoded_access_units_;
     Logger& logger_;
     std::shared_ptr<RuntimeStatus> status_;
+    H264Encoder::AccessUnitSink access_unit_sink_;
     H264EncoderConfig config_;
     std::unique_ptr<H264Encoder> encoder_;
     std::string last_error_;

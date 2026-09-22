@@ -29,6 +29,7 @@ h2 { font-size: 1.05rem; }
 .video-frame { position: relative; aspect-ratio: 16 / 7; overflow: hidden; border: 1px solid #263a42; border-radius: 8px; background: repeating-linear-gradient(135deg, #0b1216, #0b1216 10px, #0d151a 10px, #0d151a 20px); }
 video { width: 100%; height: 100%; object-fit: contain; }
 .video-placeholder { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; pointer-events: none; color: var(--muted); font-size: .82rem; }
+.video-placeholder.hidden { display: none; }
 .video-placeholder span { margin-bottom: 10px; border: 1px solid #e36a6a; border-radius: 4px; padding: 4px 7px; color: #ff8f8f; font: 700 .68rem/1 monospace; letter-spacing: .15em; }
 .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 12px; }
 .metrics article { min-height: 126px; padding: 18px; display: flex; flex-direction: column; }
