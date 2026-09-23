@@ -431,7 +431,7 @@ Response route_request(const Request& request, const StatusSnapshot& status,
         return json_response(http::status::ok, request.version(), alerts_json(items));
     }
     if (path == "/api/v1/recordings") {
-        if (recording) {
+        if (recording && recording->status().configured) {
             const auto recording_status = recording->status();
             return json_response(http::status::ok, request.version(),
                 std::string("{\"available\":true,\"state\":") +
@@ -454,7 +454,7 @@ Response route_request(const Request& request, const StatusSnapshot& status,
         return json_response(http::status::ok, request.version(),
                              std::string("{\"enabled\":") + json_bool(enabled) + "}\n");
     }
-    if (recording) {
+    if (recording && recording->status().configured) {
         std::string error;
         const bool started = path == "/api/v1/recording/start";
         if ((started ? recording->start(error) : recording->stop(error))) {

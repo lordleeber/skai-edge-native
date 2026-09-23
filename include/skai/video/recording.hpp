@@ -56,7 +56,7 @@ private:
     std::string last_error_;
     std::string session_id_;
     bool waiting_for_keyframe_ = true;
-    std::uint64_t expected_sequence_ = 0;
+    std::uint64_t observed_queue_drops_ = 0;
     std::uint64_t pending_access_units_ = 0;
     std::uint64_t pending_bytes_ = 0;
 };

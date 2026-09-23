@@ -24,7 +24,7 @@ web:
 recording:
   enabled: true
   directory: recordings
-  segment_seconds: 300
+  segment_seconds: 60
   max_storage_mb: 1024
   min_free_space_mb: 100
 

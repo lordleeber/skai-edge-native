@@ -101,7 +101,7 @@ int main(int argc, char* argv[]) {
     skai::Application::Modules modules;
     auto database = std::make_unique<skai::Database>();
     auto alert_repository = std::make_shared<skai::AlertRepository>(*database);
-    std::shared_ptr<skai::RecordingController> recording_control;
+    auto recording_control = std::make_shared<skai::RecordingController>();
     auto webrtc_manager = std::make_shared<skai::WebRtcManager>(logger);
     modules.storage = std::move(database);
     modules.webrtc = std::make_unique<skai::IceRuntimeModule>(logger);
@@ -110,7 +110,6 @@ int main(int argc, char* argv[]) {
                                                           alert_repository, recording_control,
                                                           webrtc_manager);
 #if SKAI_HAS_YOLO_PIPELINE
-    recording_control = std::make_shared<skai::RecordingController>();
     auto alert_manager = std::make_shared<skai::AlertManager>(
         gps_state, events, alert_repository, &logger);
     modules.detector = std::make_unique<skai::YoloInferenceModule>(

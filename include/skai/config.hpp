@@ -41,7 +41,7 @@ struct WebConfig {
 struct RecordingConfig {
     bool enabled = true;
     std::string directory = "recordings";
-    int segment_seconds = 300;
+    int segment_seconds = 60;
     std::uint64_t max_storage_mb = 1024;
     std::uint64_t min_free_space_mb = 100;
 };
