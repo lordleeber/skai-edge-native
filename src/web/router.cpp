@@ -154,7 +154,10 @@ std::string detections_json(const LatestDetectionsDto& latest) {
     output.imbue(std::locale::classic());
     output << std::setprecision(6) << "{\"available\":"
            << json_bool(latest.available) << ",\"frame_sequence\":"
-           << latest.frame_sequence << ",\"detections\":[";
+           << latest.frame_sequence << ",\"pts_ns\":" << latest.pts_ns
+           << ",\"frame_width\":" << latest.frame_width
+           << ",\"frame_height\":" << latest.frame_height
+           << ",\"detections\":[";
     for (std::size_t index = 0; index < latest.detections.size(); ++index) {
         const auto& detection = latest.detections[index];
         if (index) output << ',';

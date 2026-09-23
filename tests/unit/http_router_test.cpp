@@ -142,11 +142,18 @@ TEST(HttpRouter, ServesExplicitConfigDetectionAndGpsDtos) {
 
     const auto permit = api.detector_permit();
     ASSERT_TRUE(api.commit_detections(
-        permit, 17, {{0, "person", 0.91f, 1, 2, 3, 4}}, [] {}));
+        permit, 17, 1280, 720, 123456789,
+        {{0, "person", 0.91f, 1, 2, 3, 4}}, [] {}));
     const auto detections = skai::web::route_request(
         {http::verb::get, "/api/v1/detections/latest", 11}, status, api);
     EXPECT_EQ(detections.result(), http::status::ok);
     EXPECT_NE(detections.body().find("\"frame_sequence\":17"),
+              std::string::npos);
+    EXPECT_NE(detections.body().find("\"pts_ns\":123456789"),
+              std::string::npos);
+    EXPECT_NE(detections.body().find("\"frame_width\":1280"),
+              std::string::npos);
+    EXPECT_NE(detections.body().find("\"frame_height\":720"),
               std::string::npos);
     EXPECT_NE(detections.body().find("\"class_name\":\"person\""),
               std::string::npos);

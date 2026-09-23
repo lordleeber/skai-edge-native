@@ -8,9 +8,11 @@ namespace skai {
 bool RtspVideoModule::initialize(const Config& config) {
     if (source_) return false;
     auto source = std::make_unique<RtspSource>(frames_, logger_, DecodeMode::Auto,
-                                               true, status_);
+                                               true, status_, encoded_access_units_,
+                                               access_unit_sink_);
     config_ = config.video;
     frames_.reset();
+    if (encoded_access_units_) encoded_access_units_->reset();
     source_ = std::move(source);
     return true;
 }
@@ -34,6 +36,7 @@ void RtspVideoModule::wait() noexcept {
     if (source_) source_->stop();
     if (status_) status_->clear_video();
     frames_.shutdown();
+    if (encoded_access_units_) encoded_access_units_->shutdown();
     source_.reset();
 }
 

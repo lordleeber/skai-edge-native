@@ -418,6 +418,10 @@ void WebRtcSession::media_loop() noexcept {
     while (media_running_) {
         auto unit = media_queue_.pop_for(std::chrono::milliseconds(100));
         if (!unit) continue;
+        if (unit->discontinuity) {
+            waiting_for_keyframe = true;
+            timestamp_initialized = false;
+        }
         const auto queue_drops = media_queue_.stats().dropped;
         if (queue_drops != observed_queue_drops) {
             observed_queue_drops = queue_drops;

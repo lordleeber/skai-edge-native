@@ -46,6 +46,9 @@ struct DetectionDto {
 struct LatestDetectionsDto {
     bool available = false;
     std::uint64_t frame_sequence = 0;
+    std::uint64_t pts_ns = 0;
+    int frame_width = 0;
+    int frame_height = 0;
     std::vector<DetectionDto> detections;
 };
 
@@ -114,12 +117,27 @@ public:
                            std::uint64_t frame_sequence,
                            std::vector<DetectionDto> detections,
                            Commit&& commit) {
+        return commit_detections(permit, frame_sequence, 0, 0, 0,
+                                 std::move(detections),
+                                 std::forward<Commit>(commit));
+    }
+
+    template <typename Commit>
+    bool commit_detections(const DetectorPermit& permit,
+                           std::uint64_t frame_sequence,
+                           int frame_width, int frame_height,
+                           std::uint64_t pts_ns,
+                           std::vector<DetectionDto> detections,
+                           Commit&& commit) {
         std::lock_guard<std::mutex> lock(mutex_);
         if (!detector_enabled_ || permit.generation != detector_generation_) {
             return false;
         }
         latest_.available = true;
         latest_.frame_sequence = frame_sequence;
+        latest_.frame_width = frame_width;
+        latest_.frame_height = frame_height;
+        latest_.pts_ns = pts_ns;
         latest_.detections = std::move(detections);
         std::forward<Commit>(commit)();
         return true;

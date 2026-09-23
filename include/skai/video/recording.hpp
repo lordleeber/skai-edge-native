@@ -7,7 +7,7 @@
 #include "skai/logging.hpp"
 #include "skai/video/recording_control.hpp"
 #include "skai/video/gstreamer_runtime.hpp"
-#include "skai/video/h264_encoder.hpp"
+#include "skai/video/encoded_access_unit.hpp"
 
 #include <atomic>
 #include <memory>

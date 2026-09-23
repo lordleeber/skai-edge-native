@@ -17,7 +17,50 @@
   let activeWhepLocation = "";
   let videoRetryTimer = 0;
   let videoGeneration = 0;
+  let latestOverlay = null;
+  let overlayEnabled = true;
   const alertIds = new Set();
+
+  function drawDetectionOverlay() {
+    const canvas = byId("video-overlay");
+    const video = byId("live-video");
+    const width = canvas.clientWidth || video.clientWidth || 0;
+    const height = canvas.clientHeight || video.clientHeight || 0;
+    const ratio = window.devicePixelRatio || 1;
+    if (canvas.width !== Math.round(width * ratio)) canvas.width = Math.round(width * ratio);
+    if (canvas.height !== Math.round(height * ratio)) canvas.height = Math.round(height * ratio);
+    const context = canvas.getContext("2d");
+    context.setTransform(ratio, 0, 0, ratio, 0, 0);
+    context.clearRect(0, 0, width, height);
+    if (!overlayEnabled || !latestOverlay || width <= 0 || height <= 0) return;
+    const sourceWidth = Number(latestOverlay.frame_width) || video.videoWidth;
+    const sourceHeight = Number(latestOverlay.frame_height) || video.videoHeight;
+    if (!(sourceWidth > 0 && sourceHeight > 0)) return;
+    const scale = Math.min(width / sourceWidth, height / sourceHeight);
+    const offsetX = (width - sourceWidth * scale) / 2;
+    const offsetY = (height - sourceHeight * scale) / 2;
+    context.lineWidth = 2;
+    context.font = "600 12px ui-monospace, monospace";
+    context.textBaseline = "top";
+    for (const detection of latestOverlay.detections || []) {
+      if (!Array.isArray(detection.box) || detection.box.length !== 4) continue;
+      const [x1, y1, x2, y2] = detection.box.map(Number);
+      if (![x1, y1, x2, y2].every(Number.isFinite)) continue;
+      const x = offsetX + x1 * scale;
+      const y = offsetY + y1 * scale;
+      const boxWidth = Math.max(0, (x2 - x1) * scale);
+      const boxHeight = Math.max(0, (y2 - y1) * scale);
+      const label = `${detection.class_name || `Class ${detection.class_id}`} ${(Number(detection.confidence) * 100).toFixed(1)}%`;
+      context.strokeStyle = "#63e6be";
+      context.fillStyle = "rgba(7, 18, 15, .82)";
+      context.strokeRect(x, y, boxWidth, boxHeight);
+      const labelWidth = context.measureText(label).width + 10;
+      const labelY = Math.max(0, y - 20);
+      context.fillRect(x, labelY, labelWidth, 20);
+      context.fillStyle = "#eef4f5";
+      context.fillText(label, x + 5, labelY + 3);
+    }
+  }
 
   async function getJson(path) {
     const controller = new AbortController();
@@ -63,6 +106,8 @@
     const sequence = Number(data.frame_sequence);
     if (available && Number.isFinite(sequence) && sequence < latestDetectionSequence) return;
     latestDetectionSequence = available && Number.isFinite(sequence) ? sequence : -1;
+    latestOverlay = available ? data : null;
+    drawDetectionOverlay();
     const rows = byId("detections");
     rows.replaceChildren();
     setText("detection-count", `${detections.length} object${detections.length === 1 ? "" : "s"}`);
@@ -252,6 +297,8 @@
     if (activePeer) activePeer.close();
     activePeer = null;
     byId("live-video").srcObject = null;
+    latestOverlay = null;
+    drawDetectionOverlay();
     byId("video-placeholder").classList.toggle("hidden", false);
     if (removeRemote && location) {
       fetch(location, {method: "DELETE", keepalive: true}).catch(() => {});
@@ -276,6 +323,7 @@
       byId("live-video").srcObject = event.streams[0] || new MediaStream([event.track]);
       byId("video-placeholder").classList.toggle("hidden", true);
       setText("live-stream-state", "Live");
+      drawDetectionOverlay();
     });
     pc.addEventListener("connectionstatechange", () => {
       if (generation !== videoGeneration) return;
@@ -309,18 +357,21 @@
   }
 
   async function initializeVideo() {
+    let config;
+    try {
+      config = await getJson("/api/v1/config");
+      overlayEnabled = config.detector?.annotate !== false;
+      drawDetectionOverlay();
+    } catch {
+      setText("live-stream-state", "Unavailable");
+      return;
+    }
     if (typeof RTCPeerConnection === "undefined") {
       setText("live-stream-state", "Unsupported");
       return;
     }
-    try {
-      const config = await getJson("/api/v1/config");
-      if (config.webrtc?.enabled === false) {
-        setText("live-stream-state", "Disabled");
-        return;
-      }
-    } catch {
-      setText("live-stream-state", "Unavailable");
+    if (config.webrtc?.enabled === false) {
+      setText("live-stream-state", "Disabled");
       return;
     }
     connectVideo();
@@ -329,6 +380,7 @@
 
   byId("record-start").addEventListener("click", () => recording("start"));
   byId("record-stop").addEventListener("click", () => recording("stop"));
+  window.addEventListener("resize", drawDetectionOverlay);
   bootstrapPromise = Promise.all([initialLoad(), initializeVideo()]);
   connect();
 })();

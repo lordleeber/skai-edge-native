@@ -38,6 +38,13 @@ safe oldest-alert cleanup. Steps 21 and 22 connect bounded H.264 encoding and
 segmented MP4 recording. Step 23 embeds the pinned `skai-ice` and
 libdatachannel pair used by the upcoming WHEP transport.
 
+The current service supersedes the Step 21 media path for H.264 RTSP inputs:
+the parsed source access units are passed directly to MP4 recording and WebRTC.
+Only the inference branch is decoded. Detection boxes travel as WebSocket JSON
+and the browser draws them on a canvas over the unmodified video, avoiding a
+decode/draw/re-encode cycle. H.265 inputs remain available for inference, but
+direct recording and browser delivery require an H.264 source.
+
 ## Build and test
 
 Install CMake 3.22+, a C++17 compiler, yaml-cpp (`libyaml-cpp-dev`),
@@ -223,19 +230,18 @@ can populate them from the parsed YAML `detector.confidence` and `detector.nms`
 values. The Jetson test compares a reproducible image with independently
 evaluated `yolo11s.onnx` reference values and reruns it for deterministic output.
 
-## Frame annotation
+## Detection overlay
 
-`skai::annotate_frame()` takes a decoded BGR `Frame`, the matching
-`DetectionResult`, optional class names, and `AnnotationOptions`. It copies the
-frame before OpenCV draws bounding boxes, class/confidence labels, and optional
-FPS/inference timing, so the input pixels and inference result remain unchanged.
-Class IDs without supplied names render as `class_<id>`. Set
-`options.enabled = false` for a pixel-identical copy; the YAML
-`detector.annotate` flag defaults to true. `YoloInferenceModule` consumes the
-RTSP inference queue, runs TensorRT YOLO, applies that setting, and publishes
-the resulting frame to a bounded queue for the next media stage. The standard
-YOLO11 COCO class names are used by this service path. Encoding and external
-video delivery are not implemented yet.
+`YoloInferenceModule` consumes decoded BGR frames for TensorRT inference and
+publishes boxes, class names, confidence, source dimensions, and source PTS as
+detection events. The browser scales those source-pixel coordinates into the
+letterboxed video area and draws the overlay on a transparent canvas. The YAML
+`detector.annotate` flag controls that browser overlay and defaults to true.
+
+`skai::annotate_frame()` remains available for snapshots and tests that need a
+copied, server-rendered image, but the production live-video path does not feed
+annotated frames into an encoder. The standard YOLO11 COCO class names are used
+by both paths.
 
 ## Bounded queue
 

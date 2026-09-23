@@ -3,6 +3,7 @@
 #include "skai/config.hpp"
 #include "skai/core/bounded_queue.hpp"
 #include "skai/video/frame.hpp"
+#include "skai/video/encoded_access_unit.hpp"
 #include "skai/video/gstreamer_runtime.hpp"
 #include "skai/video/rtsp_recovery.hpp"
 #include "skai/video/rtsp_metrics.hpp"
@@ -14,6 +15,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -50,10 +52,14 @@ std::string serialize_rtsp_metrics(const RtspDiagnostics& diagnostics);
 
 class RtspSource {
 public:
+    using AccessUnitSink = std::function<void(const EncodedAccessUnit&)>;
+
     RtspSource(BoundedQueue<Frame>& frames, Logger& logger,
                DecodeMode decode_mode = DecodeMode::Auto,
                bool enqueue_frames = true,
-               std::shared_ptr<RuntimeStatus> status = {});
+               std::shared_ptr<RuntimeStatus> status = {},
+               BoundedQueue<EncodedAccessUnit>* encoded_access_units = nullptr,
+               AccessUnitSink access_unit_sink = {});
     ~RtspSource();
 
     RtspSource(const RtspSource&) = delete;
@@ -74,6 +80,7 @@ private:
     bool open_pipeline(std::string& error);
     void close_pipeline() noexcept;
     bool capture_sample(GstSample* sample, RtspRecovery& recovery);
+    bool capture_access_unit(GstSample* sample);
     void capture_loop() noexcept;
     void set_error(const std::string& error);
     void publish_recovery(const RtspRecovery& recovery);
@@ -86,10 +93,13 @@ private:
     DecodeMode decode_mode_;
     bool enqueue_frames_;
     std::shared_ptr<RuntimeStatus> status_;
+    BoundedQueue<EncodedAccessUnit>* encoded_access_units_;
+    AccessUnitSink access_unit_sink_;
     VideoConfig config_;
     std::unique_ptr<gst::Pipeline> pipeline_;
     GstElement* rtsp_element_ = nullptr; // borrowed from pipeline_; worker-only
     std::atomic<GstElement*> sink_{nullptr}; // borrowed from pipeline_
+    std::atomic<GstElement*> encoded_sink_{nullptr}; // borrowed from pipeline_
     std::thread worker_;
     std::atomic<bool> running_{false};
     std::mutex backoff_mutex_;
@@ -108,6 +118,8 @@ private:
     std::vector<GstElement*> managers_; // owned references until signal disconnect
     MonotonicCounter pipeline_packets_lost_;
     MonotonicCounter pipeline_packets_late_;
+    std::uint64_t access_unit_sequence_ = 0;
+    bool first_access_unit_ = true;
 };
 
 } // namespace skai

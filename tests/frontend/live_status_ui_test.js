@@ -13,6 +13,11 @@ class Element {
     this.dataset = {};
     this.children = [];
     this.parent = null;
+    this.clientWidth = 640;
+    this.clientHeight = 360;
+    this.videoWidth = 1280;
+    this.videoHeight = 720;
+    this.drawCalls = [];
     const classes = new Set();
     this.classList = {
       contains: (name) => classes.has(name),
@@ -33,9 +38,20 @@ class Element {
   }
   insertRow() { const row = new Element(); this.append(row); return row; }
   insertCell() { const cell = new Element(); this.append(cell); return cell; }
+  getContext() {
+    return {
+      clearRect: (...args) => this.drawCalls.push(["clearRect", ...args]),
+      strokeRect: (...args) => this.drawCalls.push(["strokeRect", ...args]),
+      fillRect: (...args) => this.drawCalls.push(["fillRect", ...args]),
+      fillText: (...args) => this.drawCalls.push(["fillText", ...args]),
+      measureText: (value) => ({width: String(value).length * 7}),
+      setTransform: (...args) => this.drawCalls.push(["setTransform", ...args])
+    };
+  }
 }
 
-function createHarness({withRtc = false, webrtcEnabled = true} = {}) {
+function createHarness({withRtc = false, webrtcEnabled = true,
+  overlayEnabled = true} = {}) {
   const elements = new Map();
   const element = (id) => {
     if (!elements.has(id)) elements.set(id, new Element());
@@ -62,7 +78,7 @@ function createHarness({withRtc = false, webrtcEnabled = true} = {}) {
     ]},
     alerts: {available: true, items: [{id: "a-1", detections: [
       {class_name: "person"}]}]},
-    config: {webrtc: {enabled: webrtcEnabled}}
+    config: {webrtc: {enabled: webrtcEnabled}, detector: {annotate: overlayEnabled}}
   };
   const fetchCalls = [];
   const fetchRequests = [];
@@ -139,7 +155,7 @@ function createHarness({withRtc = false, webrtcEnabled = true} = {}) {
     location: {protocol: "http:", host: "edge.test"},
     structuredClone,
     WebSocket: MockWebSocket,
-    window: {...timerApi, addEventListener() {}}
+    window: {...timerApi, addEventListener() {}, devicePixelRatio: 1}
   };
   if (withRtc) context.RTCPeerConnection = MockPeerConnection;
   vm.runInNewContext(appSource, context, {filename: "app.js"});
@@ -211,6 +227,35 @@ test("newer socket detections win and reconnect clears stale detections", async 
   assert.equal(harness.elements.get("detections").children[0].children[0].textContent,
     "No detections yet");
   assert.equal(harness.elements.get("alerts").children.length, 2);
+});
+
+test("detection metadata draws bounding boxes over the unmodified video", async () => {
+  const harness = createHarness();
+  await flush();
+  const socket = harness.sockets[0];
+  socket.open();
+  socket.message({type: "detection", data: {available: true, frame_sequence: 6,
+    frame_width: 1280, frame_height: 720,
+    detections: [{class_id: 2, class_name: "car", confidence: 0.8,
+      box: [128, 72, 640, 360]}]}});
+
+  const calls = harness.elements.get("video-overlay").drawCalls;
+  assert.ok(calls.some(([name, x, y, width, height]) =>
+    name === "strokeRect" && x === 64 && y === 36 && width === 256 && height === 144));
+  assert.ok(calls.some(([name, label]) => name === "fillText" && label === "car 80.0%"));
+});
+
+test("disabled annotation config leaves the source video unobscured", async () => {
+  const harness = createHarness({overlayEnabled: false});
+  await flush();
+  const socket = harness.sockets[0];
+  socket.open();
+  socket.message({type: "detection", data: {available: true, frame_sequence: 6,
+    frame_width: 1280, frame_height: 720,
+    detections: [{class_name: "car", confidence: 0.8, box: [128, 72, 640, 360]}]}});
+
+  assert.equal(harness.elements.get("video-overlay").drawCalls.some(
+    ([name]) => name === "strokeRect"), false);
 });
 
 test("a stuck handshake is closed and advances exponential retry", async () => {

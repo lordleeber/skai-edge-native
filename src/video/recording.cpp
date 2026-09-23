@@ -342,6 +342,10 @@ void RecordingModule::run() noexcept {
             if (input_.is_shutdown()) break;
             continue;
         }
+        if (unit->discontinuity) {
+            waiting_for_keyframe_ = true;
+            if (pipeline_) close_pipeline(true);
+        }
         if (waiting_for_keyframe_) {
             if (!unit->keyframe) { control_->add_dropped(); continue; }
             waiting_for_keyframe_ = false;

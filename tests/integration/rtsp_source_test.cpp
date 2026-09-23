@@ -1,4 +1,5 @@
 #include "rtsp_test_server.hpp"
+#include "skai/video/encoded_access_unit.hpp"
 #include "skai/video/rtsp_source.hpp"
 #include "skai/video/rtsp_video_module.hpp"
 
@@ -129,6 +130,45 @@ void receives_decoded_frames(skai::test::RtspTestServer::Codec codec,
 
 TEST(RtspSource, DecodesH264IntoBoundedInferenceQueue) {
     receives_decoded_frames(skai::test::RtspTestServer::Codec::H264, "H264");
+}
+
+TEST(RtspSource, PublishesSourceH264AccessUnitsWithoutReencoding) {
+    std::string error;
+    ASSERT_TRUE(skai::gst::initialize_once(error)) << error;
+    skai::test::RtspTestServer server;
+    ASSERT_TRUE(server.start(error)) << error;
+    skai::BoundedQueue<skai::Frame> frames(2);
+    skai::BoundedQueue<skai::EncodedAccessUnit> access_units(30);
+    std::ostringstream output;
+    skai::Logger logger(output);
+    skai::RtspSource source(frames, logger, skai::DecodeMode::Software, true, {},
+                            &access_units);
+    skai::VideoConfig config;
+    config.rtsp_url = server.url();
+    config.transport = "tcp";
+    config.latency_ms = 50;
+    ASSERT_TRUE(source.start(config, error)) << error << output.str();
+
+    ASSERT_TRUE(frames.pop_for(std::chrono::seconds(3)).has_value()) << output.str();
+    bool saw_keyframe = false;
+    bool saw_discontinuity = false;
+    std::uint64_t previous_sequence = 0;
+    for (int attempt = 0; attempt < 30 && !saw_keyframe; ++attempt) {
+        auto unit = access_units.pop_for(std::chrono::milliseconds(200));
+        if (!unit) continue;
+        EXPECT_GT(unit->sequence, previous_sequence);
+        previous_sequence = unit->sequence;
+        ASSERT_GE(unit->bytes.size(), 4U);
+        EXPECT_EQ(unit->bytes[0], 0U);
+        EXPECT_EQ(unit->bytes[1], 0U);
+        EXPECT_TRUE((unit->bytes[2] == 1U) ||
+                    (unit->bytes[2] == 0U && unit->bytes[3] == 1U));
+        saw_discontinuity = saw_discontinuity || unit->discontinuity;
+        saw_keyframe = saw_keyframe || unit->keyframe;
+    }
+    EXPECT_TRUE(saw_discontinuity);
+    EXPECT_TRUE(saw_keyframe);
+    source.stop();
 }
 
 TEST(RtspSource, DecodesH265IntoBoundedInferenceQueue) {
