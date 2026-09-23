@@ -56,6 +56,16 @@ TEST(Config, CanDisableDetectorAnnotation) {
     EXPECT_FALSE(result.config.detector.annotate);
 }
 
+TEST(Config, KeepsRuntimeFilesUnderOutputByDefault) {
+    const auto result = skai::parse_config(
+        "video: {rtsp_url: 'rtsp://camera/stream'}\n");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_EQ(result.config.recording.directory, "output/recordings");
+    EXPECT_EQ(result.config.recording.segment_seconds, 60);
+    EXPECT_EQ(result.config.storage.database_path, "output/skai-edge.db");
+    EXPECT_EQ(result.config.storage.alert_directory, "output/alerts");
+}
+
 TEST(Config, ParsesAlertRulesWithOptionalNormalizedRoi) {
     const auto result = skai::parse_config(
         "video: {rtsp_url: 'rtsp://camera/stream'}\n"

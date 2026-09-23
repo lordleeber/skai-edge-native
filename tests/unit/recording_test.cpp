@@ -13,9 +13,9 @@
 
 namespace {
 
-skai::Frame frame() {
+skai::Frame frame(std::uint64_t sequence = 1) {
     skai::Frame value;
-    value.sequence = 1;
+    value.sequence = sequence;
     value.timestamp = std::chrono::steady_clock::now();
     value.width = 32;
     value.height = 24;
@@ -64,7 +64,10 @@ TEST(RecordingModule, FinalizesMp4FromEncodedAccessUnits) {
     ASSERT_TRUE(recorder.initialize(config));
     ASSERT_TRUE(recorder.start()) << recorder.last_error();
     ASSERT_TRUE(encoder.start({}, error)) << error;
-    ASSERT_TRUE(frames.push(frame()));
+    for (std::uint64_t sequence = 1; sequence < 16; sequence += 2) {
+        ASSERT_TRUE(frames.push(frame(sequence)));
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
     for (int attempt = 0; attempt < 300 && !control->status().active; ++attempt) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
@@ -74,7 +77,7 @@ TEST(RecordingModule, FinalizesMp4FromEncodedAccessUnits) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     recorder.wait();
 
-    EXPECT_GT(control->status().access_units_written, 0U);
+    EXPECT_GT(control->status().access_units_written, 1U);
 
     std::uintmax_t size = 0;
     std::size_t files = 0;

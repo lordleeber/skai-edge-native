@@ -40,15 +40,15 @@ struct WebConfig {
 
 struct RecordingConfig {
     bool enabled = true;
-    std::string directory = "recordings";
-    int segment_seconds = 300;
+    std::string directory = "output/recordings";
+    int segment_seconds = 60;
     std::uint64_t max_storage_mb = 1024;
     std::uint64_t min_free_space_mb = 100;
 };
 
 struct StorageConfig {
-    std::string database_path = "/var/lib/skai-edge/skai-edge.db";
-    std::string alert_directory = "/var/lib/skai-edge/alerts";
+    std::string database_path = "output/skai-edge.db";
+    std::string alert_directory = "output/alerts";
 };
 
 struct AlertRoi {

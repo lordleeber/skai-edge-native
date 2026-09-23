@@ -122,6 +122,7 @@ bool RecordingModule::start() {
         return false;
     }
     running_ = true;
+    observed_queue_drops_ = input_.stats().dropped;
     worker_ = std::thread(&RecordingModule::run, this);
     return true;
 }
@@ -322,6 +323,12 @@ void RecordingModule::run() noexcept {
             continue;
         }
         auto unit = input_.pop_for(std::chrono::milliseconds(25));
+        const auto queue_drops = input_.stats().dropped;
+        if (queue_drops != observed_queue_drops_) {
+            observed_queue_drops_ = queue_drops;
+            waiting_for_keyframe_ = true;
+            if (pipeline_) close_pipeline(true);
+        }
         if (pipeline_) {
             const auto event = pipeline_->poll(std::chrono::milliseconds(0));
             if (event.type == gst::BusEventType::Error || event.type == gst::BusEventType::Eos) {
@@ -334,11 +341,6 @@ void RecordingModule::run() noexcept {
             if (input_.is_shutdown()) break;
             continue;
         }
-        if (expected_sequence_ && unit->sequence != expected_sequence_) {
-            waiting_for_keyframe_ = true;
-            if (pipeline_) close_pipeline(true);
-        }
-        expected_sequence_ = unit->sequence + 1;
         if (waiting_for_keyframe_) {
             if (!unit->keyframe) { control_->add_dropped(); continue; }
             waiting_for_keyframe_ = false;
