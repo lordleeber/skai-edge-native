@@ -58,6 +58,10 @@ std::string webrtc_diagnostics_json(const WebRtcDiagnostics& diagnostics) {
                << ",\"last_error\":" << json_string(peer.last_error) << '}';
     };
     output << "{\"enabled\":" << json_bool(diagnostics.enabled)
+           << ",\"media_available\":" << json_bool(diagnostics.media_available)
+           << ",\"media_unavailable_reason\":"
+           << json_string(diagnostics.media_unavailable_reason)
+           << ",\"keyframe_cached\":" << json_bool(diagnostics.keyframe_cached)
            << ",\"lan_only\":" << json_bool(diagnostics.lan_only)
            << ",\"max_peers\":" << diagnostics.max_peers
            << ",\"active_peers\":" << diagnostics.peers.size()
@@ -436,12 +440,18 @@ Response route_request(const Request& request, const StatusSnapshot& status,
     if (path == "/api/v1/recordings") {
         if (recording && recording->status().configured) {
             const auto recording_status = recording->status();
-            return json_response(http::status::ok, request.version(),
-                std::string("{\"available\":true,\"state\":") +
+            const auto result = recording_status.available
+                                    ? http::status::ok
+                                    : http::status::service_unavailable;
+            return json_response(result, request.version(),
+                std::string("{\"available\":") +
+                json_bool(recording_status.available) + ",\"state\":" +
                 json_string(recording_status.state) + ",\"active\":" +
                 json_bool(recording_status.active) + ",\"current_path\":" +
                 json_string(recording_status.current_path) + ",\"access_units_written\":" +
-                std::to_string(recording_status.access_units_written) + "}\n");
+                std::to_string(recording_status.access_units_written) +
+                ",\"unavailable_reason\":" +
+                json_string(recording_status.unavailable_reason) + "}\n");
         }
         return json_response(http::status::service_unavailable, request.version(),
                              "{\"available\":false,\"items\":[]}\n");

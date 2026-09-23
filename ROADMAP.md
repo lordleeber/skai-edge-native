@@ -98,53 +98,27 @@ Do not recreate ROS 2 inside the application by building an unnecessarily compli
 |  | Vanilla Web UI       |                      |                               |
 |  +----------------------+                      |                               |
 |                                                                                |
-|  RTSP URL                                                                      |
-|          |                                                                     |
-|          v                                                                     |
-|  +----------------------+                                                      |
-|  | RtspSource           |                                                      |
-|  | GStreamer ingest     |                                                      |
-|  +----------+-----------+                                                      |
-|             | raw frames                                                       |
-|             v                                                                  |
-|  +----------------------+                                                      |
-|  | Bounded Frame Queue  |                                                      |
-|  +----------+-----------+                                                      |
-|             |                                                                  |
-|             v                                                                  |
-|  +----------------------+                                                      |
-|  | TensorRT Detector    |                                                      |
-|  | CUDA preprocessing   |                                                      |
-|  +----------+-----------+                                                      |
-|             | detections + annotated frames                                    |
-|       +-----+-----------------------------+                                    |
-|       |                                   |                                    |
-|       v                                   v                                    |
-| +-------------+                 +----------------------+                       |
-| | AlertManager|                 | GStreamer H.264      |                       |
-| +------+------+                 | encode / recording   |                       |
-|        |                        +----+------------+----+                       |
-|        |                             |            |                            |
-|        |                             |            +----> MP4 recording         |
-|        |                             |                                         |
-|        |                             v                                         |
-|        |                     encoded H.264 access units                        |
-|        |                             |                                         |
-|        |                             v                                         |
-|        |                     +-------------------+                             |
-|        |                     | libdatachannel    |                             |
-|        |                     | DTLS/SRTP/RTP     |                             |
-|        |                     +---------+---------+                             |
-|        |                               |                                       |
-|        |                               v                                       |
-|        |                          +----------+                                 |
-|        |                          | skai-ice |                                 |
-|        |                          | STUN/ICE |                                 |
-|        |                          +-----+----+                                 |
-|        |                                |                                      |
-|        |                                +-----------> Browser WebRTC           |
-|        |                                                                       |
-|        +----> SQLite metadata + JPG snapshot                                   |
+|  RTSP URL -> RtspSource -> H.264 parser -> bounded/leaky tee                   |
+|                                      |                                         |
+|                 +--------------------+--------------------+                    |
+|                 |                                         |                    |
+|                 v                                         v                    |
+|       source H.264 access units                         decoder                 |
+|            +----+----------+                               |                    |
+|            |               |                               v                    |
+|            v               v                    Bounded Frame Queue             |
+|      MP4 recording   +-------------------+                  |                    |
+|                      | libdatachannel    |                  v                    |
+|                      | DTLS/SRTP/RTP     |          TensorRT Detector            |
+|                      +---------+---------+                  |                    |
+|                                |                timestamped bbox metadata        |
+|                                v                    +-----+------+              |
+|                           +----------+              |            |              |
+|                           | skai-ice |              v            v              |
+|                           | STUN/ICE |      Browser canvas   AlertManager       |
+|                           +-----+----+          overlay           |              |
+|                                 |                     SQLite metadata + JPG      |
+|                                 +-----------> Browser WebRTC                    |
 |                                                                                |
 |  +----------------------+                                                      |
 |  | GPS Source           |                                                      |
@@ -159,11 +133,26 @@ WebRTC ownership is intentionally split:
 
 ```text
 Boost.Beast     -> WHEP HTTP signaling/session lifecycle
-GStreamer       -> H.264 production
+GStreamer       -> RTSP ingest, H.264 parsing, decode branch, MP4 muxing
 libdatachannel  -> PeerConnection, DTLS, SRTP, RTP
 skai-ice        -> STUN + ICE connectivity
-Browser         -> native RTCPeerConnection
+Browser         -> native RTCPeerConnection + canvas detection overlay
 ```
+
+### Current media topology amendment
+
+The implemented H.264 path supersedes the encode branch originally specified in
+Steps 21 and 25. `RtspSource` parses the source H.264 once and tees it into two
+bounded branches: source access units go directly to segmented MP4 recording and
+libdatachannel, while only the inference branch is decoded. TensorRT detections
+are sent as timestamped WebSocket metadata, and the browser aligns them to the
+WebRTC frame RTP timestamp before drawing boxes on a canvas.
+
+Passthrough is deliberately limited to constrained-baseline H.264 at Level 3.1
+or lower so the bitstream matches the WHEP SDP contract. H.265 and incompatible
+H.264 sources remain usable for inference, but recording and WHEP report media as
+unavailable. Re-encoding remains a historical implementation milestone, not the
+current production topology.
 
 The first WebRTC target is LAN deployment. `skai-edge-native` must not silently fall back to libjuice or introduce a second ICE stack.
 
@@ -1422,6 +1411,9 @@ Goal: preserve the useful recording functionality while keeping media handling i
 
 ## Step 21 — H.264 encoder pipeline
 
+Historical milestone: the production media topology now uses the amendment in
+Section 3 and does not run this encoder for compatible H.264 RTSP sources.
+
 Annotated frame:
 
 ```text
@@ -1667,9 +1659,10 @@ Acceptance:
 
 ## Step 25 — H.264 media delivery to libdatachannel
 
-Connect the existing GStreamer H.264 output to libdatachannel.
+Connect H.264 access units to libdatachannel. The current topology obtains these
+from the parsed RTSP source as described in the Section 3 amendment.
 
-Target:
+Original target (superseded for compatible H.264 RTSP inputs):
 
 ```text
 Annotated frame

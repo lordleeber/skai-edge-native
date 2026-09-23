@@ -9,7 +9,7 @@ bool RtspVideoModule::initialize(const Config& config) {
     if (source_) return false;
     auto source = std::make_unique<RtspSource>(frames_, logger_, DecodeMode::Auto,
                                                true, status_, encoded_access_units_,
-                                               access_unit_sink_);
+                                               access_unit_sink_, media_status_sink_);
     config_ = config.video;
     frames_.reset();
     if (encoded_access_units_) encoded_access_units_->reset();

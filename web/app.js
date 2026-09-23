@@ -18,6 +18,7 @@
   let videoRetryTimer = 0;
   let videoGeneration = 0;
   let latestOverlay = null;
+  let detectionFrames = [];
   let overlayEnabled = true;
   const alertIds = new Set();
 
@@ -62,6 +63,48 @@
     }
   }
 
+  function ptsToRtpTimestamp(ptsNs) {
+    const value = Number(ptsNs);
+    if (!Number.isFinite(value) || value < 0) return null;
+    const seconds = Math.floor(value / 1e9);
+    const remainder = value - seconds * 1e9;
+    return (seconds * 90000 + Math.floor(remainder * 90000 / 1e9)) >>> 0;
+  }
+
+  function signedRtpDistance(left, right) {
+    const difference = (left - right) >>> 0;
+    return difference > 0x7fffffff ? difference - 0x100000000 : difference;
+  }
+
+  function presentDetectionFrame(rtpTimestamp) {
+    const timestamp = Number(rtpTimestamp) >>> 0;
+    let selected = null;
+    let selectedDistance = Number.POSITIVE_INFINITY;
+    for (const frame of detectionFrames) {
+      const distance = Math.abs(signedRtpDistance(frame.rtpTimestamp, timestamp));
+      if (distance <= 9000 && distance < selectedDistance) {
+        selected = frame.data;
+        selectedDistance = distance;
+      }
+    }
+    latestOverlay = selected;
+    detectionFrames = detectionFrames.filter((frame) =>
+      signedRtpDistance(frame.rtpTimestamp, timestamp) >= -9000);
+    drawDetectionOverlay();
+  }
+
+  function scheduleVideoFrameOverlay(generation) {
+    const video = byId("live-video");
+    if (generation !== videoGeneration || !video.requestVideoFrameCallback) return;
+    video.requestVideoFrameCallback((_now, metadata) => {
+      if (generation !== videoGeneration) return;
+      if (Number.isFinite(metadata?.rtpTimestamp)) {
+        presentDetectionFrame(metadata.rtpTimestamp);
+      }
+      scheduleVideoFrameOverlay(generation);
+    });
+  }
+
   async function getJson(path) {
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), 5000);
@@ -88,6 +131,11 @@
     setText("video-state", videoFps == null ? "Waiting for frames" : "Receiving frames");
     setText("detector-state", detectorEnabled == null ? "Unavailable" :
       detectorEnabled ? "Enabled" : "Disabled");
+    if (detectorEnabled === false) {
+      detectionFrames = [];
+      latestOverlay = null;
+      drawDetectionOverlay();
+    }
     setText("detector-fps", number(detectorFps, " fps"));
     setText("inference-time", `Inference ${number(inferenceMs, " ms")}`);
     byId("system-status").dataset.state = data.status;
@@ -106,8 +154,14 @@
     const sequence = Number(data.frame_sequence);
     if (available && Number.isFinite(sequence) && sequence < latestDetectionSequence) return;
     latestDetectionSequence = available && Number.isFinite(sequence) ? sequence : -1;
-    latestOverlay = available ? data : null;
-    drawDetectionOverlay();
+    const rtpTimestamp = available ? ptsToRtpTimestamp(data.pts_ns) : null;
+    if (available && rtpTimestamp != null && byId("live-video").requestVideoFrameCallback) {
+      detectionFrames.push({rtpTimestamp, data});
+      if (detectionFrames.length > 60) detectionFrames.shift();
+    } else {
+      latestOverlay = available ? data : null;
+      drawDetectionOverlay();
+    }
     const rows = byId("detections");
     rows.replaceChildren();
     setText("detection-count", `${detections.length} object${detections.length === 1 ? "" : "s"}`);
@@ -297,6 +351,7 @@
     if (activePeer) activePeer.close();
     activePeer = null;
     byId("live-video").srcObject = null;
+    detectionFrames = [];
     latestOverlay = null;
     drawDetectionOverlay();
     byId("video-placeholder").classList.toggle("hidden", false);
@@ -317,13 +372,17 @@
     setText("live-stream-state", "Connecting");
     const pc = new RTCPeerConnection();
     activePeer = pc;
-    pc.addTransceiver("video", {direction: "recvonly"});
+    const transceiver = pc.addTransceiver("video", {direction: "recvonly"});
+    if (transceiver?.receiver && "playoutDelayHint" in transceiver.receiver) {
+      transceiver.receiver.playoutDelayHint = 0.25;
+    }
     pc.addEventListener("track", (event) => {
       if (generation !== videoGeneration) return;
       byId("live-video").srcObject = event.streams[0] || new MediaStream([event.track]);
       byId("video-placeholder").classList.toggle("hidden", true);
       setText("live-stream-state", "Live");
       drawDetectionOverlay();
+      scheduleVideoFrameOverlay(generation);
     });
     pc.addEventListener("connectionstatechange", () => {
       if (generation !== videoGeneration) return;

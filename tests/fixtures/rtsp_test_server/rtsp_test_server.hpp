@@ -14,7 +14,7 @@ namespace test {
 // Test-only loopback RTSP server; never link this class into skai-edge.
 class RtspTestServer {
 public:
-    enum class Codec { H264, H265 };
+    enum class Codec { H264, H264High, H265 };
 
     explicit RtspTestServer(Codec codec = Codec::H264, std::string username = {},
                             std::string password = {})

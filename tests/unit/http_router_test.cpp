@@ -246,6 +246,26 @@ TEST(HttpRouter, TreatsUnconfiguredRecordingControllerAsUnavailable) {
     EXPECT_EQ(started.result(), http::status::not_implemented);
 }
 
+TEST(HttpRouter, ReportsConfiguredRecordingUnavailableWithoutCompatibleMedia) {
+    skai::ApiState api;
+    skai::RecordingController recording;
+    recording.set_media_available(false, "recording requires H.264 input");
+    recording.configure(skai::RecordingConfig{});
+    const skai::RuntimeStatusSnapshot status;
+
+    const auto listed = skai::web::route_request(
+        {http::verb::get, "/api/v1/recordings", 11}, status, api, nullptr, &recording);
+    EXPECT_EQ(listed.result(), http::status::service_unavailable);
+    EXPECT_NE(listed.body().find("\"available\":false"), std::string::npos);
+    EXPECT_NE(listed.body().find("requires H.264"), std::string::npos);
+
+    const auto started = skai::web::route_request(
+        {http::verb::post, "/api/v1/recording/start", 11}, status, api, nullptr,
+        &recording);
+    EXPECT_EQ(started.result(), http::status::service_unavailable);
+    EXPECT_NE(started.body().find("requires H.264"), std::string::npos);
+}
+
 TEST(HttpRouter, DisabledGpsHasNoApiFix) {
     skai::ApiState api;
     skai::Config config;

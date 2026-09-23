@@ -38,12 +38,14 @@ safe oldest-alert cleanup. Steps 21 and 22 connect bounded H.264 encoding and
 segmented MP4 recording. Step 23 embeds the pinned `skai-ice` and
 libdatachannel pair used by the upcoming WHEP transport.
 
-The current service supersedes the Step 21 media path for H.264 RTSP inputs:
-the parsed source access units are passed directly to MP4 recording and WebRTC.
-Only the inference branch is decoded. Detection boxes travel as WebSocket JSON
-and the browser draws them on a canvas over the unmodified video, avoiding a
-decode/draw/re-encode cycle. H.265 inputs remain available for inference, but
-direct recording and browser delivery require an H.264 source.
+The current service supersedes the Step 21 media path for compatible H.264 RTSP
+inputs: constrained-baseline streams at Level 3.1 or lower are parsed and passed
+directly to MP4 recording and WebRTC. Only the inference branch is decoded.
+Detection boxes travel as timestamped WebSocket JSON, and the browser matches
+their source PTS to the presented WebRTC RTP frame before drawing them on a
+canvas. This avoids a decode/draw/re-encode cycle. H.265 and incompatible H.264
+inputs remain available for inference, while recording and WHEP explicitly
+report that passthrough media is unavailable.
 
 ## Build and test
 

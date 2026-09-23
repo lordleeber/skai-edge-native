@@ -29,10 +29,19 @@ const char* launch_for(RtspTestServer::Codec codec) {
                "tune=zerolatency bitrate=100 ! rtph265pay name=pay0 pt=96 "
                "config-interval=1 )";
     }
+    if (codec == RtspTestServer::Codec::H264High) {
+        return "( videotestsrc is-live=true pattern=smpte ! "
+               "video/x-raw,width=160,height=120,framerate=10/1 ! videoconvert ! "
+               "identity name=stall_gate ! x264enc speed-preset=ultrafast "
+               "bitrate=100 key-int-max=10 bframes=2 ! "
+               "video/x-h264,profile=high,level=(string)3.1 ! "
+               "rtph264pay name=pay0 pt=96 config-interval=1 )";
+    }
     return "( videotestsrc is-live=true pattern=smpte ! "
            "video/x-raw,width=160,height=120,framerate=10/1 ! videoconvert ! "
            "identity name=stall_gate ! x264enc speed-preset=ultrafast "
            "tune=zerolatency bitrate=100 key-int-max=10 ! "
+           "video/x-h264,profile=constrained-baseline,level=(string)3.1 ! "
            "rtph264pay name=pay0 pt=96 config-interval=1 )";
 }
 
@@ -49,9 +58,9 @@ bool RtspTestServer::start(std::string& error) {
         error = "GStreamer must be initialized before the RTSP test server";
         return false;
     }
-    const bool plugins_ready = codec_ == Codec::H264
-                                   ? plugin_available("x264enc") && plugin_available("rtph264pay")
-                                   : plugin_available("x265enc") && plugin_available("rtph265pay");
+    const bool plugins_ready = codec_ == Codec::H265
+                                   ? plugin_available("x265enc") && plugin_available("rtph265pay")
+                                   : plugin_available("x264enc") && plugin_available("rtph264pay");
     if (!plugins_ready) {
         error = "RTSP test encoder or payloader plugin is unavailable";
         return false;

@@ -101,6 +101,10 @@ int main(int argc, char* argv[]) {
     auto alert_repository = std::make_shared<skai::AlertRepository>(*database);
     auto recording_control = std::make_shared<skai::RecordingController>();
     auto webrtc_manager = std::make_shared<skai::WebRtcManager>(logger);
+    recording_control->set_media_available(
+        false, "waiting for a browser-compatible H.264 source");
+    webrtc_manager->set_media_available(
+        false, "waiting for a browser-compatible H.264 source");
     modules.storage = std::move(database);
     modules.webrtc = std::make_unique<skai::IceRuntimeModule>(logger);
     modules.web = std::make_unique<skai::web::HttpServer>(logger, runtime_status,
@@ -123,6 +127,11 @@ int main(int argc, char* argv[]) {
         inference_frames, encoded_access_units, logger, runtime_status,
         [webrtc_manager](const skai::EncodedAccessUnit& unit) {
             webrtc_manager->publish_access_unit(unit);
+        },
+        [recording_control, webrtc_manager](bool available,
+                                             const std::string& reason) {
+            recording_control->set_media_available(available, reason);
+            webrtc_manager->set_media_available(available, reason);
         });
     modules.gps = std::make_unique<skai::GpsModule>(gps_state);
     skai::Application app(cli.config_path, logger, std::move(modules));

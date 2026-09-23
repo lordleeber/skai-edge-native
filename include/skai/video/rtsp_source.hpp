@@ -53,13 +53,15 @@ std::string serialize_rtsp_metrics(const RtspDiagnostics& diagnostics);
 class RtspSource {
 public:
     using AccessUnitSink = std::function<void(const EncodedAccessUnit&)>;
+    using MediaStatusSink = std::function<void(bool, const std::string&)>;
 
     RtspSource(BoundedQueue<Frame>& frames, Logger& logger,
                DecodeMode decode_mode = DecodeMode::Auto,
                bool enqueue_frames = true,
                std::shared_ptr<RuntimeStatus> status = {},
                BoundedQueue<EncodedAccessUnit>* encoded_access_units = nullptr,
-               AccessUnitSink access_unit_sink = {});
+               AccessUnitSink access_unit_sink = {},
+               MediaStatusSink media_status_sink = {});
     ~RtspSource();
 
     RtspSource(const RtspSource&) = delete;
@@ -81,6 +83,7 @@ private:
     void close_pipeline() noexcept;
     bool capture_sample(GstSample* sample, RtspRecovery& recovery);
     bool capture_access_unit(GstSample* sample);
+    void publish_media_status(bool available, const std::string& reason);
     void capture_loop() noexcept;
     void set_error(const std::string& error);
     void publish_recovery(const RtspRecovery& recovery);
@@ -95,6 +98,7 @@ private:
     std::shared_ptr<RuntimeStatus> status_;
     BoundedQueue<EncodedAccessUnit>* encoded_access_units_;
     AccessUnitSink access_unit_sink_;
+    MediaStatusSink media_status_sink_;
     VideoConfig config_;
     std::unique_ptr<gst::Pipeline> pipeline_;
     GstElement* rtsp_element_ = nullptr; // borrowed from pipeline_; worker-only
@@ -120,6 +124,10 @@ private:
     MonotonicCounter pipeline_packets_late_;
     std::uint64_t access_unit_sequence_ = 0;
     bool first_access_unit_ = true;
+    std::mutex media_status_mutex_;
+    bool media_status_known_ = false;
+    bool media_available_ = false;
+    std::string media_unavailable_reason_;
 };
 
 } // namespace skai

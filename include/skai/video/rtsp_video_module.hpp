@@ -17,10 +17,12 @@ public:
     RtspVideoModule(BoundedQueue<Frame>& frames,
                     BoundedQueue<EncodedAccessUnit>& encoded_access_units,
                     Logger& logger, std::shared_ptr<RuntimeStatus> status = {},
-                    RtspSource::AccessUnitSink access_unit_sink = {})
+                    RtspSource::AccessUnitSink access_unit_sink = {},
+                    RtspSource::MediaStatusSink media_status_sink = {})
         : frames_(frames), encoded_access_units_(&encoded_access_units),
           logger_(logger), status_(std::move(status)),
-          access_unit_sink_(std::move(access_unit_sink)) {}
+          access_unit_sink_(std::move(access_unit_sink)),
+          media_status_sink_(std::move(media_status_sink)) {}
 
     bool initialize(const Config& config) override;
     bool start() override;
@@ -33,6 +35,7 @@ private:
     Logger& logger_;
     std::shared_ptr<RuntimeStatus> status_;
     RtspSource::AccessUnitSink access_unit_sink_;
+    RtspSource::MediaStatusSink media_status_sink_;
     VideoConfig config_;
     std::unique_ptr<RtspSource> source_;
 };

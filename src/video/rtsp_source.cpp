@@ -34,6 +34,35 @@ ElementNames elements_for(const std::string& codec) {
                             : ElementNames{"rtph264depay", "h264parse", "avdec_h264"};
 }
 
+bool browser_compatible_h264_caps(GstCaps* caps, std::string& reason) {
+    if (!caps || gst_caps_is_empty(caps)) {
+        reason = "source H.264 caps are unavailable";
+        return false;
+    }
+    const GstStructure* structure = gst_caps_get_structure(caps, 0);
+    const char* profile = gst_structure_get_string(structure, "profile");
+    const char* level = gst_structure_get_string(structure, "level");
+    if (!profile || std::string(profile) != "constrained-baseline") {
+        reason = "source H.264 must use constrained-baseline profile";
+        return false;
+    }
+    if (!level) {
+        reason = "source H.264 level is unavailable";
+        return false;
+    }
+    const std::string level_name(level);
+    const bool supported_level = level_name == "1" || level_name == "1b" ||
+        level_name == "1.1" || level_name == "1.2" || level_name == "1.3" ||
+        level_name == "2" || level_name == "2.1" || level_name == "2.2" ||
+        level_name == "3" || level_name == "3.1";
+    if (!supported_level) {
+        reason = "source H.264 must use level 3.1 or lower";
+        return false;
+    }
+    reason.clear();
+    return true;
+}
+
 const char* health_name(SourceHealth health) {
     switch (health) {
     case SourceHealth::Stopped: return "stopped";
@@ -73,11 +102,13 @@ std::string serialize_rtsp_metrics(const RtspDiagnostics& d) {
 RtspSource::RtspSource(BoundedQueue<Frame>& frames, Logger& logger, DecodeMode decode_mode,
                        bool enqueue_frames, std::shared_ptr<RuntimeStatus> status,
                        BoundedQueue<EncodedAccessUnit>* encoded_access_units,
-                       AccessUnitSink access_unit_sink)
+                       AccessUnitSink access_unit_sink,
+                       MediaStatusSink media_status_sink)
     : frames_(frames), logger_(logger), decode_mode_(decode_mode),
       enqueue_frames_(enqueue_frames), status_(std::move(status)),
       encoded_access_units_(encoded_access_units),
-      access_unit_sink_(std::move(access_unit_sink)) {}
+      access_unit_sink_(std::move(access_unit_sink)),
+      media_status_sink_(std::move(media_status_sink)) {}
 
 RtspSource::~RtspSource() { stop(); }
 
@@ -96,6 +127,7 @@ bool RtspSource::start(const VideoConfig& config, std::string& error) {
     sink_ = nullptr;
     encoded_sink_ = nullptr;
     access_unit_sequence_ = 0;
+    publish_media_status(false, "waiting for a browser-compatible H.264 source");
     {
         std::lock_guard<std::mutex> lock(diagnostics_mutex_);
         diagnostics_ = {};
@@ -121,6 +153,7 @@ bool RtspSource::open_pipeline(std::string& error) {
     sink_ = nullptr;
     encoded_sink_ = nullptr;
     first_access_unit_ = true;
+    publish_media_status(false, "RTSP source is reconnecting");
     pipeline_ = gst::Pipeline::create_empty(logger_, error);
     if (!pipeline_) return false;
 
@@ -368,6 +401,12 @@ void RtspSource::connect_rtp_pad(GstPad* pad) {
         g_object_set(compressed_filter, "caps", encoded_caps, nullptr);
         g_object_set(encoded_sink, "sync", FALSE, "max-buffers", 120,
                      "drop", TRUE, nullptr);
+        g_object_set(decode_queue, "max-size-buffers", 2u,
+                     "max-size-bytes", 0u, "max-size-time", guint64{0},
+                     "leaky", 2, nullptr);
+        g_object_set(encoded_queue, "max-size-buffers", 120u,
+                     "max-size-bytes", 0u, "max-size-time", guint64{0},
+                     "leaky", 2, nullptr);
         gst_caps_unref(encoded_caps);
         chain_linked =
             gst_element_link_many(depay, parser, compressed_filter, tee, nullptr) &&
@@ -395,6 +434,9 @@ void RtspSource::connect_rtp_pad(GstPad* pad) {
         std::lock_guard<std::mutex> lock(diagnostics_mutex_);
         diagnostics_.codec = codec;
         diagnostics_.decoder = decoder_name;
+    }
+    if (codec != "H264") {
+        publish_media_status(false, "recording and WebRTC require H.264 input");
     }
     for (auto* element : elements) gst_element_sync_state_with_parent(element);
 }
@@ -473,16 +515,20 @@ bool RtspSource::capture_sample(GstSample* sample, RtspRecovery& recovery) {
 }
 
 bool RtspSource::capture_access_unit(GstSample* sample) {
+    std::string incompatibility;
+    const bool compatible = browser_compatible_h264_caps(
+        gst_sample_get_caps(sample), incompatibility);
+    publish_media_status(compatible, incompatibility);
+    if (!compatible) return false;
     GstBuffer* buffer = gst_sample_get_buffer(sample);
     GstMapInfo mapped{};
     if (!buffer || !gst_buffer_map(buffer, &mapped, GST_MAP_READ)) return false;
     EncodedAccessUnit unit;
     unit.sequence = ++access_unit_sequence_;
-    if (GST_CLOCK_TIME_IS_VALID(GST_BUFFER_PTS(buffer))) {
-        unit.pts_ns = GST_BUFFER_PTS(buffer);
-    } else if (GST_CLOCK_TIME_IS_VALID(GST_BUFFER_DTS(buffer))) {
-        unit.pts_ns = GST_BUFFER_DTS(buffer);
-    }
+    unit.has_pts = GST_CLOCK_TIME_IS_VALID(GST_BUFFER_PTS(buffer));
+    unit.pts_ns = unit.has_pts ? GST_BUFFER_PTS(buffer) : 0;
+    unit.has_dts = GST_CLOCK_TIME_IS_VALID(GST_BUFFER_DTS(buffer));
+    unit.dts_ns = unit.has_dts ? GST_BUFFER_DTS(buffer) : 0;
     unit.keyframe = !GST_BUFFER_FLAG_IS_SET(buffer, GST_BUFFER_FLAG_DELTA_UNIT);
     unit.discontinuity = first_access_unit_ ||
                          GST_BUFFER_FLAG_IS_SET(buffer, GST_BUFFER_FLAG_DISCONT);
@@ -501,6 +547,25 @@ bool RtspSource::capture_access_unit(GstSample* sample) {
         return false;
     }
     return true;
+}
+
+void RtspSource::publish_media_status(bool available, const std::string& reason) {
+    {
+        std::lock_guard<std::mutex> lock(media_status_mutex_);
+        if (media_status_known_ && media_available_ == available &&
+            media_unavailable_reason_ == reason) return;
+        media_status_known_ = true;
+        media_available_ = available;
+        media_unavailable_reason_ = reason;
+    }
+    if (!media_status_sink_) return;
+    try {
+        media_status_sink_(available, reason);
+    } catch (const std::exception& failure) {
+        logger_.log(LogLevel::Error, "video", failure.what());
+    } catch (...) {
+        logger_.log(LogLevel::Error, "video", "media status sink failed");
+    }
 }
 
 void RtspSource::capture_loop() noexcept {
