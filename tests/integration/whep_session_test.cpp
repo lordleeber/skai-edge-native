@@ -143,6 +143,36 @@ skai::EncodedAccessUnit h264_delta(std::uint64_t pts_ns) {
     return unit;
 }
 
+TEST(WebRtcManager, InvalidatesCachedKeyframeOnSourceDiscontinuity) {
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    skai::WebRtcManager manager(logger);
+    auto config = loopback_config(logger);
+    manager.configure(config.webrtc);
+
+    manager.publish_access_unit(h264_keyframe(0));
+    EXPECT_TRUE(manager.diagnostics().keyframe_cached);
+    auto discontinuity = h264_delta(33'333'333ULL);
+    discontinuity.discontinuity = true;
+    manager.publish_access_unit(discontinuity);
+    EXPECT_FALSE(manager.diagnostics().keyframe_cached);
+    manager.publish_access_unit(h264_keyframe(66'666'666ULL));
+    EXPECT_TRUE(manager.diagnostics().keyframe_cached);
+}
+
+TEST(WebRtcManager, RejectsSessionWhileSourceMediaIsUnsupported) {
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    skai::WebRtcManager manager(logger);
+    auto config = loopback_config(logger);
+    manager.configure(config.webrtc);
+    manager.set_media_available(false, "recording and WebRTC require H.264 input");
+
+    const auto created = manager.create_session(make_browser_offer().sdp);
+    EXPECT_EQ(created.error, skai::CreateSessionError::Disabled);
+    EXPECT_NE(created.message.find("require H.264"), std::string::npos);
+}
+
 bool contains_nal_type(const rtc::binary& bytes, std::uint8_t type) {
     for (std::size_t index = 0; index + 4 < bytes.size(); ++index) {
         const auto value = [&](std::size_t position) {

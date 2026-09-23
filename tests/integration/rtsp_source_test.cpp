@@ -1,4 +1,5 @@
 #include "rtsp_test_server.hpp"
+#include "skai/video/encoded_access_unit.hpp"
 #include "skai/video/rtsp_source.hpp"
 #include "skai/video/rtsp_video_module.hpp"
 
@@ -131,6 +132,86 @@ TEST(RtspSource, DecodesH264IntoBoundedInferenceQueue) {
     receives_decoded_frames(skai::test::RtspTestServer::Codec::H264, "H264");
 }
 
+TEST(RtspSource, PublishesSourceH264AccessUnitsWithoutReencoding) {
+    std::string error;
+    ASSERT_TRUE(skai::gst::initialize_once(error)) << error;
+    skai::test::RtspTestServer server;
+    ASSERT_TRUE(server.start(error)) << error;
+    skai::BoundedQueue<skai::Frame> frames(2);
+    skai::BoundedQueue<skai::EncodedAccessUnit> access_units(30);
+    std::ostringstream output;
+    skai::Logger logger(output);
+    skai::RtspSource source(frames, logger, skai::DecodeMode::Software, true, {},
+                            &access_units);
+    skai::VideoConfig config;
+    config.rtsp_url = server.url();
+    config.transport = "tcp";
+    config.latency_ms = 50;
+    ASSERT_TRUE(source.start(config, error)) << error << output.str();
+
+    ASSERT_TRUE(frames.pop_for(std::chrono::seconds(3)).has_value()) << output.str();
+    bool saw_keyframe = false;
+    bool saw_discontinuity = false;
+    bool saw_pts = false;
+    std::uint64_t previous_sequence = 0;
+    for (int attempt = 0; attempt < 30 && !saw_keyframe; ++attempt) {
+        auto unit = access_units.pop_for(std::chrono::milliseconds(200));
+        if (!unit) continue;
+        EXPECT_GT(unit->sequence, previous_sequence);
+        previous_sequence = unit->sequence;
+        ASSERT_GE(unit->bytes.size(), 4U);
+        EXPECT_EQ(unit->bytes[0], 0U);
+        EXPECT_EQ(unit->bytes[1], 0U);
+        EXPECT_TRUE((unit->bytes[2] == 1U) ||
+                    (unit->bytes[2] == 0U && unit->bytes[3] == 1U));
+        saw_discontinuity = saw_discontinuity || unit->discontinuity;
+        saw_pts = saw_pts || unit->has_pts;
+        saw_keyframe = saw_keyframe || unit->keyframe;
+    }
+    EXPECT_TRUE(saw_discontinuity);
+    EXPECT_TRUE(saw_keyframe);
+    EXPECT_TRUE(saw_pts);
+    source.stop();
+}
+
+TEST(RtspSource, RejectsHighProfileH264PassthroughButStillDecodesForInference) {
+    std::string error;
+    ASSERT_TRUE(skai::gst::initialize_once(error)) << error;
+    skai::test::RtspTestServer server(skai::test::RtspTestServer::Codec::H264High);
+    ASSERT_TRUE(server.start(error)) << error;
+    skai::BoundedQueue<skai::Frame> frames(2);
+    skai::BoundedQueue<skai::EncodedAccessUnit> access_units(30);
+    std::mutex status_mutex;
+    std::condition_variable status_changed;
+    bool incompatible = false;
+    std::string reason;
+    std::ostringstream output;
+    skai::Logger logger(output);
+    skai::RtspSource source(frames, logger, skai::DecodeMode::Software, true, {},
+                            &access_units, {}, [&](bool available, const std::string& value) {
+        std::lock_guard<std::mutex> lock(status_mutex);
+        if (!available && value.find("constrained-baseline") != std::string::npos) {
+            incompatible = true;
+            reason = value;
+            status_changed.notify_all();
+        }
+    });
+    skai::VideoConfig config;
+    config.rtsp_url = server.url();
+    config.transport = "tcp";
+    config.latency_ms = 50;
+    ASSERT_TRUE(source.start(config, error)) << error << output.str();
+
+    ASSERT_TRUE(frames.pop_for(std::chrono::seconds(5)).has_value()) << output.str();
+    std::unique_lock<std::mutex> lock(status_mutex);
+    ASSERT_TRUE(status_changed.wait_for(lock, std::chrono::seconds(2),
+                                        [&] { return incompatible; })) << output.str();
+    EXPECT_NE(reason.find("constrained-baseline"), std::string::npos);
+    lock.unlock();
+    EXPECT_FALSE(access_units.pop_for(std::chrono::milliseconds(100)).has_value());
+    source.stop();
+}
+
 TEST(RtspSource, DecodesH265IntoBoundedInferenceQueue) {
     std::string error;
     ASSERT_TRUE(skai::gst::initialize_once(error)) << error;
@@ -138,6 +219,43 @@ TEST(RtspSource, DecodesH265IntoBoundedInferenceQueue) {
         GTEST_SKIP() << "H.265 test plugins unavailable";
     }
     receives_decoded_frames(skai::test::RtspTestServer::Codec::H265, "H265");
+}
+
+TEST(RtspSource, ReportsRecordingAndWebrtcUnavailableForH265) {
+    std::string error;
+    ASSERT_TRUE(skai::gst::initialize_once(error)) << error;
+    if (!plugin_available("x265enc") || !plugin_available("avdec_h265")) {
+        GTEST_SKIP() << "H.265 test plugins unavailable";
+    }
+    skai::test::RtspTestServer server(skai::test::RtspTestServer::Codec::H265);
+    ASSERT_TRUE(server.start(error)) << error;
+    skai::BoundedQueue<skai::Frame> frames(2);
+    skai::BoundedQueue<skai::EncodedAccessUnit> access_units(4);
+    std::mutex status_mutex;
+    std::condition_variable status_changed;
+    bool unsupported = false;
+    std::ostringstream output;
+    skai::Logger logger(output);
+    skai::RtspSource source(frames, logger, skai::DecodeMode::Software, true, {},
+                            &access_units, {}, [&](bool available, const std::string& reason) {
+        std::lock_guard<std::mutex> lock(status_mutex);
+        if (!available && reason.find("require H.264") != std::string::npos) {
+            unsupported = true;
+            status_changed.notify_all();
+        }
+    });
+    skai::VideoConfig config;
+    config.rtsp_url = server.url();
+    config.transport = "tcp";
+    config.latency_ms = 50;
+    ASSERT_TRUE(source.start(config, error)) << error << output.str();
+    ASSERT_TRUE(frames.pop_for(std::chrono::seconds(5)).has_value()) << output.str();
+    std::unique_lock<std::mutex> lock(status_mutex);
+    EXPECT_TRUE(status_changed.wait_for(lock, std::chrono::seconds(2),
+                                        [&] { return unsupported; })) << output.str();
+    lock.unlock();
+    EXPECT_FALSE(access_units.pop_for(std::chrono::milliseconds(100)).has_value());
+    source.stop();
 }
 
 TEST(RtspSource, ReceivesH264OverUdp) {

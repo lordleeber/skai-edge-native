@@ -334,8 +334,10 @@ bool H264Encoder::capture_sample(GstSample* sample) {
     if (!gst_buffer_map(buffer, &mapped, GST_MAP_READ)) return false;
     EncodedAccessUnit unit;
     unit.sequence = GST_BUFFER_OFFSET_IS_VALID(buffer) ? GST_BUFFER_OFFSET(buffer) : 0;
-    unit.pts_ns = GST_CLOCK_TIME_IS_VALID(GST_BUFFER_PTS(buffer)) ?
-                      GST_BUFFER_PTS(buffer) : 0;
+    unit.has_pts = GST_CLOCK_TIME_IS_VALID(GST_BUFFER_PTS(buffer));
+    unit.pts_ns = unit.has_pts ? GST_BUFFER_PTS(buffer) : 0;
+    unit.has_dts = GST_CLOCK_TIME_IS_VALID(GST_BUFFER_DTS(buffer));
+    unit.dts_ns = unit.has_dts ? GST_BUFFER_DTS(buffer) : 0;
     unit.keyframe = !GST_BUFFER_FLAG_IS_SET(buffer, GST_BUFFER_FLAG_DELTA_UNIT);
     unit.bytes.assign(mapped.data, mapped.data + mapped.size);
     gst_buffer_unmap(buffer, &mapped);

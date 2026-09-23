@@ -39,11 +39,14 @@ std::string class_name(int class_id) {
                : "class_" + std::to_string(class_id);
 }
 
-std::string detection_event_data(const DetectionResult& result) {
+std::string detection_event_data(const DetectionResult& result, const Frame& frame) {
     std::ostringstream output;
     output.imbue(std::locale::classic());
     output << std::setprecision(std::numeric_limits<float>::max_digits10)
            << "{\"available\":true,\"frame_sequence\":" << result.frame_sequence
+           << ",\"pts_ns\":" << frame.pts_ns
+           << ",\"frame_width\":" << frame.width
+           << ",\"frame_height\":" << frame.height
            << ",\"detections\":[";
     for (std::size_t index = 0; index < result.detections.size(); ++index) {
         const auto& detection = result.detections[index];
@@ -67,14 +70,21 @@ YoloInferenceModule::YoloInferenceModule(BoundedQueue<Frame>& input,
                                          std::shared_ptr<ApiState> api,
                                          std::shared_ptr<EventChannel> events,
                                          std::shared_ptr<AlertManager> alerts)
-    : input_(input), output_(annotated_output), logger_(logger),
+    : input_(input), output_(&annotated_output), logger_(logger),
       status_(std::move(status)), api_(std::move(api)),
       events_(std::move(events)), alerts_(std::move(alerts)) {}
+
+YoloInferenceModule::YoloInferenceModule(
+        BoundedQueue<Frame>& input, Logger& logger,
+        std::shared_ptr<RuntimeStatus> status, std::shared_ptr<ApiState> api,
+        std::shared_ptr<EventChannel> events, std::shared_ptr<AlertManager> alerts)
+    : input_(input), logger_(logger), status_(std::move(status)),
+      api_(std::move(api)), events_(std::move(events)), alerts_(std::move(alerts)) {}
 
 bool YoloInferenceModule::initialize(const Config& config) {
     if (detector_ || worker_.joinable()) return false;
     input_.reset();
-    output_.reset();
+    if (output_) output_->reset();
     alert_queue_.reset();
     if (status_) status_->clear_detector();
     annotation_.enabled = config.detector.annotate;
@@ -114,7 +124,7 @@ void YoloInferenceModule::stop() noexcept {
 void YoloInferenceModule::wait() noexcept {
     if (worker_.joinable()) worker_.join();
     if (alert_worker_.joinable()) alert_worker_.join();
-    output_.shutdown();
+    if (output_) output_->shutdown();
     if (status_) status_->clear_detector();
     detector_.reset();
     bootstrap_.reset();
@@ -129,7 +139,7 @@ void YoloInferenceModule::run() noexcept {
                                  : DetectorPermit{true, 0};
         if (!permit.enabled) {
             if (status_) status_->clear_detector();
-            output_.push(std::move(*frame));
+            if (output_) output_->push(std::move(*frame));
             continue;
         }
         DetectionResult detections;
@@ -152,10 +162,12 @@ void YoloInferenceModule::run() noexcept {
                                    timing.inference_wall_ms +
                                    timing.postprocess_wall_ms;
         Frame annotated;
-        if (!annotate_frame(*frame, detections, coco_class_names(), annotation_,
-                            annotated, error)) {
-            logger_.log(LogLevel::Error, "annotation", error);
-            continue;
+        if (output_) {
+            if (!annotate_frame(*frame, detections, coco_class_names(), annotation_,
+                                annotated, error)) {
+                logger_.log(LogLevel::Error, "annotation", error);
+                continue;
+            }
         }
         std::vector<DetectionDto> published;
         if (api_) {
@@ -168,7 +180,10 @@ void YoloInferenceModule::run() noexcept {
             }
         }
         std::optional<AlertWork> alert_work;
-        if (alerts_) alert_work = AlertWork{detections, annotated, permit.generation};
+        if (alerts_) {
+            alert_work = AlertWork{detections, output_ ? annotated : *frame,
+                                   permit.generation};
+        }
         auto commit = [&] {
             previous = now;
             if (status_) {
@@ -181,7 +196,7 @@ void YoloInferenceModule::run() noexcept {
             }
             if (events_) {
                 events_->publish(EventType::Detection,
-                                 detection_event_data(detections));
+                                 detection_event_data(detections, *frame));
             }
             if (alerts_) {
                 const auto dropped = alert_queue_.stats().dropped;
@@ -191,13 +206,14 @@ void YoloInferenceModule::run() noexcept {
                                 "alert persistence queue dropped its oldest frame");
                 }
             }
-            output_.push(std::move(annotated));
+            if (output_) output_->push(std::move(annotated));
         };
         if (!api_) {
             commit();
-        } else if (!api_->commit_detections(permit, detections.frame_sequence,
-                                            std::move(published), commit)) {
-            output_.push(std::move(*frame));
+        } else if (!api_->commit_detections(
+                       permit, detections.frame_sequence, frame->width, frame->height,
+                       frame->pts_ns, std::move(published), commit)) {
+            if (output_) output_->push(std::move(*frame));
         }
     }
 }

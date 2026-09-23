@@ -34,12 +34,20 @@ void RecordingController::configure(const RecordingConfig& config) {
     requested_ = config.enabled;
     status_ = {};
     status_.configured = true;
-    status_.state = config.enabled ? "starting" : "stopped";
+    status_.available = media_available_;
+    status_.unavailable_reason = media_unavailable_reason_;
+    status_.state = !media_available_ ? "unavailable" :
+                    config.enabled ? "starting" : "stopped";
 }
 
 bool RecordingController::start(std::string& error) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!configured_) { error = "recording is not configured"; return false; }
+    if (!media_available_) {
+        error = media_unavailable_reason_.empty()
+                    ? "source H.264 is unavailable" : media_unavailable_reason_;
+        return false;
+    }
     requested_ = true;
     status_.last_error.clear();
     if (!status_.active) status_.state = "starting";
@@ -58,7 +66,7 @@ bool RecordingController::stop(std::string& error) {
 
 bool RecordingController::requested() const {
     std::lock_guard<std::mutex> lock(mutex_);
-    return requested_;
+    return requested_ && media_available_;
 }
 
 RecordingStatus RecordingController::status() const {
@@ -96,6 +104,22 @@ void RecordingController::commit_written(std::uint64_t access_units, std::uint64
 void RecordingController::add_dropped() {
     std::lock_guard<std::mutex> lock(mutex_);
     ++status_.access_units_dropped;
+}
+
+void RecordingController::set_media_available(bool available, std::string reason) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    media_available_ = available;
+    media_unavailable_reason_ = available ? std::string{} : std::move(reason);
+    status_.available = available;
+    status_.unavailable_reason = media_unavailable_reason_;
+    if (!available) {
+        status_.active = false;
+        status_.state = "unavailable";
+    } else if (requested_ && !status_.active) {
+        status_.state = "starting";
+    } else if (!requested_) {
+        status_.state = "stopped";
+    }
 }
 
 RecordingModule::RecordingModule(BoundedQueue<EncodedAccessUnit>& input, Logger& logger,
@@ -237,8 +261,8 @@ bool RecordingModule::write_access_unit(const EncodedAccessUnit& unit, std::stri
     }
     std::memcpy(mapped.data, unit.bytes.data(), unit.bytes.size());
     gst_buffer_unmap(buffer, &mapped);
-    GST_BUFFER_PTS(buffer) = unit.pts_ns;
-    GST_BUFFER_DTS(buffer) = GST_CLOCK_TIME_NONE;
+    GST_BUFFER_PTS(buffer) = unit.has_pts ? unit.pts_ns : GST_CLOCK_TIME_NONE;
+    GST_BUFFER_DTS(buffer) = unit.has_dts ? unit.dts_ns : GST_CLOCK_TIME_NONE;
     if (gst_app_src_push_buffer(GST_APP_SRC(appsrc_), buffer) != GST_FLOW_OK) {
         error = "MP4 recorder rejected H.264 access unit";
         return false;
@@ -341,6 +365,10 @@ void RecordingModule::run() noexcept {
         if (!unit) {
             if (input_.is_shutdown()) break;
             continue;
+        }
+        if (unit->discontinuity) {
+            waiting_for_keyframe_ = true;
+            if (pipeline_) close_pipeline(true);
         }
         if (waiting_for_keyframe_) {
             if (!unit->keyframe) { control_->add_dropped(); continue; }

@@ -45,7 +45,8 @@ target_link_libraries(skai-h264-encoder-tests PRIVATE skai-h264-encoder GTest::g
 gtest_discover_tests(skai-h264-encoder-tests PROPERTIES TIMEOUT 15)
 
 add_executable(skai-recording-tests unit/recording_test.cpp)
-target_link_libraries(skai-recording-tests PRIVATE skai-recording GTest::gtest_main)
+target_link_libraries(skai-recording-tests PRIVATE skai-recording skai-h264-encoder
+    GTest::gtest_main)
 gtest_discover_tests(skai-recording-tests PROPERTIES TIMEOUT 20)
 
 add_executable(skai-webrtc-tests integration/webrtc_dependency_test.cpp)

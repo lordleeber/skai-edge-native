@@ -15,12 +15,18 @@
 
 namespace skai {
 
-// Consumes decoded frames, runs YOLO, and publishes copied annotated frames for
-// the next media stage. One worker owns all TensorRT/CUDA inference resources.
+// Consumes decoded frames and runs YOLO. Production publishes detection metadata;
+// tests and snapshot callers may optionally request copied annotated frames.
+// One worker owns all TensorRT/CUDA inference resources.
 class YoloInferenceModule final : public LifecycleModule {
 public:
     YoloInferenceModule(BoundedQueue<Frame>& input,
                         BoundedQueue<Frame>& annotated_output, Logger& logger,
+                        std::shared_ptr<RuntimeStatus> status = {},
+                        std::shared_ptr<ApiState> api = {},
+                        std::shared_ptr<EventChannel> events = {},
+                        std::shared_ptr<AlertManager> alerts = {});
+    YoloInferenceModule(BoundedQueue<Frame>& input, Logger& logger,
                         std::shared_ptr<RuntimeStatus> status = {},
                         std::shared_ptr<ApiState> api = {},
                         std::shared_ptr<EventChannel> events = {},
@@ -41,7 +47,7 @@ private:
     void persist_alerts() noexcept;
 
     BoundedQueue<Frame>& input_;
-    BoundedQueue<Frame>& output_;
+    BoundedQueue<Frame>* output_ = nullptr;
     Logger& logger_;
     std::shared_ptr<RuntimeStatus> status_;
     std::shared_ptr<ApiState> api_;

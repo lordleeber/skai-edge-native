@@ -65,6 +65,9 @@ struct WebRtcPeerDiagnostics {
 
 struct WebRtcDiagnostics {
     bool enabled = false;
+    bool media_available = true;
+    bool keyframe_cached = false;
+    std::string media_unavailable_reason;
     bool lan_only = true;
     std::size_t max_peers = 0;
     std::uint64_t sessions_created = 0;
@@ -153,6 +156,7 @@ public:
     std::size_t cleanup_stale_sessions();
     std::size_t session_count() const;
     WebRtcDiagnostics diagnostics() const;
+    void set_media_available(bool available, std::string reason = {});
     void publish_access_unit(const EncodedAccessUnit& unit) noexcept;
     void shutdown() noexcept;
 
@@ -179,7 +183,9 @@ private:
     std::uint64_t signaling_errors_ = 0;
     std::atomic<std::uint64_t> media_errors_{0};
     std::string last_close_reason_;
+    std::string media_unavailable_reason_;
     bool enabled_ = false;
+    bool media_available_ = true;
     bool stopping_ = true;
 };
 

@@ -7,7 +7,6 @@
 #include "skai/storage/database.hpp"
 #include "skai/storage/alert_repository.hpp"
 #include "skai/video/gstreamer_runtime.hpp"
-#include "skai/video/h264_encoder_module.hpp"
 #include "skai/video/rtsp_video_module.hpp"
 #include "skai/video/rtsp_source.hpp"
 #include "skai/video/recording.hpp"
@@ -93,7 +92,6 @@ int main(int argc, char* argv[]) {
     }
 
     skai::BoundedQueue<skai::Frame> inference_frames(2);
-    skai::BoundedQueue<skai::Frame> annotated_frames(2);
     skai::BoundedQueue<skai::EncodedAccessUnit> encoded_access_units(120);
     auto runtime_status = std::make_shared<skai::RuntimeStatus>();
     auto gps_state = std::make_shared<skai::GpsState>();
@@ -103,32 +101,38 @@ int main(int argc, char* argv[]) {
     auto alert_repository = std::make_shared<skai::AlertRepository>(*database);
     auto recording_control = std::make_shared<skai::RecordingController>();
     auto webrtc_manager = std::make_shared<skai::WebRtcManager>(logger);
+    recording_control->set_media_available(
+        false, "waiting for a browser-compatible H.264 source");
+    webrtc_manager->set_media_available(
+        false, "waiting for a browser-compatible H.264 source");
     modules.storage = std::move(database);
     modules.webrtc = std::make_unique<skai::IceRuntimeModule>(logger);
     modules.web = std::make_unique<skai::web::HttpServer>(logger, runtime_status,
                                                           api_state, events,
                                                           alert_repository, recording_control,
                                                           webrtc_manager);
+    modules.recording = std::make_unique<skai::RecordingModule>(
+        encoded_access_units, logger, recording_control, events);
 #if SKAI_HAS_YOLO_PIPELINE
     auto alert_manager = std::make_shared<skai::AlertManager>(
         gps_state, events, alert_repository, &logger);
     modules.detector = std::make_unique<skai::YoloInferenceModule>(
-        inference_frames, annotated_frames, logger, runtime_status, api_state,
-        events, alert_manager);
-    modules.encoder = std::make_unique<skai::H264EncoderModule>(
-        annotated_frames, encoded_access_units, logger, runtime_status,
-        [webrtc_manager](const skai::EncodedAccessUnit& unit) {
-            webrtc_manager->publish_access_unit(unit);
-        });
-    modules.recording = std::make_unique<skai::RecordingModule>(
-        encoded_access_units, logger, recording_control, events);
+        inference_frames, logger, runtime_status, api_state, events, alert_manager);
 #else
     api_state->set_detector_supported(false);
     logger.log(skai::LogLevel::Warning, "detector",
                "service built without TensorRT/CUDA inference support");
 #endif
-    modules.video = std::make_unique<skai::RtspVideoModule>(inference_frames, logger,
-                                                            runtime_status);
+    modules.video = std::make_unique<skai::RtspVideoModule>(
+        inference_frames, encoded_access_units, logger, runtime_status,
+        [webrtc_manager](const skai::EncodedAccessUnit& unit) {
+            webrtc_manager->publish_access_unit(unit);
+        },
+        [recording_control, webrtc_manager](bool available,
+                                             const std::string& reason) {
+            recording_control->set_media_available(available, reason);
+            webrtc_manager->set_media_available(available, reason);
+        });
     modules.gps = std::make_unique<skai::GpsModule>(gps_state);
     skai::Application app(cli.config_path, logger, std::move(modules));
     if (!app.initialize()) {

@@ -142,11 +142,18 @@ TEST(HttpRouter, ServesExplicitConfigDetectionAndGpsDtos) {
 
     const auto permit = api.detector_permit();
     ASSERT_TRUE(api.commit_detections(
-        permit, 17, {{0, "person", 0.91f, 1, 2, 3, 4}}, [] {}));
+        permit, 17, 1280, 720, 123456789,
+        {{0, "person", 0.91f, 1, 2, 3, 4}}, [] {}));
     const auto detections = skai::web::route_request(
         {http::verb::get, "/api/v1/detections/latest", 11}, status, api);
     EXPECT_EQ(detections.result(), http::status::ok);
     EXPECT_NE(detections.body().find("\"frame_sequence\":17"),
+              std::string::npos);
+    EXPECT_NE(detections.body().find("\"pts_ns\":123456789"),
+              std::string::npos);
+    EXPECT_NE(detections.body().find("\"frame_width\":1280"),
+              std::string::npos);
+    EXPECT_NE(detections.body().find("\"frame_height\":720"),
               std::string::npos);
     EXPECT_NE(detections.body().find("\"class_name\":\"person\""),
               std::string::npos);
@@ -237,6 +244,26 @@ TEST(HttpRouter, TreatsUnconfiguredRecordingControllerAsUnavailable) {
         {http::verb::post, "/api/v1/recording/start", 11}, status, api, nullptr,
         &recording);
     EXPECT_EQ(started.result(), http::status::not_implemented);
+}
+
+TEST(HttpRouter, ReportsConfiguredRecordingUnavailableWithoutCompatibleMedia) {
+    skai::ApiState api;
+    skai::RecordingController recording;
+    recording.set_media_available(false, "recording requires H.264 input");
+    recording.configure(skai::RecordingConfig{});
+    const skai::RuntimeStatusSnapshot status;
+
+    const auto listed = skai::web::route_request(
+        {http::verb::get, "/api/v1/recordings", 11}, status, api, nullptr, &recording);
+    EXPECT_EQ(listed.result(), http::status::service_unavailable);
+    EXPECT_NE(listed.body().find("\"available\":false"), std::string::npos);
+    EXPECT_NE(listed.body().find("requires H.264"), std::string::npos);
+
+    const auto started = skai::web::route_request(
+        {http::verb::post, "/api/v1/recording/start", 11}, status, api, nullptr,
+        &recording);
+    EXPECT_EQ(started.result(), http::status::service_unavailable);
+    EXPECT_NE(started.body().find("requires H.264"), std::string::npos);
 }
 
 TEST(HttpRouter, DisabledGpsHasNoApiFix) {

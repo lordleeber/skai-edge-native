@@ -34,6 +34,35 @@ ElementNames elements_for(const std::string& codec) {
                             : ElementNames{"rtph264depay", "h264parse", "avdec_h264"};
 }
 
+bool browser_compatible_h264_caps(GstCaps* caps, std::string& reason) {
+    if (!caps || gst_caps_is_empty(caps)) {
+        reason = "source H.264 caps are unavailable";
+        return false;
+    }
+    const GstStructure* structure = gst_caps_get_structure(caps, 0);
+    const char* profile = gst_structure_get_string(structure, "profile");
+    const char* level = gst_structure_get_string(structure, "level");
+    if (!profile || std::string(profile) != "constrained-baseline") {
+        reason = "source H.264 must use constrained-baseline profile";
+        return false;
+    }
+    if (!level) {
+        reason = "source H.264 level is unavailable";
+        return false;
+    }
+    const std::string level_name(level);
+    const bool supported_level = level_name == "1" || level_name == "1b" ||
+        level_name == "1.1" || level_name == "1.2" || level_name == "1.3" ||
+        level_name == "2" || level_name == "2.1" || level_name == "2.2" ||
+        level_name == "3" || level_name == "3.1";
+    if (!supported_level) {
+        reason = "source H.264 must use level 3.1 or lower";
+        return false;
+    }
+    reason.clear();
+    return true;
+}
+
 const char* health_name(SourceHealth health) {
     switch (health) {
     case SourceHealth::Stopped: return "stopped";
@@ -71,9 +100,15 @@ std::string serialize_rtsp_metrics(const RtspDiagnostics& d) {
 }
 
 RtspSource::RtspSource(BoundedQueue<Frame>& frames, Logger& logger, DecodeMode decode_mode,
-                       bool enqueue_frames, std::shared_ptr<RuntimeStatus> status)
+                       bool enqueue_frames, std::shared_ptr<RuntimeStatus> status,
+                       BoundedQueue<EncodedAccessUnit>* encoded_access_units,
+                       AccessUnitSink access_unit_sink,
+                       MediaStatusSink media_status_sink)
     : frames_(frames), logger_(logger), decode_mode_(decode_mode),
-      enqueue_frames_(enqueue_frames), status_(std::move(status)) {}
+      enqueue_frames_(enqueue_frames), status_(std::move(status)),
+      encoded_access_units_(encoded_access_units),
+      access_unit_sink_(std::move(access_unit_sink)),
+      media_status_sink_(std::move(media_status_sink)) {}
 
 RtspSource::~RtspSource() { stop(); }
 
@@ -90,6 +125,9 @@ bool RtspSource::start(const VideoConfig& config, std::string& error) {
     config_ = config;
     if (status_) status_->clear_video();
     sink_ = nullptr;
+    encoded_sink_ = nullptr;
+    access_unit_sequence_ = 0;
+    publish_media_status(false, "waiting for a browser-compatible H.264 source");
     {
         std::lock_guard<std::mutex> lock(diagnostics_mutex_);
         diagnostics_ = {};
@@ -113,6 +151,9 @@ bool RtspSource::start(const VideoConfig& config, std::string& error) {
 
 bool RtspSource::open_pipeline(std::string& error) {
     sink_ = nullptr;
+    encoded_sink_ = nullptr;
+    first_access_unit_ = true;
+    publish_media_status(false, "RTSP source is reconnecting");
     pipeline_ = gst::Pipeline::create_empty(logger_, error);
     if (!pipeline_) return false;
 
@@ -196,6 +237,7 @@ void RtspSource::close_pipeline() noexcept {
         pipeline_packets_late_.reset();
     }
     sink_ = nullptr;
+    encoded_sink_ = nullptr;
     rtsp_element_ = nullptr;
     pipeline_.reset();
 }
@@ -320,8 +362,23 @@ void RtspSource::connect_rtp_pad(GstPad* pad) {
     GstElement* color = gst_element_factory_make("videoconvert", nullptr);
     GstElement* filter = gst_element_factory_make("capsfilter", nullptr);
     GstElement* sink = gst_element_factory_make("appsink", "inference_sink");
-    GstElement* elements[] = {depay, parser, decoder, converter, color, filter, sink};
-    if (std::any_of(std::begin(elements), std::end(elements), [](GstElement* e) { return !e; })) {
+    const bool publish_h264 = codec == "H264" &&
+                              (encoded_access_units_ || access_unit_sink_);
+    GstElement* compressed_filter = publish_h264
+                                        ? gst_element_factory_make("capsfilter", nullptr)
+                                        : nullptr;
+    GstElement* tee = publish_h264 ? gst_element_factory_make("tee", nullptr) : nullptr;
+    GstElement* decode_queue = publish_h264 ? gst_element_factory_make("queue", nullptr) : nullptr;
+    GstElement* encoded_queue = publish_h264 ? gst_element_factory_make("queue", nullptr) : nullptr;
+    GstElement* encoded_sink = publish_h264
+                                   ? gst_element_factory_make("appsink", "encoded_sink")
+                                   : nullptr;
+    std::vector<GstElement*> elements = {depay, parser, decoder, converter, color, filter, sink};
+    if (publish_h264) {
+        elements.insert(elements.end(), {compressed_filter, tee, decode_queue,
+                                         encoded_queue, encoded_sink});
+    }
+    if (std::any_of(elements.begin(), elements.end(), [](GstElement* e) { return !e; })) {
         for (auto* element : elements) {
             if (element) gst_object_unref(element);
         }
@@ -335,7 +392,32 @@ void RtspSource::connect_rtp_pad(GstPad* pad) {
     gst_caps_unref(output_caps);
     g_object_set(sink, "sync", FALSE, "max-buffers", 1, "drop", TRUE, nullptr);
     for (auto* element : elements) gst_bin_add(GST_BIN(pipeline_->element()), element);
-    if (!gst_element_link_many(depay, parser, decoder, converter, color, filter, sink, nullptr)) {
+    bool chain_linked = false;
+    if (publish_h264) {
+        GstCaps* encoded_caps = gst_caps_new_simple(
+            "video/x-h264", "stream-format", G_TYPE_STRING, "byte-stream",
+            "alignment", G_TYPE_STRING, "au", nullptr);
+        g_object_set(parser, "config-interval", -1, nullptr);
+        g_object_set(compressed_filter, "caps", encoded_caps, nullptr);
+        g_object_set(encoded_sink, "sync", FALSE, "max-buffers", 120,
+                     "drop", TRUE, nullptr);
+        g_object_set(decode_queue, "max-size-buffers", 2u,
+                     "max-size-bytes", 0u, "max-size-time", guint64{0},
+                     "leaky", 2, nullptr);
+        g_object_set(encoded_queue, "max-size-buffers", 120u,
+                     "max-size-bytes", 0u, "max-size-time", guint64{0},
+                     "leaky", 2, nullptr);
+        gst_caps_unref(encoded_caps);
+        chain_linked =
+            gst_element_link_many(depay, parser, compressed_filter, tee, nullptr) &&
+            gst_element_link_many(tee, decode_queue, decoder, converter, color,
+                                  filter, sink, nullptr) &&
+            gst_element_link_many(tee, encoded_queue, encoded_sink, nullptr);
+    } else {
+        chain_linked = gst_element_link_many(depay, parser, decoder, converter, color,
+                                             filter, sink, nullptr);
+    }
+    if (!chain_linked) {
         set_error("could not link RTSP " + codec + " decode chain");
         return;
     }
@@ -347,10 +429,14 @@ void RtspSource::connect_rtp_pad(GstPad* pad) {
         return;
     }
     sink_ = sink;
+    encoded_sink_ = encoded_sink;
     {
         std::lock_guard<std::mutex> lock(diagnostics_mutex_);
         diagnostics_.codec = codec;
         diagnostics_.decoder = decoder_name;
+    }
+    if (codec != "H264") {
+        publish_media_status(false, "recording and WebRTC require H.264 input");
     }
     for (auto* element : elements) gst_element_sync_state_with_parent(element);
 }
@@ -428,6 +514,60 @@ bool RtspSource::capture_sample(GstSample* sample, RtspRecovery& recovery) {
     return captured;
 }
 
+bool RtspSource::capture_access_unit(GstSample* sample) {
+    std::string incompatibility;
+    const bool compatible = browser_compatible_h264_caps(
+        gst_sample_get_caps(sample), incompatibility);
+    publish_media_status(compatible, incompatibility);
+    if (!compatible) return false;
+    GstBuffer* buffer = gst_sample_get_buffer(sample);
+    GstMapInfo mapped{};
+    if (!buffer || !gst_buffer_map(buffer, &mapped, GST_MAP_READ)) return false;
+    EncodedAccessUnit unit;
+    unit.sequence = ++access_unit_sequence_;
+    unit.has_pts = GST_CLOCK_TIME_IS_VALID(GST_BUFFER_PTS(buffer));
+    unit.pts_ns = unit.has_pts ? GST_BUFFER_PTS(buffer) : 0;
+    unit.has_dts = GST_CLOCK_TIME_IS_VALID(GST_BUFFER_DTS(buffer));
+    unit.dts_ns = unit.has_dts ? GST_BUFFER_DTS(buffer) : 0;
+    unit.keyframe = !GST_BUFFER_FLAG_IS_SET(buffer, GST_BUFFER_FLAG_DELTA_UNIT);
+    unit.discontinuity = first_access_unit_ ||
+                         GST_BUFFER_FLAG_IS_SET(buffer, GST_BUFFER_FLAG_DISCONT);
+    unit.bytes.assign(mapped.data, mapped.data + mapped.size);
+    gst_buffer_unmap(buffer, &mapped);
+    first_access_unit_ = false;
+    if (unit.bytes.empty()) return false;
+    try {
+        if (access_unit_sink_) access_unit_sink_(unit);
+        if (encoded_access_units_) encoded_access_units_->push(std::move(unit));
+    } catch (const std::exception& failure) {
+        logger_.log(LogLevel::Error, "video", failure.what());
+        return false;
+    } catch (...) {
+        logger_.log(LogLevel::Error, "video", "could not publish source H.264 access unit");
+        return false;
+    }
+    return true;
+}
+
+void RtspSource::publish_media_status(bool available, const std::string& reason) {
+    {
+        std::lock_guard<std::mutex> lock(media_status_mutex_);
+        if (media_status_known_ && media_available_ == available &&
+            media_unavailable_reason_ == reason) return;
+        media_status_known_ = true;
+        media_available_ = available;
+        media_unavailable_reason_ = reason;
+    }
+    if (!media_status_sink_) return;
+    try {
+        media_status_sink_(available, reason);
+    } catch (const std::exception& failure) {
+        logger_.log(LogLevel::Error, "video", failure.what());
+    } catch (...) {
+        logger_.log(LogLevel::Error, "video", "media status sink failed");
+    }
+}
+
 void RtspSource::capture_loop() noexcept {
     RtspRecovery recovery(std::chrono::milliseconds(config_.stall_timeout_ms),
                           std::chrono::milliseconds(config_.reconnect_delay_ms),
@@ -472,11 +612,26 @@ void RtspSource::capture_loop() noexcept {
                 break;
             }
             GstElement* sink = sink_.load();
+            GstElement* encoded_sink = encoded_sink_.load();
+            if (encoded_sink) {
+                while (GstSample* sample = gst_app_sink_try_pull_sample(
+                           GST_APP_SINK(encoded_sink), 0)) {
+                    capture_access_unit(sample);
+                    gst_sample_unref(sample);
+                }
+            }
             if (sink) {
                 GstSample* sample = gst_app_sink_try_pull_sample(GST_APP_SINK(sink),
-                                                                  100 * GST_MSECOND);
+                                                                  50 * GST_MSECOND);
                 if (sample) {
                     received_frame = capture_sample(sample, recovery) || received_frame;
+                    gst_sample_unref(sample);
+                }
+            }
+            if (encoded_sink) {
+                while (GstSample* sample = gst_app_sink_try_pull_sample(
+                           GST_APP_SINK(encoded_sink), 0)) {
+                    capture_access_unit(sample);
                     gst_sample_unref(sample);
                 }
             }
@@ -501,6 +656,7 @@ void RtspSource::capture_loop() noexcept {
         close_pipeline();
         if (!running_) break;
         frames_.discard_all();
+        if (encoded_access_units_) encoded_access_units_->discard_all();
         set_error(error);
         recovery.fail(std::chrono::steady_clock::now());
         publish_recovery(recovery);

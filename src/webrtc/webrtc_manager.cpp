@@ -418,6 +418,10 @@ void WebRtcSession::media_loop() noexcept {
     while (media_running_) {
         auto unit = media_queue_.pop_for(std::chrono::milliseconds(100));
         if (!unit) continue;
+        if (unit->discontinuity) {
+            waiting_for_keyframe = true;
+            timestamp_initialized = false;
+        }
         const auto queue_drops = media_queue_.stats().dropped;
         if (queue_drops != observed_queue_drops) {
             observed_queue_drops = queue_drops;
@@ -436,7 +440,10 @@ void WebRtcSession::media_loop() noexcept {
         if (waiting_for_keyframe) {
             waiting_for_keyframe = false;
         }
-        if (!timestamp_initialized) {
+        if (unit->has_pts) {
+            timestamp_initialized = true;
+            rtp_timestamp = h264_rtp_timestamp(unit->pts_ns);
+        } else if (!timestamp_initialized) {
             timestamp_initialized = true;
             rtp_timestamp = rtp_config_->startTimestamp;
         } else {
@@ -590,6 +597,12 @@ CreateSessionResult WebRtcManager::create_session(std::string_view offer_sdp) {
         if (!enabled_ || stopping_) {
             return {CreateSessionError::Disabled, {}, {}, "WebRTC is disabled"};
         }
+        if (!media_available_) {
+            return {CreateSessionError::Disabled, {}, {},
+                    media_unavailable_reason_.empty()
+                        ? "browser-compatible source H.264 is unavailable"
+                        : media_unavailable_reason_};
+        }
         if (sessions_.size() >= max_peers_) {
             return {CreateSessionError::Capacity, {}, {}, "maximum peer count reached"};
         }
@@ -624,7 +637,8 @@ CreateSessionResult WebRtcManager::create_session(std::string_view offer_sdp) {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         const auto found = sessions_.find(session->id());
-        if (stopping_ || found == sessions_.end() || found->second != session) {
+        if (stopping_ || !media_available_ || found == sessions_.end() ||
+            found->second != session) {
             session->close();
             return {CreateSessionError::Disabled, {}, {}, "WebRTC is shutting down"};
         }
@@ -694,6 +708,9 @@ WebRtcDiagnostics WebRtcManager::diagnostics() const {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         result.enabled = enabled_ && !stopping_;
+        result.media_available = media_available_;
+        result.media_unavailable_reason = media_unavailable_reason_;
+        result.keyframe_cached = static_cast<bool>(latest_keyframe_);
         result.max_peers = max_peers_;
         result.sessions_created = sessions_created_;
         result.sessions_closed = sessions_closed_;
@@ -713,7 +730,8 @@ void WebRtcManager::publish_access_unit(const EncodedAccessUnit& unit) noexcept 
     std::vector<std::shared_ptr<WebRtcSession>> sessions;
     try {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (!enabled_ || stopping_) return;
+        if (!enabled_ || stopping_ || !media_available_) return;
+        if (unit.discontinuity) latest_keyframe_.reset();
         if (unit.keyframe) latest_keyframe_ = std::make_unique<EncodedAccessUnit>(unit);
         sessions.reserve(sessions_.size());
         for (const auto& item : sessions_) sessions.push_back(item.second);
@@ -721,6 +739,28 @@ void WebRtcManager::publish_access_unit(const EncodedAccessUnit& unit) noexcept 
         return;
     }
     for (const auto& session : sessions) session->enqueue(unit);
+}
+
+void WebRtcManager::set_media_available(bool available, std::string reason) {
+    std::vector<std::shared_ptr<WebRtcSession>> sessions;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (media_available_ == available &&
+            media_unavailable_reason_ == (available ? std::string{} : reason)) return;
+        media_available_ = available;
+        media_unavailable_reason_ = available ? std::string{} : std::move(reason);
+        if (available) return;
+        latest_keyframe_.reset();
+        for (auto& item : sessions_) sessions.push_back(std::move(item.second));
+        if (!sessions.empty()) {
+            sessions_closed_ += sessions.size();
+            last_close_reason_ = "source_media_unavailable";
+        }
+        sessions_.clear();
+    }
+    for (const auto& session : sessions) {
+        remember_closed(session, "source_media_unavailable");
+    }
 }
 
 void WebRtcManager::shutdown() noexcept {
