@@ -1,4 +1,5 @@
 #include "websocket_session.hpp"
+#include "skai/web/router.hpp"
 
 #include <boost/asio/post.hpp>
 
@@ -25,6 +26,7 @@ WebSocketSession::WebSocketSession(beast::tcp_stream stream,
                                    std::shared_ptr<RuntimeStatus> status,
                                    std::shared_ptr<ApiState> api,
                                    std::shared_ptr<EventChannel> events,
+                                   std::shared_ptr<WebRtcManager> webrtc,
                                    std::function<void(
                                        std::shared_ptr<WebSocketSession>)>
                                        register_session,
@@ -32,7 +34,7 @@ WebSocketSession::WebSocketSession(beast::tcp_stream stream,
                                        unregister_session)
     : stream_(std::move(stream)), status_timer_(stream_.get_executor()),
       started_(started), status_(std::move(status)), api_(std::move(api)),
-      events_(std::move(events)),
+      events_(std::move(events)), webrtc_(std::move(webrtc)),
       register_session_(std::move(register_session)),
       unregister_session_(std::move(unregister_session)) {}
 
@@ -188,6 +190,12 @@ std::string WebSocketSession::status_data() const {
                << ",\"access_units_dropped\":" << encoder.access_units_dropped
                << ",\"last_access_unit_age_ms\":"
                << encoder.last_access_unit_age_ms << '}';
+    }
+    output << ",\"webrtc\":";
+    if (!webrtc_) {
+        output << "null";
+    } else {
+        output << webrtc_diagnostics_json(webrtc_->diagnostics());
     }
     output << '}';
     return output.str();

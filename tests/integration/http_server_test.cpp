@@ -283,15 +283,19 @@ TEST(HttpServer, WebSocketBroadcastsEventsToMultipleClients) {
     gps_state->update(skai::GpsSource(skai::GpsConfig{}).latest());
     auto api = std::make_shared<skai::ApiState>(nullptr, gps_state);
     auto events = std::make_shared<skai::EventChannel>();
+    auto webrtc = std::make_shared<skai::WebRtcManager>(logger);
     logger.set_error_sink([events](const std::string& module,
                                    const std::string& message) {
         events->publish(skai::EventType::SystemError,
                         skai::make_system_error_data(module, message));
     });
-    skai::web::HttpServer server(logger, status, api, events);
+    skai::web::HttpServer server(logger, status, api, events, nullptr, nullptr,
+                                 webrtc);
     skai::Config config;
     config.web.bind = "127.0.0.1";
     config.web.port = 0;
+    config.webrtc.enabled = false;
+    config.webrtc.host_interfaces.clear();
     ASSERT_TRUE(server.initialize(config));
     ASSERT_TRUE(server.start());
 
@@ -303,8 +307,13 @@ TEST(HttpServer, WebSocketBroadcastsEventsToMultipleClients) {
     connect_websocket(second, server.port());
 
     for (auto* client : {&first, &second}) {
-        EXPECT_NE(read_websocket(*client).find("\"type\":\"status\""),
+        const auto status_event = read_websocket(*client);
+        EXPECT_NE(status_event.find("\"type\":\"status\""), std::string::npos);
+        EXPECT_NE(status_event.find("\"webrtc\":{\"enabled\":false"),
                   std::string::npos);
+        EXPECT_NE(status_event.find("\"lan_only\":true"), std::string::npos);
+        EXPECT_NE(status_event.find("\"signaling_errors\":0"), std::string::npos);
+        EXPECT_NE(status_event.find("\"recently_closed\":[]"), std::string::npos);
         const auto gps = read_websocket(*client);
         EXPECT_NE(gps.find("\"type\":\"gps\""), std::string::npos);
         EXPECT_NE(gps.find("\"source\":\"fixed\""), std::string::npos);

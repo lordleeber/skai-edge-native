@@ -29,6 +29,8 @@ struct PublicConfigDto {
     std::string gps_source;
     bool webrtc_enabled = false;
     int webrtc_max_peers = 0;
+    int webrtc_connection_timeout_ms = 0;
+    int webrtc_media_queue_capacity = 0;
 };
 
 struct DetectionDto {
@@ -84,6 +86,8 @@ public:
         dto.gps_source = config.gps.source;
         dto.webrtc_enabled = config.webrtc.enabled;
         dto.webrtc_max_peers = config.webrtc.max_peers;
+        dto.webrtc_connection_timeout_ms = config.webrtc.connection_timeout_ms;
+        dto.webrtc_media_queue_capacity = config.webrtc.media_queue_capacity;
         std::lock_guard<std::mutex> lock(mutex_);
         config_ = std::move(dto);
         configured_ = true;

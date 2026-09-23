@@ -83,7 +83,7 @@ private:
             parser_.get().target() == "/ws") {
             auto request = parser_.release();
             auto session = std::make_shared<WebSocketSession>(
-                std::move(stream_), started_, status_, api_, events_, register_ws_,
+                std::move(stream_), started_, status_, api_, events_, webrtc_, register_ws_,
                 unregister_ws_);
             session->run(std::move(request));
             return;

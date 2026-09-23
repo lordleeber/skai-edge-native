@@ -3,6 +3,7 @@
 #include "skai/api_state.hpp"
 #include "skai/events.hpp"
 #include "skai/status.hpp"
+#include "skai/webrtc/webrtc_manager.hpp"
 
 #include <boost/asio/steady_timer.hpp>
 #include <boost/beast/core.hpp>
@@ -24,6 +25,7 @@ public:
                      std::shared_ptr<RuntimeStatus> status,
                      std::shared_ptr<ApiState> api,
                      std::shared_ptr<EventChannel> events,
+                     std::shared_ptr<WebRtcManager> webrtc,
                      std::function<void(std::shared_ptr<WebSocketSession>)>
                          register_session,
                      std::function<void(WebSocketSession*)> unregister_session);
@@ -52,6 +54,7 @@ private:
     std::shared_ptr<RuntimeStatus> status_;
     std::shared_ptr<ApiState> api_;
     std::shared_ptr<EventChannel> events_;
+    std::shared_ptr<WebRtcManager> webrtc_;
     std::function<void(std::shared_ptr<WebSocketSession>)> register_session_;
     std::function<void(WebSocketSession*)> unregister_session_;
     EventQueue outgoing_{32};

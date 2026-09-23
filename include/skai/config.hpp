@@ -77,6 +77,8 @@ struct GpsConfig {
 struct WebrtcConfig {
     bool enabled = true;
     int max_peers = 2;
+    int connection_timeout_ms = 15000;
+    int media_queue_capacity = 8;
     std::vector<std::string> host_interfaces = {"eth0", "wlan0"};
     int ice_log_verbosity = 1;
 };

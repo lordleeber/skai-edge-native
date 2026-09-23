@@ -190,6 +190,12 @@ void validate(const Config& config) {
     check_range(std::isfinite(config.gps.altitude_m), "gps.altitude_m", "must be finite");
     check_range(config.webrtc.max_peers >= 1 && config.webrtc.max_peers <= 100,
                 "webrtc.max_peers", "must be between 1 and 100");
+    check_range(config.webrtc.connection_timeout_ms >= 1000 &&
+                    config.webrtc.connection_timeout_ms <= 300000,
+                "webrtc.connection_timeout_ms", "must be between 1000 and 300000");
+    check_range(config.webrtc.media_queue_capacity >= 1 &&
+                    config.webrtc.media_queue_capacity <= 120,
+                "webrtc.media_queue_capacity", "must be between 1 and 120");
     check_range(config.webrtc.ice_log_verbosity >= 0 && config.webrtc.ice_log_verbosity <= 5,
                 "webrtc.ice_log_verbosity", "must be between 0 and 5");
     check_range(!config.webrtc.enabled || !config.webrtc.host_interfaces.empty(),
@@ -290,10 +296,15 @@ Config parse(const YAML::Node& root) {
         read_scalar(section, "altitude_m", "gps", config.gps.altitude_m);
     }
     if (const auto section = root["webrtc"]) {
-        check_keys(section, "webrtc", {"enabled", "max_peers", "host_interfaces",
+        check_keys(section, "webrtc", {"enabled", "max_peers", "connection_timeout_ms",
+                                       "media_queue_capacity", "host_interfaces",
                                        "ice_log_verbosity"});
         read_scalar(section, "enabled", "webrtc", config.webrtc.enabled);
         read_scalar(section, "max_peers", "webrtc", config.webrtc.max_peers);
+        read_scalar(section, "connection_timeout_ms", "webrtc",
+                    config.webrtc.connection_timeout_ms);
+        read_scalar(section, "media_queue_capacity", "webrtc",
+                    config.webrtc.media_queue_capacity);
         read_scalar(section, "ice_log_verbosity", "webrtc", config.webrtc.ice_log_verbosity);
         if (const auto interfaces = section["host_interfaces"]) {
             if (!interfaces.IsSequence()) {

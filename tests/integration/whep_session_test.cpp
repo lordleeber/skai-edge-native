@@ -31,6 +31,30 @@ struct BrowserOffer {
     std::shared_ptr<rtc::Track> track;
     std::string sdp;
 };
+class NackFirstPacket final : public rtc::MediaHandler {
+public:
+    void incoming(rtc::message_vector& messages,
+                  const rtc::message_callback& send) override {
+        if (sent_) return;
+        for (const auto& message : messages) {
+            if (message->type == rtc::Message::Control ||
+                message->size() < sizeof(rtc::RtpHeader)) continue;
+            auto* rtp = reinterpret_cast<rtc::RtpHeader*>(message->data());
+            auto nack_message = rtc::make_message(rtc::RtcpNack::Size(1),
+                                                   rtc::Message::Control);
+            auto* nack = reinterpret_cast<rtc::RtcpNack*>(nack_message->data());
+            nack->preparePacket(rtp->ssrc(), 1);
+            nack->parts[0].setPid(rtp->seqNumber());
+            nack->parts[0].setBlp(0);
+            sent_ = true;
+            send(std::move(nack_message));
+            break;
+        }
+    }
+
+private:
+    bool sent_ = false;
+};
 class SlowWebRtcManager final : public skai::WebRtcManager {
 public:
     using WebRtcManager::WebRtcManager;
@@ -148,6 +172,11 @@ TEST(WebRtcManager, CreatesUniqueAnswersEnforcesCapacityAndClosesSessions) {
     const auto malformed = manager.create_session("not an SDP offer");
     EXPECT_EQ(malformed.error, skai::CreateSessionError::InvalidOffer);
     EXPECT_EQ(manager.session_count(), 0U);
+    const auto failed_signaling = manager.diagnostics();
+    ASSERT_EQ(failed_signaling.recently_closed.size(), 1U);
+    EXPECT_EQ(failed_signaling.recently_closed.back().failure_stage, "signaling");
+    EXPECT_EQ(failed_signaling.recently_closed.back().close_reason,
+              "signaling_failure");
 
     const auto excessive_level = manager.create_session(make_browser_offer(
         rtc::Description::Direction::RecvOnly,
@@ -196,8 +225,10 @@ TEST(WebRtcManager, DeliversAnnexBAccessUnitsOverTheNegotiatedH264Track) {
     manager.configure(config.webrtc);
 
     auto browser = make_browser_offer();
-    browser.track->setMediaHandler(std::make_shared<rtc::H264RtpDepacketizer>(
-        rtc::NalUnit::Separator::StartSequence));
+    auto depacketizer = std::make_shared<rtc::H264RtpDepacketizer>(
+        rtc::NalUnit::Separator::StartSequence);
+    depacketizer->addToChain(std::make_shared<NackFirstPacket>());
+    browser.track->setMediaHandler(depacketizer);
     std::mutex mutex;
     std::condition_variable changed;
     std::size_t received_bytes = 0;
@@ -226,8 +257,89 @@ TEST(WebRtcManager, DeliversAnnexBAccessUnitsOverTheNegotiatedH264Track) {
     }
     EXPECT_GT(received_bytes, 0U) << logs.str();
     lock.unlock();
+    auto diagnostics = manager.diagnostics();
+    const auto nack_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (!diagnostics.peers.empty() &&
+           diagnostics.peers[0].packets_retransmitted == 0 &&
+           std::chrono::steady_clock::now() < nack_deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        diagnostics = manager.diagnostics();
+    }
+    ASSERT_EQ(diagnostics.peers.size(), 1U);
+    EXPECT_EQ(diagnostics.peers[0].peer_state, "connected");
+    EXPECT_TRUE(diagnostics.peers[0].ice_state == "connected" ||
+                diagnostics.peers[0].ice_state == "completed");
+    EXPECT_EQ(diagnostics.peers[0].local_interface, "lo");
+    EXPECT_EQ(diagnostics.peers[0].selected_interface, "lo");
+    EXPECT_FALSE(diagnostics.peers[0].local_candidate.empty());
+    EXPECT_GT(diagnostics.peers[0].bytes_sent, 0U);
+    EXPECT_GT(diagnostics.peers[0].packets_sent, 0U);
+    EXPECT_GT(diagnostics.peers[0].packets_retransmitted, 0U);
     EXPECT_TRUE(manager.close_session(created.session_id));
     EXPECT_EQ(manager.session_count(), 0U);
+    const auto closed = manager.diagnostics();
+    EXPECT_EQ(closed.sessions_created, 1U);
+    EXPECT_EQ(closed.sessions_closed, 1U);
+    EXPECT_EQ(closed.last_close_reason, "client_delete");
+    ASSERT_EQ(closed.recently_closed.size(), 1U);
+    EXPECT_EQ(closed.recently_closed[0].session_id, created.session_id);
+    EXPECT_EQ(closed.recently_closed[0].close_reason, "client_delete");
+}
+
+TEST(WebRtcManager, SupportsTwoConnectedViewersAndRepeatedSessionCleanup) {
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    auto config = loopback_config(logger);
+    config.webrtc.max_peers = 2;
+    skai::WebRtcManager manager(logger);
+    manager.configure(config.webrtc);
+    auto first_browser = make_browser_offer();
+    auto second_browser = make_browser_offer();
+    std::atomic<int> first_frames{0}, second_frames{0};
+    for (auto* browser : {&first_browser, &second_browser}) {
+        browser->track->setMediaHandler(std::make_shared<rtc::H264RtpDepacketizer>(
+            rtc::NalUnit::Separator::StartSequence));
+    }
+    first_browser.track->onFrame([&](rtc::binary, rtc::FrameInfo) { ++first_frames; });
+    second_browser.track->onFrame([&](rtc::binary, rtc::FrameInfo) { ++second_frames; });
+
+    const auto first = manager.create_session(first_browser.sdp);
+    const auto second = manager.create_session(second_browser.sdp);
+    ASSERT_TRUE(first) << first.message;
+    ASSERT_TRUE(second) << second.message;
+    first_browser.peer->setRemoteDescription(
+        rtc::Description(first.answer_sdp, rtc::Description::Type::Answer));
+    second_browser.peer->setRemoteDescription(
+        rtc::Description(second.answer_sdp, rtc::Description::Type::Answer));
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    std::uint64_t pts = 0;
+    while ((first_frames.load() == 0 || second_frames.load() == 0) &&
+           std::chrono::steady_clock::now() < deadline) {
+        manager.publish_access_unit(h264_keyframe(pts));
+        pts += 33'333'333;
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    EXPECT_GT(first_frames.load(), 0);
+    EXPECT_GT(second_frames.load(), 0);
+    const auto active = manager.diagnostics();
+    ASSERT_EQ(active.peers.size(), 2U);
+    EXPECT_EQ(active.peers[0].peer_state, "connected");
+    EXPECT_EQ(active.peers[1].peer_state, "connected");
+    EXPECT_EQ(manager.create_session(make_browser_offer().sdp).error,
+              skai::CreateSessionError::Capacity);
+    EXPECT_TRUE(manager.close_session(first.session_id));
+    EXPECT_TRUE(manager.close_session(second.session_id));
+
+    for (int cycle = 0; cycle < 20; ++cycle) {
+        const auto created = manager.create_session(make_browser_offer().sdp);
+        ASSERT_TRUE(created) << "cycle " << cycle << ": " << created.message;
+        ASSERT_TRUE(manager.close_session(created.session_id));
+        EXPECT_EQ(manager.session_count(), 0U);
+    }
+    const auto diagnostics = manager.diagnostics();
+    EXPECT_EQ(diagnostics.sessions_created, 22U);
+    EXPECT_EQ(diagnostics.sessions_closed, 22U);
+    EXPECT_EQ(diagnostics.recently_closed.size(), 16U);
 }
 
 TEST(WebRtcManager, KeepsRtpTimeMovingWhenEncoderPtsRestarts) {
@@ -354,6 +466,24 @@ TEST(WebRtcManager, ReapsStaleSessions) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     EXPECT_EQ(manager.session_count(), 0U);
+    const auto diagnostics = manager.diagnostics();
+    EXPECT_EQ(diagnostics.sessions_closed, 1U);
+    EXPECT_EQ(diagnostics.last_close_reason, "connection_timeout");
+}
+
+TEST(WebRtcManager, StartsConnectionTimeoutOnlyAfterSignalingCompletes) {
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    auto config = loopback_config(logger);
+    skai::WebRtcManager manager(logger, std::chrono::milliseconds(1));
+    manager.configure(config.webrtc);
+    auto offer = make_browser_offer().sdp;
+    for (int index = 0; index < 3000; ++index) {
+        offer += "a=x-skai-padding:" + std::to_string(index) + "\r\n";
+    }
+
+    const auto created = manager.create_session(offer);
+    ASSERT_TRUE(created) << created.message << '\n' << logs.str();
 }
 
 TEST(WhepHttpApi, CreatesAndDeletesSessionWithoutWebSocket) {

@@ -24,6 +24,8 @@ gps:
   latitude: 25.033964
   longitude: 121.564468
 webrtc:
+  connection_timeout_ms: 12000
+  media_queue_capacity: 12
   host_interfaces: [eth0, wlan0]
 logging:
   level: debug
@@ -41,6 +43,8 @@ TEST(Config, ParsesValidSettings) {
     EXPECT_EQ(result.config.storage.database_path, "/tmp/skai-edge-test.db");
     EXPECT_EQ(result.config.storage.alert_directory, "/tmp/skai-edge-alerts");
     EXPECT_EQ(result.config.webrtc.host_interfaces.size(), 2U);
+    EXPECT_EQ(result.config.webrtc.connection_timeout_ms, 12000);
+    EXPECT_EQ(result.config.webrtc.media_queue_capacity, 12);
     EXPECT_EQ(result.config.logging.level, skai::LogLevel::Debug);
 }
 
@@ -159,6 +163,19 @@ TEST(Config, AllowsEmptyDisabledWebrtcInterfaceWhitelist) {
         "video: {rtsp_url: 'rtsp://camera/stream'}\n"
         "webrtc: {enabled: false, host_interfaces: []}\n");
     EXPECT_TRUE(result.ok) << result.error;
+}
+
+TEST(Config, RejectsInvalidWebrtcHardeningLimits) {
+    for (const auto* settings : {"connection_timeout_ms: 999",
+                                 "connection_timeout_ms: 300001",
+                                 "media_queue_capacity: 0",
+                                 "media_queue_capacity: 121"}) {
+        const auto result = skai::parse_config(
+            "video: {rtsp_url: 'rtsp://camera/stream'}\nwebrtc: {" +
+            std::string(settings) + "}\n");
+        EXPECT_FALSE(result.ok) << settings;
+        EXPECT_NE(result.error.find("webrtc."), std::string::npos) << settings;
+    }
 }
 
 TEST(Config, RejectsInvalidGpsCoordinate) {
