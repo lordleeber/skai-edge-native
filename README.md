@@ -97,10 +97,7 @@ cmake --build build/production --target skai-edge
 
 Run `./build/skai-edge --help` for usage. With no arguments, the service tries
 the built-in RTSP URL `rtsp://127.0.0.1/stream`; provide `--config PATH` for a
-real stream. Runtime files are kept under `output/` by default: SQLite state in
-`output/skai-edge.db`, alert snapshots in `output/alerts/`, and MP4 segments in
-`output/recordings/`. The directory is ignored by Git. Copy
-`config/config.example.yaml` and set `video.rtsp_url` for
+real stream. Copy `config/config.example.yaml` and set `video.rtsp_url` for
 deployment. Startup validates the URL, then retries in the background if the
 endpoint is unavailable. Set
 `video.transport` to `tcp` or `udp` and `video.latency_ms` for the RTSP

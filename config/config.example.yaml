@@ -23,14 +23,14 @@ web:
 
 recording:
   enabled: true
-  directory: output/recordings
+  directory: recordings
   segment_seconds: 60
   max_storage_mb: 1024
   min_free_space_mb: 100
 
 storage:
-  database_path: output/skai-edge.db
-  alert_directory: output/alerts
+  database_path: /var/lib/skai-edge/skai-edge.db
+  alert_directory: /var/lib/skai-edge/alerts
 
 alerts:
   - class: person

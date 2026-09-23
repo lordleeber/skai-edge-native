@@ -223,6 +223,22 @@ TEST(HttpRouter, ControlsConfiguredRecording) {
     EXPECT_NE(stopped.body().find("\"state\":\"stopped\""), std::string::npos);
 }
 
+TEST(HttpRouter, TreatsUnconfiguredRecordingControllerAsUnavailable) {
+    skai::ApiState api;
+    skai::RecordingController recording;
+    const skai::RuntimeStatusSnapshot status;
+
+    const auto listed = skai::web::route_request(
+        {http::verb::get, "/api/v1/recordings", 11}, status, api, nullptr, &recording);
+    EXPECT_EQ(listed.result(), http::status::service_unavailable);
+    EXPECT_NE(listed.body().find("\"available\":false"), std::string::npos);
+
+    const auto started = skai::web::route_request(
+        {http::verb::post, "/api/v1/recording/start", 11}, status, api, nullptr,
+        &recording);
+    EXPECT_EQ(started.result(), http::status::not_implemented);
+}
+
 TEST(HttpRouter, DisabledGpsHasNoApiFix) {
     skai::ApiState api;
     skai::Config config;

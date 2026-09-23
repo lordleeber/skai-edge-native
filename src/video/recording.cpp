@@ -316,6 +316,7 @@ void RecordingModule::run() noexcept {
     while (running_) {
         if (!control_->requested()) {
             if (pipeline_) close_pipeline(true);
+            waiting_for_keyframe_ = true;
             control_->set_stopped();
             publish_state();
             auto ignored = input_.pop_for(std::chrono::milliseconds(25));
