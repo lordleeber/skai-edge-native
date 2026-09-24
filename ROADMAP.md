@@ -1910,9 +1910,39 @@ Split and progress:
   selection in `SeiResultSelector`, SEI insertion into the WHIP copy of each
   sent unit, and counters in the WHIP session-close log (SEI units, results
   attached and dropped, boxes dropped, `dt` p50/p95/max).
-- `step-28-c`: loopback WHIP end-to-end test (SEI recovery, RTP continuity
-  across a restart, byte-for-byte check against the unmodified units), the
-  throughput check, and the `dt` re-measurement on the target camera.
+- `step-28-c` (done): loopback WHIP end-to-end test
+  (`tests/integration/whip_sei_test.cpp`) and the on-camera run with
+  `scripts/measure_whip_sei.sh`, results below.
+
+Measured after Step 28 on 2026-09-24 (same device, engine, and default build
+as the baseline; WHIP to `https://skai-cam.duckdns.org/sfu/cam1/whip`):
+
+| run | detector fps (mean) | inference ms (median) |
+|---|---|---|
+| WHIP off, 60 s | 19.12 | 33.4 |
+| WHIP on with SEI, 120 s | 19.47 | 29.6 |
+
+- The test stream reports 30/1 in its caps but delivered about 19.2 access
+  units per second on this day (2304 in 120 s), against about 25 fps when the
+  baseline was taken, so one frame is about 4700 ticks instead of 3600.
+- WHIP session summary: 2304 units sent, 2294 SEI units, 2300 results
+  attached, 0 results dropped, 0 boxes dropped.
+- `dt` p50 4698, p95 4701 ticks (one frame at this rate), max 32752
+  (about 7 frames, at session start).
+- The 3 MP4 segments recorded during the WHIP run contain no SEI UUID bytes.
+- Tolerance for later re-runs: detector fps within 5 % of the WHIP-off run on
+  the same stream, `dt` p95 at most 2 frames, 0 results dropped in steady state.
+
+Pitfalls found in `step-28-c`:
+
+- expected: closing a Boost.Asio acceptor from another thread wakes a
+  blocked `accept()`. On Linux it does not, and the test hung at teardown; the
+  loopback server now makes a throwaway connection to wake it.
+- expected: the WHIP loopback test would need a TLS endpoint because config
+  loading requires `https://`. `WhipPublisher::initialize` does not re-check
+  the scheme, so tests can pass an `http://127.0.0.1` URL directly.
+- the "about 25 fps" test stream is not a fixed reference; compare `dt` in
+  frames, not in ticks, and read the actual rate from the units sent.
 
 Decisions made in `step-28-a`:
 

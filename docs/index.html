@@ -50,7 +50,7 @@ b.hl-key { color: var(--accent); }
     開發順序照 repo 根目錄的 <code>ROADMAP.md</code>，一個 step 就是一個 PR。
   </p>
   <p>
-    這份教材跟著開發一章一章長出來。<b class="hl-key">目前只有一章</b>，從 Step 27 開始；更早的 step 還沒有對應的章節。
+    這份教材跟著開發一章一章長出來，<b class="hl-key">從 Step 27 開始</b>；更早的 step 還沒有對應的章節。
   </p>
 </header>
 
@@ -59,6 +59,11 @@ b.hl-key { color: var(--accent); }
     <span class="no">STEP 27</span>
     <h2>把影像推上雲端：兩種 WHIP 推流實作的比較</h2>
     <p>從零講 WebRTC 推流要做哪些事（SDP、ICE、NAT、DTLS/SRTP、WHIP），再逐層對照 skai-edge-cpp 的 GStreamer webrtcbin 與本 repo 的 libdatachannel 實作，附可自己跑的驗證指令。適合沒碰過 WebRTC 的讀者。</p>
+  </a>
+  <a class="card" href="step28-sei-overlay.html">
+    <span class="no">STEP 28</span>
+    <h2>讓雲端觀眾也看到框：把偵測結果藏進 H.264 SEI</h2>
+    <p>雲端 minisfu 只原樣轉發影像，所以把 YOLO 的偵測結果寫成 H.264 SEI 跟著畫面走：SEI 的位元組長相、插入位置、用相對的 dt 對齊畫面、1 KB 上限怎麼取捨，以及 RTSP 重連時 RTP 時間戳為什麼改了三次設計。附三個可自己跑的實驗與實機量測數字。</p>
   </a>
 </div>
 </div>
