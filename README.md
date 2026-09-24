@@ -108,6 +108,11 @@ both the POST and DELETE signaling requests; RTP media does not use it. The
 token is never written to logs or YAML. The configured H.264 source
 must support the same browser-compatible passthrough used by WHEP.
 
+Step 28 carries detections to cloud viewers as H.264 SEI on the WHIP stream
+(contract in `ROADMAP.md`). `step-28-a` adds the tested SEI helpers and keeps
+the WHIP RTP timestamp moving forward across RTSP reconnects; SEI insertion
+into the live WHIP stream arrives in `step-28-b`.
+
 For an executable-only build without GoogleTest or the RTSP-server fixture:
 
 ```sh

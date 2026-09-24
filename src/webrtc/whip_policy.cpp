@@ -1,5 +1,7 @@
 #include "webrtc/whip_policy.hpp"
 
+#include "skai/video/encoded_access_unit.hpp"
+
 #include <algorithm>
 
 namespace skai {
@@ -69,6 +71,29 @@ bool WhipPeerState::wait_for_gathering(const std::atomic<bool>& stopping,
         changed_.wait_until(lock, next_check);
     }
     return gathered_ && !failed_ && !stopping;
+}
+
+std::uint32_t WhipRtpClock::timestamp(std::uint64_t generation, bool has_pts,
+                                      std::uint64_t pts_ns) {
+    if (has_last_ && generation != generation_) last_pts_ticks_.reset();
+    generation_ = generation;
+    std::uint32_t next = has_last_ ? last_ + frame_ticks_ : start_;
+    if (has_pts) {
+        const auto ticks = h264_rtp_timestamp(pts_ns);
+        if (has_last_ && !last_pts_ticks_) {
+            // First PTS after a restart or after units without PTS.
+            offset_ = next - ticks;
+        } else if (last_pts_ticks_) {
+            const auto step = static_cast<std::int32_t>(ticks - *last_pts_ticks_);
+            // Learn the frame interval from consecutive units at 10 fps or faster.
+            if (step > 0 && step <= 9000) frame_ticks_ = static_cast<std::uint32_t>(step);
+        }
+        next = ticks + offset_;
+        last_pts_ticks_ = ticks;
+    }
+    last_ = next;
+    has_last_ = true;
+    return next;
 }
 
 } // namespace skai

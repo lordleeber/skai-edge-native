@@ -1,3 +1,4 @@
+#include "skai/video/encoded_access_unit.hpp"
 #include "webrtc/whip_policy.hpp"
 
 #include <gtest/gtest.h>
@@ -44,4 +45,94 @@ TEST(WhipResource, InvalidCreatedSessionIsFatalToAutomaticRetry) {
                  skai::UnrecoverableWhipError);
     EXPECT_EQ(skai::whip_resource_url(endpoint, "/sfu/cam1/whip/abc"),
               "https://skai-cam.duckdns.org/sfu/cam1/whip/abc");
+}
+
+namespace {
+
+constexpr std::uint64_t kFrame25 = 40'000'000;
+
+} // namespace
+
+TEST(WhipRtpClock, DerivesTimestampsFromPtsLikeLanWhep) {
+    skai::WhipRtpClock clock(12345);
+    EXPECT_EQ(clock.timestamp(0, true, 520'000'000), skai::h264_rtp_timestamp(520'000'000));
+    EXPECT_EQ(clock.timestamp(0, true, 520'000'000 + kFrame25),
+              skai::h264_rtp_timestamp(520'000'000) + 3600);
+}
+
+TEST(WhipRtpClock, ContinuesForwardAfterRtspReconnectRestartsPts) {
+    skai::WhipRtpClock clock(0);
+    clock.timestamp(0, true, 10'000'000'000ULL);
+    const auto last = clock.timestamp(0, true, 10'000'000'000ULL + kFrame25);
+        const auto resumed = clock.timestamp(1, true, 520'000'000);
+    EXPECT_EQ(resumed, last + 3600);
+    EXPECT_EQ(clock.timestamp(1, true, 520'000'000 + kFrame25), resumed + 3600);
+}
+
+TEST(WhipRtpClock, DiscontinuityStaysLatchedUntilAUnitIsSent) {
+    skai::WhipRtpClock clock(0);
+    clock.timestamp(0, true, 5'000'000'000ULL);
+    const auto last = clock.timestamp(0, true, 5'000'000'000ULL + kFrame25);
+        // Keyframe gating skips the flagged unit; the next keyframe is sent later.
+    const auto resumed = clock.timestamp(1, true, 520'000'000 + 3 * kFrame25);
+    EXPECT_EQ(resumed, last + 3600);
+}
+
+TEST(WhipRtpClock, ContinuesAcrossTheThirtyTwoBitWrap) {
+    skai::WhipRtpClock clock(0);
+    const std::uint64_t near_wrap = (0xffffffffULL - 1000ULL) * 1'000'000'000ULL / 90'000ULL;
+    const auto a = clock.timestamp(0, true, near_wrap);
+    const auto b = clock.timestamp(0, true, near_wrap + kFrame25);
+        const auto c = clock.timestamp(1, true, 0);
+    EXPECT_EQ(static_cast<std::uint32_t>(b - a), 3600U);
+    EXPECT_EQ(static_cast<std::uint32_t>(c - b), 3600U);
+}
+
+TEST(WhipRtpClock, UnitsWithoutPtsStepOneFrame) {
+    skai::WhipRtpClock clock(777);
+    EXPECT_EQ(clock.timestamp(0, false, 0), 777U);
+    EXPECT_EQ(clock.timestamp(0, false, 0), 3777U);
+}
+
+TEST(WhipRtpClock, NewRestartGenerationContinuesAfterShortSessionWithoutFlag) {
+    // The flagged unit may be discarded by queue overflow or a WHIP pause, and
+    // a short session leaves only a small backward PTS step; the generation
+    // stamped by the producer still identifies the restart.
+    skai::WhipRtpClock clock(0);
+    clock.timestamp(4, true, 520'000'000);
+    const auto last = clock.timestamp(4, true, 520'000'000 + kFrame25);
+    // The new pipeline's first sent keyframe lies a few frames ahead of the old PTS.
+    const auto resumed = clock.timestamp(5, true, 520'000'000 + 4 * kFrame25);
+    EXPECT_EQ(resumed, last + 3600);
+    const auto small_backward = clock.timestamp(6, true, 530'000'000);
+    EXPECT_EQ(small_backward, resumed + 3600);
+}
+
+TEST(WhipRtpClock, NonIncreasingPtsWithinOneGenerationDoesNotDriftAhead) {
+    skai::WhipRtpClock clock(0);
+    const std::uint64_t base = 2'000'000'000ULL;
+    const auto first = clock.timestamp(0, true, base);
+    clock.timestamp(0, true, base + kFrame25);
+    clock.timestamp(0, true, base + kFrame25);          // duplicate PTS
+    clock.timestamp(0, true, base + kFrame25 - 1'000'000); // small reorder
+    for (int i = 2; i <= 50; ++i) {
+        EXPECT_EQ(clock.timestamp(0, true, base + i * kFrame25),
+                  first + static_cast<std::uint32_t>(i) * 3600);
+    }
+}
+
+TEST(WhipRtpClock, RestartAfterOnlyOnePtsUnitStepsADefaultFrame) {
+    skai::WhipRtpClock clock(0);
+    const auto first = clock.timestamp(0, true, 9'000'000'000ULL);
+    EXPECT_EQ(clock.timestamp(1, true, 520'000'000), first + 3000);
+}
+
+TEST(WhipRtpClock, SwitchingFromMissingPtsToPtsKeepsMovingForward) {
+    skai::WhipRtpClock clock(4'000'000'000U);
+    const auto a = clock.timestamp(0, false, 0);
+    const auto b = clock.timestamp(0, false, 0);
+    const auto c = clock.timestamp(0, true, 520'000'000);
+    EXPECT_EQ(b, a + 3000);
+    EXPECT_EQ(c, b + 3000);
+    EXPECT_EQ(clock.timestamp(0, true, 520'000'000 + kFrame25), c + 3600);
 }

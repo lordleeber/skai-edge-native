@@ -3,6 +3,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <mutex>
 #include <optional>
 #include <stdexcept>
@@ -39,6 +40,27 @@ private:
     std::optional<Clock::time_point> disconnected_at_;
     bool gathered_ = false;
     bool failed_ = false;
+};
+
+// Maps access-unit PTS to WHIP RTP timestamps on one SSRC. PTS restarts near
+// zero after an RTSP reconnect, so a discontinuity continues from the last sent
+// timestamp plus one frame instead of jumping backward.
+class WhipRtpClock {
+public:
+    explicit WhipRtpClock(std::uint32_t start_timestamp) : start_(start_timestamp) {}
+
+    // `generation` counts RTSP restarts and is stamped when a unit is queued, so
+    // a restart is seen even when its flagged unit was discarded or skipped.
+    std::uint32_t timestamp(std::uint64_t generation, bool has_pts, std::uint64_t pts_ns);
+
+private:
+    std::uint32_t start_;
+    std::uint32_t offset_ = 0;
+    std::uint32_t last_ = 0;
+    std::uint32_t frame_ticks_ = 3000;
+    std::optional<std::uint32_t> last_pts_ticks_;
+    std::uint64_t generation_ = 0;
+    bool has_last_ = false;
 };
 
 } // namespace skai

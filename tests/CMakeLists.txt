@@ -50,6 +50,11 @@ target_link_libraries(skai-recording-tests PRIVATE skai-recording skai-h264-enco
     GTest::gtest_main)
 gtest_discover_tests(skai-recording-tests PROPERTIES TIMEOUT 20)
 
+add_executable(skai-detection-sei-tests unit/detection_sei_test.cpp)
+target_link_libraries(skai-detection-sei-tests PRIVATE skai-detection-sei skai-gstreamer
+    PkgConfig::GST_VIDEO_APP GTest::gtest_main)
+gtest_discover_tests(skai-detection-sei-tests PROPERTIES TIMEOUT 30)
+
 add_executable(skai-webrtc-tests integration/webrtc_dependency_test.cpp
     unit/whip_publisher_test.cpp)
 target_include_directories(skai-webrtc-tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
