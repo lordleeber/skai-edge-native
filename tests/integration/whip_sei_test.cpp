@@ -60,7 +60,7 @@ public:
     }
     bool wait_for_open_track(std::chrono::seconds timeout) {
         std::unique_lock<std::mutex> lock(mutex_);
-        return changed_.wait_for(lock, timeout, [this] { return track_ && track_->isOpen(); });
+        return changed_.wait_for(lock, timeout, [this] { return track_open_; });
     }
     std::vector<ReceivedFrame> frames() {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -121,7 +121,12 @@ private:
                 frame.rtp_timestamp = info.timestamp;
                 frames_.push_back(std::move(frame));
             });
-            track->onOpen([this] { changed_.notify_all(); });
+            // Set under the lock so the waiter cannot miss the wakeup.
+            track->onOpen([this] {
+                std::lock_guard<std::mutex> lock(mutex_);
+                track_open_ = true;
+                changed_.notify_all();
+            });
             std::lock_guard<std::mutex> lock(mutex_);
             track_ = std::move(track);
         });
@@ -145,6 +150,7 @@ private:
     std::mutex mutex_;
     std::condition_variable changed_;
     std::shared_ptr<rtc::Track> track_;
+    bool track_open_ = false;
     std::vector<ReceivedFrame> frames_;
 };
 
@@ -255,7 +261,11 @@ TEST(WhipSei, ViewerRecoversEveryResultAcrossAnRtspRestartAndMediaIsUnchanged) {
             const auto step = static_cast<std::int32_t>(frames[f].rtp_timestamp -
                                                          frames[f - 1].rtp_timestamp);
             EXPECT_GT(step, 0) << "RTP timestamp moved backward at frame " << f;
-            if (source_of_frame[f] == restart_index) EXPECT_EQ(step, 3600);
+            // Exactly one frame, when the unit sent just before the restart arrived.
+            if (source_of_frame[f] == restart_index &&
+                source_of_frame[f - 1] == restart_index - 1) {
+                EXPECT_EQ(step, 3600);
+            }
         }
         if (!sei) continue;
 

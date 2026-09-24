@@ -938,7 +938,7 @@ Total Test time (real) =   8.42 sec</pre>
 <ul>
   <li>照觀眾端的規則（時間戳 − dt）找回的那一幀，正是類別名稱標明的那一幀；沒有任何結果跨過重連。</li>
   <li>每幀最多一則 SEI、都在 slice 前面；把 SEI 拿掉之後，其餘 NAL 跟原始畫面逐 byte 相同；呼叫端手上的原始畫面（也就是 WHEP 與錄影拿到的那份）沒被改動。</li>
-  <li>RTP 時間戳從不倒退，跨過重連那一步剛好是 3600：測試串流是 25 fps，<code>WhipRtpClock</code> 在重連前已經從 PTS 學到一幀是 3600 tick（第 9 節）。</li>
+  <li>RTP 時間戳從不倒退；跨過重連那一步，只要重連前最後一幀有收到，就剛好是 3600：測試串流是 25 fps，<code>WhipRtpClock</code> 在重連前已經從 PTS 學到一幀是 3600 tick（第 9 節）。那一幀如果在傳輸中遺失，間隔會是兩幀，測試只檢查不倒退。</li>
 </ul>
 <p>三種故意改壞程式的方式（拿掉插入、把 SEI 插到 slice 後面、讓時間戳不理會世代）都會讓這條測試失敗。</p>
 <p>你看到的秒數會不一樣。有 GPU 與引擎檔時，該一樣的是 <code>out of 35</code> 與 <code>0 tests failed</code>。其他情況：</p>
