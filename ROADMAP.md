@@ -956,8 +956,8 @@ Requirements:
 - clear routing layer
 - no framework above Beast
 
-Scope split with Step 40: this step sets baseline limits so the server is never unbounded
-from day one. Step 40 audits every entry point added later (WebSocket, WHEP, static
+Scope split with Step 41: this step sets baseline limits so the server is never unbounded
+from day one. Step 41 audits every entry point added later (WebSocket, WHEP, static
 files), makes limits configurable, and adds the remaining hardening.
 
 Suggested structure:
@@ -1088,7 +1088,7 @@ Do NOT use:
 The frontend should be editable and runnable without npm.
 
 The static file handler is confined to the web root from its first version, not
-deferred to Step 40.
+deferred to Step 41.
 
 Tests written first:
 
@@ -1814,9 +1814,96 @@ libdatachannel.
 
 ---
 
+## Step 28 — Cloud detection overlay via H.264 SEI
+
+Step 27 publishes the source H.264 to the cloud through WHIP, but detections
+still reach only LAN browsers over the local WebSocket. Cloud `/watch` viewers
+therefore see video without boxes. The cloud minisfu (`skai-edge-streaming-infra`)
+forwards the H.264 payload unchanged, strips RTP header extensions, and has no
+data channels, so detection metadata travels inside the video as H.264 SEI.
+The contract below is SEI spec v1, agreed with the streaming-infra side on
+2026-09-24; `/watch` parsing and drawing are implemented in that repository.
+
+SEI contract v1:
+
+```text
+NAL type 6 (SEI), payloadType 5 (user_data_unregistered)
+UUID     197c65ee-a132-4f53-85a0-8af9ad153c4b
+payload  UUID + UTF-8 JSON, then rbsp_trailing_bits (0x80)
+         emulation prevention applied to the whole SEI RBSP
+position inside the access unit, before the first VCL NAL
+JSON     {"v":1,"r":[{"dt":<uint>,"b":[[x,y,w,h,"class_name",score], ...]}, ...]}
+```
+
+Field rules:
+
+- `x, y, w, h`: top-left corner plus size, divided by the source frame width
+  and height, rounded to 4 decimals
+- `class_name` is a string; `score` is 0–1; `track_id` is optional and omitted
+  because no tracker exists
+- `dt = round((pts_attach - pts_source) * 90000 / 1e9)`, an integer >= 0, where
+  `pts_attach` is the PTS of the access unit carrying the SEI
+- `r` lists results oldest to newest
+
+Emission rules:
+
+- insert an SEI only when at least one new inference result is pending
+- a result with zero detections is sent as `"b": []` so viewers clear boxes;
+  an access unit without SEI means "no new result"
+- attach pending results to the next access unit WHIP actually sends, after
+  its keyframe gating and disconnect pause, and compute `dt` from that unit
+- keep only results within 1 s of the attaching unit; drop results from before
+  an RTSP discontinuity and results whose PTS is newer than the attaching unit
+- keep each SEI under 1 KB by dropping the oldest results first
+- insert SEI only on the WHIP path; LAN WHEP and MP4 recording stay unchanged
+- the viewer clears boxes after 1 s without results, so stopping the detector
+  requires no extra message
+
+WHIP RTP timestamp continuity:
+
+- after an RTSP reconnect the new pipeline restarts PTS near zero, so the WHIP
+  RTP timestamp currently jumps backward on the same SSRC
+- on a discontinuity, continue the WHIP RTP timestamp from the last sent value
+  plus one frame interval instead of re-deriving it from PTS
+- do not change LAN WHEP timestamps; the local overlay relies on the absolute
+  PTS-to-RTP mapping, while SEI `dt` is relative and unaffected
+
+Implement:
+
+- a bounded, non-blocking detection feed from `YoloInferenceModule` to
+  `WhipPublisher`; inference must never wait on WHIP
+- pure, unit-tested helpers for SEI encoding (payload size bytes, emulation
+  prevention, trailing bits), access-unit insertion before the first VCL NAL,
+  box normalization, and `dt` computation
+- pending-result selection in `WhipPublisher`, covering the windowing,
+  discontinuity, ordering, and size rules above
+- counters for SEI units sent, results attached, and results dropped
+
+Baseline measured on 2026-09-24 (Orin Nano 25W, `yolo11s_fp16.engine`,
+H.264 1280x720 at 25 fps, default build): source unit sent to detection
+published p50 36 ms, p95 76 ms; attach `dt` p50 3610, p95 7218, max 14429
+ticks (1, 2, and 4 frames).
+
+Acceptance:
+
+- unit tests cover SEI byte layout, emulation prevention round-trip, insertion
+  with AUD/SPS/PPS present, empty results, windowing, discontinuity drops,
+  ordering, the size cap, and WHIP RTP timestamp continuity
+- an H.264 stream with inserted SEI still decodes with the GStreamer software
+  decoder used by the tests
+- a test viewer-side parser recovers the source PTS from `dt` for every result
+- LAN WHEP overlay and recordings are byte-for-byte unaffected by SEI
+- inference throughput at the measured baseline does not drop
+- `dt` p50/p95 are re-measured on the target camera and reported in the PR
+
+Out of scope: object tracking and `track_id`, `/watch` changes, a WebSocket or
+HTTP metadata side channel, RTP header extensions, and WebRTC data channels.
+
+---
+
 # Phase 12 — Observability and Diagnostics
 
-## Step 28 — Metrics
+## Step 29 — Metrics
 
 Track:
 
@@ -1850,7 +1937,7 @@ Prometheus format can be added later if useful.
 
 ---
 
-## Step 29 — Diagnostic page
+## Step 30 — Diagnostic page
 
 Add a simple `/diagnostics` page showing:
 
@@ -1871,7 +1958,7 @@ Still vanilla JavaScript.
 
 # Phase 13 — Reliability
 
-## Step 30 — Failure recovery
+## Step 31 — Failure recovery
 
 Test and handle:
 
@@ -1903,7 +1990,7 @@ Avoid terminating the whole process for a recoverable media-source or peer error
 
 ---
 
-## Step 31 — Watchdog and health model
+## Step 32 — Watchdog and health model
 
 Internal states:
 
@@ -1936,7 +2023,7 @@ A single failed browser peer should not mark the whole service failed.
 
 # Phase 14 — Test Hardening
 
-## Step 32 — Test coverage audit and sanitizer builds
+## Step 33 — Test coverage audit and sanitizer builds
 
 The test framework has existed since Step 1 and every step shipped its own tests (see 4.8).
 This step does not introduce testing; it audits and closes gaps.
@@ -1972,7 +2059,7 @@ boundary instead.
 
 ---
 
-## Step 33 — Integration tests
+## Step 34 — Integration tests
 
 Compose the per-module integration tests written since Step 5 into end-to-end
 tests of the main pipeline.
@@ -2017,7 +2104,7 @@ Use a fixed test video and deterministic expected detections where possible.
 
 ---
 
-## Step 34 — Jetson smoke tests
+## Step 35 — Jetson smoke tests
 
 Script:
 
@@ -2043,7 +2130,7 @@ Verify:
 
 # Phase 15 — Packaging and Deployment
 
-## Step 35 — systemd service
+## Step 36 — systemd service
 
 Create:
 
@@ -2071,7 +2158,7 @@ journalctl -u skai-edge
 
 ---
 
-## Step 36 — install/package flow
+## Step 37 — install/package flow
 
 Support:
 
@@ -2108,7 +2195,7 @@ Later add `.deb` packaging if deployment becomes frequent.
 
 Optimization comes only after the end-to-end system is measurable.
 
-## Step 37 — Profiling baseline
+## Step 38 — Profiling baseline
 
 Record:
 
@@ -2131,7 +2218,7 @@ Create a baseline on Orin Nano.
 
 ---
 
-## Step 38 — Zero-copy investigation
+## Step 39 — Zero-copy investigation
 
 Investigate reducing:
 
@@ -2160,7 +2247,7 @@ libdatachannel.
 
 ---
 
-## Step 39 — Encoder optimization
+## Step 40 — Encoder optimization
 
 If `x264enc` consumes too much CPU:
 
@@ -2179,7 +2266,7 @@ Do not optimize blindly.
 
 # Phase 17 — Security
 
-## Step 40 — Web server and WHEP hardening
+## Step 41 — Web server and WHEP hardening
 
 Starting from Step 12's baseline, audit every entry point and add:
 
@@ -2471,7 +2558,7 @@ No Agora, no MediaMTX requirement, no frontend framework, and no `webrtcbin`.
 
 ## Milestone E — Deployable product baseline
 
-Complete through Step 36.
+Complete through Step 37.
 
 Result:
 
@@ -2504,7 +2591,7 @@ Recommended implementation order:
 14. Beast WHEP
 15. H.264 WebRTC media
 16. WebRTC/ICE hardening
-17. optional RTSP
+17. cloud WHIP uplink + SEI detection metadata (optional RTSP)
 18. observability
 19. recovery
 20. test coverage audit + end-to-end tests
