@@ -1,4 +1,5 @@
 #include "skai/webrtc/whip_publisher.hpp"
+#include "webrtc/whip_policy.hpp"
 
 #include <rtc/rtc.hpp>
 #include <rtc/rtp.hpp>
@@ -88,8 +89,10 @@ HttpResponse request(const std::string& url, const std::string& method,
     curl_easy_setopt(curl.get(), CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl.get(), CURLOPT_CUSTOMREQUEST, method.c_str());
     curl_easy_setopt(curl.get(), CURLOPT_FOLLOWLOCATION, 0L);
-    curl_easy_setopt(curl.get(), CURLOPT_CONNECTTIMEOUT_MS, 5000L);
-    curl_easy_setopt(curl.get(), CURLOPT_TIMEOUT_MS, 10000L);
+    const long timeout_ms = method == "DELETE" ? 2000L : 10000L;
+    curl_easy_setopt(curl.get(), CURLOPT_CONNECTTIMEOUT_MS,
+                     std::min(5000L, timeout_ms));
+    curl_easy_setopt(curl.get(), CURLOPT_TIMEOUT_MS, timeout_ms);
     curl_easy_setopt(curl.get(), CURLOPT_WRITEFUNCTION, receive_body);
     curl_easy_setopt(curl.get(), CURLOPT_WRITEDATA, &response.body);
     curl_easy_setopt(curl.get(), CURLOPT_HEADERFUNCTION, receive_header);
@@ -118,28 +121,6 @@ HttpResponse request(const std::string& url, const std::string& method,
     curl_easy_getinfo(curl.get(), CURLINFO_RESPONSE_CODE, &response.status);
     return response;
 }
-
-std::string resource_url(const std::string& endpoint, const std::string& location) {
-    const auto authority_end = endpoint.find('/', 8);
-    const auto origin = endpoint.substr(0, authority_end);
-    if (location.empty()) throw std::runtime_error("WHIP 201 omitted Location");
-    if (location.front() == '/' && (location.size() < 2 || location[1] != '/')) {
-        return origin + location;
-    }
-    if (location.rfind(origin + '/', 0) == 0) return location;
-    if (location.find(':') == std::string::npos && location.front() != '/') {
-        const auto path_end = endpoint.find_last_of('/');
-        return endpoint.substr(0, path_end + 1) + location;
-    }
-    throw std::runtime_error("WHIP Location must share the configured origin");
-}
-
-struct PeerState {
-    std::mutex mutex;
-    std::condition_variable changed;
-    bool gathered = false;
-    bool failed = false;
-};
 
 std::uint32_t random_ssrc() {
     std::random_device random;
@@ -198,6 +179,9 @@ void WhipPublisher::run() noexcept {
     while (!stopping_) {
         try {
             publish_once();
+        } catch (const UnrecoverableWhipError& error) {
+            if (!stopping_) logger_.log(LogLevel::Error, "whip", error.what());
+            return;
         } catch (const std::exception& error) {
             if (!stopping_) logger_.log(LogLevel::Error, "whip", error.what());
         } catch (...) {
@@ -214,23 +198,21 @@ void WhipPublisher::publish_once() {
     token_ = load_token();
     if (token_.empty()) throw std::runtime_error("WHIP_TOKEN is unavailable");
     auto peer = std::make_shared<rtc::PeerConnection>();
-    auto state = std::make_shared<PeerState>();
-    const std::weak_ptr<PeerState> weak = state;
+    auto state = std::make_shared<WhipPeerState>();
+    const std::weak_ptr<WhipPeerState> weak = state;
     peer->onGatheringStateChange([weak](rtc::PeerConnection::GatheringState value) {
         if (value != rtc::PeerConnection::GatheringState::Complete) return;
         if (auto state = weak.lock()) {
-            std::lock_guard<std::mutex> lock(state->mutex);
-            state->gathered = true;
-            state->changed.notify_all();
+            state->gathered();
         }
     });
     peer->onStateChange([weak](rtc::PeerConnection::State value) {
-        if (value != rtc::PeerConnection::State::Failed &&
-            value != rtc::PeerConnection::State::Disconnected) return;
         if (auto state = weak.lock()) {
-            std::lock_guard<std::mutex> lock(state->mutex);
-            state->failed = true;
-            state->changed.notify_all();
+            if (value == rtc::PeerConnection::State::Connected) state->connected();
+            else if (value == rtc::PeerConnection::State::Disconnected) {
+                state->disconnected(WhipPeerState::Clock::now());
+            } else if (value == rtc::PeerConnection::State::Failed ||
+                       value == rtc::PeerConnection::State::Closed) state->failed();
         }
     });
     const auto ssrc = random_ssrc();
@@ -270,14 +252,9 @@ void WhipPublisher::publish_once() {
     };
     try {
         peer->setLocalDescription(rtc::Description::Type::Offer);
-        {
-            std::unique_lock<std::mutex> lock(state->mutex);
-            if (!state->changed.wait_for(lock, std::chrono::seconds(5),
-                                         [this, &state] {
-                                             return state->gathered || state->failed || stopping_;
-                                         }) || !state->gathered) {
-                throw std::runtime_error("WHIP ICE gathering did not complete");
-            }
+        if (!state->wait_for_gathering(stopping_, std::chrono::seconds(5))) {
+            if (stopping_) return;
+            throw std::runtime_error("WHIP ICE gathering did not complete");
         }
         if (stopping_) return;
         const auto offer = peer->localDescription();
@@ -287,29 +264,48 @@ void WhipPublisher::publish_once() {
             throw std::runtime_error("WHIP POST returned HTTP " +
                                      std::to_string(response.status));
         }
-        location = resource_url(config_.url, response.location);
+        location = whip_resource_url(config_.url, response.location);
         peer->setRemoteDescription(rtc::Description(response.body,
                                                     rtc::Description::Type::Answer));
         logger_.log(LogLevel::Info, "whip", "publisher session created");
         bool waiting_for_keyframe = true;
         bool timestamp_ready = false;
+        bool media_opened = false;
+        bool awaiting_resume = false;
+        std::optional<std::chrono::steady_clock::time_point> track_closed_at;
         std::size_t observed_drops = media_queue_.stats().dropped;
         const auto connection_deadline = std::chrono::steady_clock::now() +
                                          std::chrono::seconds(15);
         while (!stopping_) {
-            {
-                std::lock_guard<std::mutex> lock(state->mutex);
-                if (state->failed) throw std::runtime_error("WHIP ICE connection failed");
+            const auto now = std::chrono::steady_clock::now();
+            if (state->should_reconnect(now, std::chrono::seconds(10))) {
+                throw std::runtime_error("WHIP ICE connection failed or remained disconnected");
             }
-            if (!track->isOpen()) {
-                if (std::chrono::steady_clock::now() >= connection_deadline) {
+            const bool track_open = track->isOpen();
+            if (state->is_disconnected() || !track_open) {
+                if (!media_opened && now >= connection_deadline) {
                     throw std::runtime_error("WHIP media track did not open");
                 }
+                if (media_opened && !track_open) {
+                    if (!track_closed_at) track_closed_at = now;
+                    if (now - *track_closed_at >= std::chrono::seconds(10)) {
+                        throw std::runtime_error("WHIP media track remained closed");
+                    }
+                }
+                if (!awaiting_resume) media_queue_.discard_all();
+                awaiting_resume = true;
                 std::unique_lock<std::mutex> lock(wait_mutex_);
                 wait_changed_.wait_for(lock, std::chrono::milliseconds(100),
                                        [this] { return stopping_.load(); });
                 continue;
             }
+            if (awaiting_resume) {
+                waiting_for_keyframe = true;
+                timestamp_ready = false;
+                awaiting_resume = false;
+            }
+            media_opened = true;
+            track_closed_at.reset();
             auto unit = media_queue_.pop_for(std::chrono::milliseconds(100));
             if (!unit) continue;
             const auto drops = media_queue_.stats().dropped;

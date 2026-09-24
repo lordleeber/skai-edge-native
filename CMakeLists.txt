@@ -153,8 +153,9 @@ target_include_directories(skai-application PUBLIC include)
 target_link_libraries(skai-application PUBLIC skai-config skai-logging Threads::Threads)
 
 add_library(skai-webrtc-runtime src/webrtc/ice_runtime_module.cpp
-    src/webrtc/webrtc_manager.cpp src/webrtc/whip_publisher.cpp)
-target_include_directories(skai-webrtc-runtime PUBLIC include)
+    src/webrtc/webrtc_manager.cpp src/webrtc/whip_policy.cpp
+    src/webrtc/whip_publisher.cpp)
+target_include_directories(skai-webrtc-runtime PUBLIC include PRIVATE src)
 target_link_libraries(skai-webrtc-runtime PUBLIC skai-application skai_ice::skai_ice
     LibDataChannel::LibDataChannel CURL::libcurl)
 

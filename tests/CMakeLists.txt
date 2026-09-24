@@ -16,7 +16,8 @@ target_link_libraries(skai-unit-tests PRIVATE skai-cli skai-config skai-logging
     skai-events skai-gps skai-storage skai-alerts
     GTest::gtest_main)
 target_compile_definitions(skai-unit-tests PRIVATE
-    SKAI_INVALID_CONFIG="${PROJECT_SOURCE_DIR}/tests/fixtures/config.invalid.yaml")
+    SKAI_INVALID_CONFIG="${PROJECT_SOURCE_DIR}/tests/fixtures/config.invalid.yaml"
+    SKAI_EXAMPLE_CONFIG="${PROJECT_SOURCE_DIR}/config/config.example.yaml")
 gtest_discover_tests(skai-unit-tests PROPERTIES TIMEOUT 15)
 
 add_executable(skai-integration-tests integration/process_test.cpp)
@@ -49,7 +50,9 @@ target_link_libraries(skai-recording-tests PRIVATE skai-recording skai-h264-enco
     GTest::gtest_main)
 gtest_discover_tests(skai-recording-tests PROPERTIES TIMEOUT 20)
 
-add_executable(skai-webrtc-tests integration/webrtc_dependency_test.cpp)
+add_executable(skai-webrtc-tests integration/webrtc_dependency_test.cpp
+    unit/whip_publisher_test.cpp)
+target_include_directories(skai-webrtc-tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(skai-webrtc-tests PRIVATE skai-webrtc-runtime
     LibDataChannel::LibDataChannel GTest::gtest_main)
 gtest_discover_tests(skai-webrtc-tests PROPERTIES LABELS webrtc TIMEOUT 15)

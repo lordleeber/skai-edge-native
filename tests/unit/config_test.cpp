@@ -66,6 +66,12 @@ TEST(Config, ParsesWhipPublisherSettings) {
               "https://skai-cam.duckdns.org/sfu/cam1/whip");
 }
 
+TEST(Config, ExampleDoesNotPublishToCloudByDefault) {
+    const auto result = skai::load_config(SKAI_EXAMPLE_CONFIG);
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_FALSE(result.config.whip.enabled);
+}
+
 TEST(Config, RejectsInsecureWhipUrl) {
     const auto result = skai::parse_config(
         "video: {rtsp_url: 'rtsp://camera/stream'}\n"

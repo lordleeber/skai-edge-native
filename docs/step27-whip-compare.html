@@ -201,7 +201,7 @@ details[open] summary { margin-bottom: .5rem; }
 
 <div class="note">
   <p><b>這一章對應的版本</b>：<code>skai-edge-native</code> 的 commit <code>8754f65</code>（2026-09-24，分支 <code>step-27-whip-publisher</code>），
-  以及 <code>skai-edge-cpp</code> 的 commit <code>da27afe</code>（2026-09-14）。程式碼繼續演進之後，行號與細節可能對不上，以當時的 repo 為準。</p>
+  以及 <code>skai-edge-cpp</code> 的 commit <code>da27afe</code>（2026-09-14）。程式碼摘錄保留當時版本；第 13 節的操作步驟與末尾的限制說明已反映 Step 27 code review 後的修正。</p>
   <p>文中 <code>skai-edge-cpp</code> 的檔案路徑都相對於它的 repo 根目錄；本 repo 的路徑相對於 <code>skai-edge-native</code> 根目錄。</p>
 </div>
 
@@ -472,6 +472,59 @@ add_subdirectory(third_party/libdatachannel EXCLUDE_FROM_ALL)</pre>
   這個選擇帶來的後果，<a href="#ice">第 7 節</a>會詳細講。
 </p>
 
+<h3 id="why-not-webrtcbin">為什麼不直接用 webrtcbin？</h3>
+<p>
+  webrtcbin 做得到，cpp 就是證明。本 repo 不用它，是因為 <code>ROADMAP.md</code> 明文規定。§4.7「One WebRTC/ICE stack」的規則：
+</p>
+<div class="src">ROADMAP.md（§4.7，節錄）</div>
+<pre class="code" data-src="ROADMAP.md">### 4.7 One WebRTC/ICE stack
+…
+- `skai-ice` remains an independent repository and is consumed as a pinned dependency.
+…
+<span class="hl">- do not use GStreamer `webrtcbin`</span>
+- do not link libdatachannel's normal libjuice backend by mistake</pre>
+<p>ROADMAP 最後的架構原則清單又寫了一次，而且講的是「整個應用程式」，不只瀏覽器觀看：</p>
+<div class="src">ROADMAP.md（架構原則清單，節錄）</div>
+<pre class="code" data-src="ROADMAP.md">14. libdatachannel owns PeerConnection, DTLS, SRTP, and RTP.
+<span class="hl">15. `skai-ice` is the only ICE implementation used by this application.</span>
+…
+<span class="hl">17. Do not use `cpp-httplib`, MediaMTX, or `webrtcbin` as a hidden second WebRTC path.</span>
+18. First WebRTC release is LAN/host-candidate only.
+<span class="hl">19. NAT traversal improvements belong in `skai-ice`.</span></pre>
+<p>§4.7 那兩條的意思：skai-ice 是另一個獨立的 repo，本 repo 用 git submodule 把它固定在某一個 commit（這就是 pinned dependency，<code>third_party/skai-ice</code> 就是那個 submodule）；
+另外要小心別讓 libdatachannel 連到它自己附的那份 libjuice。清單那幾條翻成白話：</p>
+<ul>
+  <li>第 14 條：PeerConnection、DTLS、SRTP、RTP 都歸 libdatachannel。</li>
+  <li>第 15 條：整個程式只能有<b>一套</b> ICE，就是 skai-ice。</li>
+  <li>第 17 條：不准另外塞一條 WebRTC 路。點名的三個，webrtcbin 會帶進自己的 ICE 與加密；MediaMTX（第 8 節會提到的現成串流伺服器）可以代做 WebRTC；cpp-httplib 是一套 HTTP 函式庫，skai-ice 附的獨立 WHEP 服務用它處理信令。三者都會繞過上面那條唯一的路。</li>
+  <li>第 18 條：第一版本來就只做區網、只有 host 候選。</li>
+  <li>第 19 條：要穿越 NAT，就去改 skai-ice。</li>
+</ul>
+<p>
+  webrtcbin 內建的 ICE 是 libnice，用了它，程式裡就會有兩套 ICE，直接違反第 15、17 條。
+  Step 27 的 WHIP 推流雖然是雲端用途，但它跟區網觀看在同一個執行檔裡，同樣受這幾條約束。
+  所以本 repo 用 skai-ice <b class="hl-key">是 ROADMAP 定下的架構規則，不是寫 Step 27 的人的個人偏好</b>。
+  至於<b>為什麼</b>要訂「只能一套 ICE」，ROADMAP 沒有寫理由，只在「不做的事」清單裡列了 <code>a second ICE implementation inside this repository</code>。
+  本章不替它補理由；要重新評估這條規則，得先找當初訂規則的人問清楚。
+</p>
+<p>
+  另一個常被問到的問題：那可以只讓 WHIP 這一路改用 libdatachannel 原本的 libjuice（它支援 STUN 與 TURN）嗎？
+  <b class="hl-bad">在同一個執行檔裡不行。</b><code>USE_SYSTEM_JUICE</code> 是整個 libdatachannel 的建置開關，不是每條連線各自選的。
+  而且 skai-ice 自己就實作了 libjuice 那一整組 <code>juice_*</code> 函式（<code>juice_create</code>、<code>juice_gather_candidates</code>、<code>juice_send</code>……，在 <code>third_party/skai-ice/src/juice_shim.cpp</code>）。
+  一個程式裡同名的函式只能有一份，兩者都連進來，不是連結失敗，就是不聲不響地只用到其中一份。
+  後者更糟：用到哪一份取決於連結順序，可能區網觀看或 WHIP 其中一邊悄悄跑了你以為沒用的那套 ICE，而且沒有任何錯誤訊息。
+  <code>CMakeLists.txt</code> 有一道檢查專門擋這種情況。<code>juice</code>、<code>juice-static</code> 是 libjuice 自己的 CMake 會建出的 target 名稱，
+  只要出現就代表多了一份 libjuice；<code>FATAL_ERROR</code> 會讓 <code>cmake -S . -B build</code> 那一步直接失敗，連編譯都不會開始：
+</p>
+<div class="src">CMakeLists.txt</div>
+<pre class="code" data-src="CMakeLists.txt">if(TARGET juice OR TARGET juice-static)
+<span class="hl">    message(FATAL_ERROR "libdatachannel built a duplicate libjuice; USE_SYSTEM_JUICE must remain ON")</span>
+endif()</pre>
+<p>
+  所以<b>改用原版 libjuice，不能只換 WHIP 這一路</b>。想讓 WHIP 有 STUN/TURN，剩下兩條路：補強 skai-ice（全程式一起受益），
+  或只讓 WHIP 改用 webrtcbin（技術上做得到，但要推翻上面的第 15、17 條）。兩條路的代價，以及為什麼建議先實測，見本章末的<a href="#limits">目前限制</a>。
+</p>
+
 <!-- ============================================================ -->
 <h2 id="source">5. 影像從哪裡來（步驟 ①）</h2>
 
@@ -735,6 +788,23 @@ a=candidate:15 1 TCP 843055615 203.0.113.7 56725 typ srflx raddr 172.16.1.50 rpo
   回應的 body 是 answer，<code>Location</code> 標頭是「這次推流 session 的網址」，結束時要對它送 <code>DELETE</code>。
 </p>
 
+<div class="note">
+  <p><b>GStreamer 沒有現成的 WHIP 元件嗎？</b>
+  GStreamer 的 Rust 外掛集（gst-plugins-rs，要另外安裝的一包元件）有 <code>whipsink</code>、<code>whipclientsink</code> 這類元件，放進 pipeline 就會自己做 POST、收 answer、結束時 DELETE。
+  這台 Jetson 裝的是 GStreamer 1.20.3 與 Ubuntu 提供的 C 外掛套件，沒有 gst-plugins-rs，所以沒有這兩個元件。
+  所以 cpp 雖然用了 webrtcbin，WHIP 的 HTTP 那一段還是自己寫的。它的檔頭註解寫得很直接：「我們只手寫薄薄一層 WHIP 的 HTTP signaling(libcurl)」。
+  <code>gst-inspect-1.0</code> 是 GStreamer 查詢元件的工具（套件 <code>gstreamer1.0-tools</code>；印出 <code>command not found</code> 就先裝它）。在任何目錄都可以這樣確認：</p>
+<pre class="shell">gst-inspect-1.0 --version
+gst-inspect-1.0 whipclientsink
+gst-inspect-1.0 whipsink</pre>
+<pre class="out">gst-inspect-1.0 version 1.20.3
+GStreamer 1.20.3
+https://launchpad.net/distros/ubuntu/+source/gstreamer1.0
+No such element or plugin 'whipclientsink'
+No such element or plugin 'whipsink'</pre>
+  <p>如果你的機器印出的是元件說明而不是這兩行，表示裝了較新的外掛。本章的比較不受影響，因為兩個專案都沒用到它們。</p>
+</div>
+
 <h3>認證：token 從哪來</h3>
 <div class="src">src/webrtc/whip_publisher.cpp</div>
 <pre class="code" data-src="src/webrtc/whip_publisher.cpp">std::string load_token() {
@@ -977,8 +1047,8 @@ a=candidate:15 1 TCP 843055615 203.0.113.7 56725 typ srflx raddr 172.16.1.50 rpo
         if (value != rtc::PeerConnection::State::Failed &amp;&amp;
 <span class="hl">            value != rtc::PeerConnection::State::Disconnected) return;</span></pre>
 <p>
-  <code>Disconnected</code> 通常只是暫時的（Wi-Fi 閃斷一下）。把它當 <code>Failed</code> 處理，等於每次閃斷都要付出「DELETE、等 3 秒、重新 POST、等下一張 keyframe」的代價。
-  這是 Step 27 的 code review 指出的問題之一，列在本章末的<a href="#recap">目前限制</a>。
+  在 8754f65 版本裡，<code>Disconnected</code> 被當成 <code>Failed</code>；短暫 Wi-Fi 閃斷也會付出「DELETE、等 3 秒、重新 POST、等下一張 keyframe」的代價。
+  Step 27 code review 後已改成允許同一個 session 在寬限時間內恢復，見本章末的<a href="#recap">後續修正</a>。
 </p>
 
 <!-- ============================================================ -->
@@ -1189,14 +1259,15 @@ a=candidate:15 1 TCP 843055615 203.0.113.7 56725 typ srflx raddr 172.16.1.50 rpo
 <pre class="out">HTTP 401</pre>
 <p><code>401 Unauthorized</code>：沒有 <code>Authorization: Bearer</code> 標頭。如果你看到 <code>000</code> 或 curl 的錯誤訊息，是連不到伺服器（網路或伺服器當時沒開），不是指令寫錯。</p>
 
-<h3>第 5 步：確認本 repo 沒有 token 時拒絕啟動</h3>
+<h3>第 5 步：確認明確啟用 WHIP 卻沒有 token 時拒絕啟動</h3>
 <p>
-  用範例設定檔 <code>config/config.example.yaml</code> 改兩處：網卡名稱 <code>[eth0, wlan0]</code> 換成 <code>$IFACE</code>；<code>storage</code> 底下的 <code>/var/lib/skai-edge/…</code>（資料庫與警報圖檔的預設位置，一般使用者沒有寫入權限）換到 <code>$DEMO/var</code> 底下。然後<b>在 <code>$DEMO</code> 目錄裡</b>、拿掉 <code>WHIP_TOKEN</code> 啟動。
+  用範例設定檔 <code>config/config.example.yaml</code> 改三處：網卡名稱 <code>[eth0, wlan0]</code> 換成 <code>$IFACE</code>；<code>storage</code> 底下的 <code>/var/lib/skai-edge/…</code> 換到 <code>$DEMO/var</code>；再明確把 <code>whip.enabled</code> 改成 <code>true</code>。然後<b>在 <code>$DEMO</code> 目錄裡</b>、拿掉 <code>WHIP_TOKEN</code> 啟動。
   為什麼一定要換目錄？見<a href="#pitfalls">常見錯誤</a>的第一格。
 </p>
 <p>最後一行的括號讓裡面的指令在子 shell 執行，<code>cd</code> 不會改到你原本的終端機；<code>$OLDPWD</code> 是 shell 記住的「上一次 cd 之前的目錄」，也就是 repo 根目錄，用來找到 <code>build/skai-edge</code>。如果 <code>$DEMO</code> 裡已經有 <code>.env</code>（例如你以前在這個目錄做過別的實驗），它會印「停止：…存在，先把它移走」而不啟動程式。</p>
 <pre class="shell">sed -e "s/host_interfaces: \[eth0, wlan0\]/host_interfaces: [$IFACE]/" \
     -e "s#/var/lib/skai-edge#$DEMO/var#" \
+    -e "s/  enabled: false/  enabled: true/" \
     config/config.example.yaml &gt; "$DEMO/whip.yaml"
 (cd "$DEMO" &amp;&amp; if [ -e .env ]; then echo "停止：$DEMO/.env 存在，先把它移走"; else
   env -u WHIP_TOKEN "$OLDPWD/build/skai-edge" --config whip.yaml; echo "exit=$?"; fi)</pre>
@@ -1208,7 +1279,7 @@ exit=2<span class="mk">4</span></pre>
   <li><span class="mk">1</span>設定檔格式正確，<code>whip.url</code> 是 https（<code>src/config.cpp</code> 會檢查）。</li>
   <li><span class="mk">2</span>ICE 模組先初始化：<code>mode=lan-only</code>，只用 <code>wlP1p1s0</code>。這就是<a href="#ice">第 7 節</a>講的 host-only。</li>
   <li><span class="mk">3</span>WHIP 模組初始化時，環境變數與 <code>$DEMO/.env</code> 都沒有 token，拒絕啟動。</li>
-  <li><span class="mk">4</span>非零結束碼，整個程式沒有啟動。範例設定檔裡 <code>whip.enabled</code> 預設是 <code>true</code>，所以<b class="hl-bad">沒設 token 的人照 README 跑範例設定，也會看到這個錯誤</b>。</li>
+  <li><span class="mk">4</span>非零結束碼，整個程式沒有啟動。這是因為實驗明確啟用了 WHIP；範例設定檔預設為 <code>false</code>。</li>
 </ol>
 
 <!-- ============================================================ -->
@@ -1217,9 +1288,9 @@ exit=2<span class="mk">4</span></pre>
 
 <div class="pit">
   <div>
-    <h4>在 repo 根目錄啟動，就真的推流了</h4>
+    <h4>啟用 WHIP 後在 repo 根目錄啟動</h4>
     <p class="sym">症狀：只想試試錯誤訊息，結果畫面被送上雲端。</p>
-    <p class="res">後果：<code>load_token()</code> 會讀<b>目前目錄</b>的 <code>.env</code>。本 repo 根目錄如果放著含 <code>WHIP_TOKEN</code> 的 <code>.env</code>（它被 git 忽略，但檔案在），<code>env -u WHIP_TOKEN</code> 擋不住。（依 <code>load_token()</code> 的程式碼判斷；為了不把畫面推出去，這一格沒有實測。）</p>
+    <p class="res">後果：啟用 WHIP 時，<code>load_token()</code> 會讀<b>目前目錄</b>的 <code>.env</code>。本 repo 根目錄如果放著含 <code>WHIP_TOKEN</code> 的 <code>.env</code>，<code>env -u WHIP_TOKEN</code> 擋不住。範例設定檔預設關閉 WHIP。</p>
     <p class="fix">正解：做實驗時 <code>cd</code> 到沒有 <code>.env</code> 的目錄，並先確認 <code>ls -a</code> 裡沒有它；第 5 步的指令會自動做這個檢查。</p>
   </div>
   <div>
@@ -1235,10 +1306,10 @@ exit=2<span class="mk">4</span></pre>
     <p class="fix">正解：先 <code>reply = promise.get_reply()</code> 存起來，再取 offer（第 3 步的腳本就是這樣寫的）。</p>
   </div>
   <div>
-    <h4>沒設 token 就照 README 跑範例</h4>
+    <h4>啟用 WHIP 卻沒設 token</h4>
     <p class="sym">症狀：<code>WHIP_TOKEN is required when whip.enabled is true</code>，結束碼 2。</p>
-    <p class="res">後果：範例設定檔預設開啟 WHIP，連只想測 RTSP 的人都跑不起來。</p>
-    <p class="fix">正解：不推雲端時把 <code>whip.enabled</code> 改成 <code>false</code>。（code review 建議把範例預設改掉，見目前限制。）</p>
+    <p class="res">後果：WHIP 模組拒絕啟動；只測 RTSP 時不需啟用 WHIP。</p>
+    <p class="fix">正解：要推雲端時才把 <code>whip.enabled</code> 改成 <code>true</code>，並設定 token。</p>
   </div>
   <div>
     <h4>DELETE 忘了帶 token</h4>
@@ -1258,7 +1329,7 @@ exit=2<span class="mk">4</span></pre>
     <h4>Location 被拒，session 沒收掉</h4>
     <p class="sym">症狀：本 repo 一直印 <code>WHIP Location must share the configured origin</code> 或 <code>WHIP 201 omitted Location</code>，每 3 秒一次。</p>
     <p class="res">後果：伺服器已經回 201、建了 session，但 <code>location</code> 還沒設就丟例外，收尾時跳過 DELETE。每次重試都在伺服器上多留一個 session。</p>
-    <p class="fix">正解：在 Step 27 的 code review 裡列為待修。部署時確認伺服器回的是同網域的 Location。</p>
+    <p class="fix">後續修正：收到無法安全清理的 201 後停止自動重試，避免每 3 秒再累積一個 session；部署時仍須確認伺服器回同 origin 的 Location。</p>
     <p class="src-tag">出處：Step 27 code review（<code>src/webrtc/whip_publisher.cpp</code> 的 POST 之後那段）</p>
   </div>
   <div>
@@ -1277,17 +1348,38 @@ exit=2<span class="mk">4</span></pre>
   <li>WHIP 推流 = 一次 HTTP POST 交換 SDP（offer / answer），之後影像走 ICE 找到的 UDP 路、用 DTLS/SRTP 加密送出，結束時 HTTP DELETE。</li>
   <li>兩個專案都自己寫 WHIP 的 HTTP 那一層；<b class="hl-key">最大的差別在 ICE 交給誰</b>。重新編碼與斷線重試則是各自的設計選擇，跟函式庫無關。</li>
   <li>cpp：webrtcbin ＋ libnice，有 STUN/TURN，送重新編碼的 480p，斷線不恢復。</li>
-  <li>本 repo：libdatachannel ＋ 自寫的 skai-ice，只有 host 候選，送原始 H.264，斷線每 3 秒重來。</li>
+  <li>本 repo：libdatachannel ＋ 自寫的 skai-ice，只有 host 候選，送原始 H.264；持續斷線才重建 session。</li>
 </ul>
 
-<h3>目前限制（下一步要處理的）</h3>
+<h3 id="limits">目前限制與後續修正</h3>
 <ul>
-  <li><b>沒有 STUN / TURN</b>：在擋 UDP 或 NAT 很嚴格的場地可能連不上。要補得從 skai-ice 做起（srflx、relay 候選），或讓 WHIP 這一路改用完整的 ICE 實作。</li>
-  <li><b>範例設定檔預設開啟 WHIP</b>，而且指向真實的伺服器：沒有 token 時啟動失敗；有 token 時會在沒有明顯提示的情況下把畫面推出去。</li>
-  <li><b><code>Disconnected</code> 被當成 <code>Failed</code></b>：Wi-Fi 閃斷也會觸發整套重連。</li>
-  <li><b>Location 缺少或跨網域時，伺服器上的 session 會漏收</b>。</li>
-  <li><b>關機可能卡住</b>：ICE gathering 的 5 秒等待與收尾的 DELETE 都不會被 <code>stop()</code> 叫醒。</li>
-  <li>本章沒有實測本 repo 對雲端的端到端推流；第 7 節的連線方式是推論。</li>
+  <li><b>沒有 STUN / TURN</b>：在擋 UDP 或 NAT 很嚴格的場地可能連不上。有三條路，代價不同：
+    <ol>
+      <li><b>先實測，不改程式</b>：在實際部署的網路跑一次端到端推流，確認只有 host 候選夠不夠用（第 7 節的連線方式目前是推論）。成本最低；連得上的話，就不必現在付出下面兩條的代價。<b class="hl-key">建議先做這一條。</b>
+        <div class="warn">
+          <p><b>下面的做法本章作者沒有實際跑過</b>（跑了就會把攝影機畫面推上雲端），是依程式碼整理的。</p>
+          <p>需要：接得到攝影機的設定檔（<code>video.rtsp_url</code> 改成你的攝影機，<code>webrtc.host_interfaces</code> 改成你的網卡，<code>whip.enabled: true</code>）；
+          推流 token（跟管 minisfu 的人拿），放在環境變數 <code>WHIP_TOKEN</code>，或放進執行目錄下的 <code>.env</code>，一行寫 <code>WHIP_TOKEN=&lt;token&gt;</code>。
+          然後在 repo 根目錄執行 <code>./build/skai-edge --config &lt;你的設定檔&gt;</code>。</p>
+          <p><b class="hl-ok">算連上</b>：log 依序出現 <code>module=whip message="publisher session created"</code> 與 <code>message="first H.264 access unit sent"</code>，
+          之後不再出現 <code>whip</code> 的錯誤；再用瀏覽器開 <code>https://skai-cam.duckdns.org/watch</code>（skai-edge-cpp 設定檔註解寫的觀看入口）看得到畫面。</p>
+          <p><b class="hl-bad">算沒連上</b>：出現 <code>publisher session created</code> 之後，約 15 秒出現 <code>WHIP media track did not open</code>，並每隔幾秒重複整個循環。
+          這代表 HTTP 那一段通了（伺服器收下 offer、回了 answer），但 ICE 找不到能通的 UDP 路，正是第 7 節那些條件有一個不成立。</p>
+          <p><b>沒連上之後</b>：這時才在下面兩條之間選。想守住 ROADMAP 的架構，選 2；急著在這個場地上線、願意改架構，選 3。無論選哪條，先把「哪個場地、什麼網路、失敗的 log」記下來，那是說服別人改架構的依據。</p>
+        </div>
+      </li>
+      <li><b>補強 skai-ice</b>：加上 srflx（問 STUN）與 relay（TURN）候選。這是 ROADMAP 第 19 條指定的方向，架構規則不用改。代價是工作量大：TURN 用戶端要處理向伺服器申請中繼位址、權限、轉送封包，而且要在 skai-ice 那個獨立 repo 裡做；區網觀看與雲端推流用的是同一套 ICE，兩邊會一起受影響。</li>
+      <li><b>只讓 WHIP 改用 webrtcbin ＋ libnice</b>：STUN/TURN 立刻可用，cpp 已經證明這樣做可行。代價是推翻 ROADMAP 第 15、17 條：執行檔裡會有兩套 ICE、兩套 WebRTC 函式庫要維護，也得先重新評估「只用 skai-ice」這個決定本身。
+        技術上它跟 libdatachannel 放得進同一個程式：libnice 的函式不叫 <code>juice_*</code>，也不受 <code>USE_SYSTEM_JUICE</code> 管，不會撞名。
+        但 cpp 證明的只是「webrtcbin 推得了 WHIP」，不是「它能跟 libdatachannel 住在同一個程式裡」；webrtcbin 還需要自己的 GLib main loop 執行緒（第 8 節），要另外整合進本 repo 的模組生命週期。
+        （改用原版 libjuice 在同一個執行檔裡做不到，見<a href="#why-not-webrtcbin">第 4 節</a>。把 WHIP 拆成另一支獨立程式，技術上就能各用各的 ICE，但第 15 條講的是「this application」，拆開算不算違反，要由訂規則的人決定。）</li>
+    </ol>
+  </li>
+  <li><b>範例設定檔預設關閉 WHIP</b>；正式推流需明確啟用並提供 token。</li>
+  <li><b>短暫 <code>Disconnected</code></b> 可在同一個 session 恢復；超過寬限時間才重連。</li>
+  <li><b>201 缺少或跨 origin 的 Location</b> 仍可能留下一個無法安全刪除的伺服器 session；用戶端會停止自動重試，避免持續累積。</li>
+  <li><b>停止等待</b>：ICE gathering 約每 100 毫秒檢查停止訊號，DELETE 最長等待 2 秒。</li>
+  <li>本章原先沒有實測本 repo 對雲端的推流；Step 27 後續實測已取得 201、ICE 完成，並送出 H.264 access unit。</li>
 </ul>
 
 <h3>自我測驗</h3>
@@ -1315,6 +1407,11 @@ exit=2<span class="mk">4</span></pre>
 <details>
   <summary>Q6. 如果伺服器重開機，兩個專案各自會發生什麼事？</summary>
   <p>cpp：連線變成 FAILED，印一行 log，之後不再嘗試，要人工重啟 node。本 repo：<code>publish_once()</code> 丟例外，<code>run()</code> 等 3 秒後重建 PeerConnection 重新 POST，伺服器回來之後會自己接上。</p>
+</details>
+
+<details>
+  <summary>Q7. 既然 libdatachannel 原本的 libjuice 支援 STUN/TURN，為什麼不讓 WHIP 這一路改用它就好？</summary>
+  <p><code>USE_SYSTEM_JUICE</code> 是整個 libdatachannel 的建置開關，不能每條連線各自選；skai-ice 又實作了同一組 <code>juice_*</code> 函式，兩者不能同時連進一個執行檔（<code>CMakeLists.txt</code> 偵測到多一份 libjuice 就會 <code>FATAL_ERROR</code>）。而且 ROADMAP 第 15 條規定整個程式只能有 skai-ice 一套 ICE。</p>
 </details>
 
 <nav class="pagenav" aria-label="章節導覽">
