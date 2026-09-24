@@ -1785,7 +1785,7 @@ Acceptance:
 
 # Phase 11 — Optional RTSP Output
 
-## Step 27 — RTSP output
+## Step 27 — Cloud WHIP uplink and optional RTSP output
 
 Deployment update: the cloud server requires a WHIP publisher at
 `https://skai-cam.duckdns.org/sfu/cam1/whip`, so Step 27 implements optional
