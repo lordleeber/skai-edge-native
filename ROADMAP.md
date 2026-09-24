@@ -1783,7 +1783,7 @@ Acceptance:
 
 ---
 
-# Phase 11 — Optional RTSP Output
+# Phase 11 — Cloud Uplink and Optional RTSP
 
 ## Step 27 — Cloud WHIP uplink and optional RTSP output
 
