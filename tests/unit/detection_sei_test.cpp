@@ -378,3 +378,190 @@ TEST(DetectionSei, StreamWithInsertedSeiDecodesAndViewerRecoversSourcePts) {
 
     EXPECT_EQ(decode_frame_count(units), kFrames);
 }
+
+namespace {
+
+struct ParsedBox {
+    std::string class_name;
+    double score = 0.0;
+};
+
+struct ParsedResult {
+    std::uint32_t dt = 0;
+    std::vector<ParsedBox> boxes;
+};
+
+// Splits the contract JSON into results; relies only on the documented shape.
+std::vector<ParsedResult> parse_results(const std::string& json) {
+    std::vector<ParsedResult> results;
+    const std::regex result("\\{\"dt\":([0-9]+),\"b\":\\[(.*?)\\]\\}");
+    const std::regex box("\\[[-0-9.]+,[-0-9.]+,[-0-9.]+,[-0-9.]+,\"([^\"]*)\",([-0-9.]+)\\]");
+    for (auto it = std::sregex_iterator(json.begin(), json.end(), result);
+         it != std::sregex_iterator(); ++it) {
+        ParsedResult parsed;
+        parsed.dt = static_cast<std::uint32_t>(std::stoul((*it)[1]));
+        const std::string boxes = (*it)[2];
+        for (auto b = std::sregex_iterator(boxes.begin(), boxes.end(), box);
+             b != std::sregex_iterator(); ++b) {
+            parsed.boxes.push_back({(*b)[1], std::stod((*b)[2])});
+        }
+        results.push_back(std::move(parsed));
+    }
+    return results;
+}
+
+std::optional<std::vector<ParsedResult>> take(skai::SeiResultSelector& selector,
+                                              std::uint64_t pts, std::uint64_t generation = 1,
+                                              std::size_t* nal_size = nullptr) {
+    const auto nal = selector.take_for(pts, generation);
+    if (nal.empty()) return std::nullopt;
+    if (nal_size) *nal_size = nal.size();
+    const auto nals = split_annex_b(nal);
+    if (nals.size() != 1) return std::nullopt;
+    const auto sei = parse_user_data_sei(nals[0]);
+    if (!sei || sei->uuid != skai::kDetectionSeiUuid) return std::nullopt;
+    return parse_results(sei->payload);
+}
+
+skai::SeiSourceResult source(std::uint64_t pts, std::size_t boxes = 1,
+                             std::uint64_t generation = 1, const char* name = "person") {
+    skai::SeiSourceResult result{pts, generation, {}};
+    for (std::size_t i = 0; i < boxes; ++i) {
+        result.boxes.push_back({0.1234, 0.5678, 0.1234, 0.5678, name,
+                                0.5 + static_cast<double>(i) / 1000.0});
+    }
+    return result;
+}
+
+constexpr std::uint64_t kSecond = 1'000'000'000ULL;
+constexpr std::uint64_t kFrame = 40'000'000ULL;
+
+} // namespace
+
+TEST(SeiResultSelector, InsertsNothingWithoutAPendingResult) {
+    skai::SeiResultSelector selector;
+    EXPECT_TRUE(selector.take_for(kSecond, 1).empty());
+    EXPECT_EQ(selector.stats().sei_units, 0U);
+}
+
+TEST(SeiResultSelector, AttachesOnceWithDtFromTheSendingUnit) {
+    skai::SeiResultSelector selector;
+    selector.add(source(kSecond));
+    const auto results = take(selector, kSecond + 2 * kFrame);
+    ASSERT_TRUE(results);
+    ASSERT_EQ(results->size(), 1U);
+    EXPECT_EQ((*results)[0].dt, 7200U);
+    ASSERT_EQ((*results)[0].boxes.size(), 1U);
+    EXPECT_EQ((*results)[0].boxes[0].class_name, "person");
+    EXPECT_FALSE(take(selector, kSecond + 3 * kFrame));
+    EXPECT_EQ(selector.stats().sei_units, 1U);
+    EXPECT_EQ(selector.stats().results_attached, 1U);
+    EXPECT_EQ(selector.stats().results_dropped, 0U);
+}
+
+TEST(SeiResultSelector, SendsZeroDetectionsSoViewersClearBoxes) {
+    skai::SeiResultSelector selector;
+    selector.add(source(kSecond, 0));
+    const auto results = take(selector, kSecond + kFrame);
+    ASSERT_TRUE(results);
+    ASSERT_EQ(results->size(), 1U);
+    EXPECT_TRUE((*results)[0].boxes.empty());
+}
+
+TEST(SeiResultSelector, ListsResultsOldestFirst) {
+    skai::SeiResultSelector selector;
+    selector.add(source(kSecond + kFrame));
+    selector.add(source(kSecond));
+    const auto results = take(selector, kSecond + 2 * kFrame);
+    ASSERT_TRUE(results);
+    ASSERT_EQ(results->size(), 2U);
+    EXPECT_EQ((*results)[0].dt, 7200U);
+    EXPECT_EQ((*results)[1].dt, 3600U);
+}
+
+TEST(SeiResultSelector, KeepsOnlyResultsWithinOneSecond) {
+    skai::SeiResultSelector selector;
+    selector.add(source(kSecond - 1));
+    selector.add(source(kSecond));
+    const auto results = take(selector, 2 * kSecond);
+    ASSERT_TRUE(results);
+    ASSERT_EQ(results->size(), 1U);
+    EXPECT_EQ((*results)[0].dt, 90'000U);
+    EXPECT_EQ(selector.stats().results_dropped, 1U);
+}
+
+TEST(SeiResultSelector, DropsResultsFromBeforeAnRtspRestart) {
+    skai::SeiResultSelector selector;
+    selector.add(source(300'000'000, 1, 1)); // old pipeline, PTS below the new one
+    selector.add(source(700'000'000, 1, 3)); // newer pipeline than the unit: wait
+    EXPECT_FALSE(take(selector, 600'000'000, 2));
+    EXPECT_EQ(selector.stats().results_dropped, 1U);
+    EXPECT_EQ(selector.pending(), 1U);
+    const auto results = take(selector, 700'000'000 + kFrame, 3);
+    ASSERT_TRUE(results);
+    EXPECT_EQ((*results)[0].dt, 3600U);
+}
+
+TEST(SeiResultSelector, DropsResultsNewerThanTheAttachingUnit) {
+    skai::SeiResultSelector selector;
+    selector.add(source(2 * kSecond));
+    EXPECT_FALSE(take(selector, 2 * kSecond - kFrame));
+    EXPECT_EQ(selector.stats().results_dropped, 1U);
+    EXPECT_EQ(selector.pending(), 0U);
+}
+
+TEST(SeiResultSelector, SizeCapDropsTheOldestResultsFirst) {
+    skai::SeiResultSelector selector;
+    for (int i = 0; i < 4; ++i) selector.add(source(kSecond + i * kFrame, 8));
+    std::size_t size = 0;
+    const auto results = take(selector, kSecond + 4 * kFrame, 1, &size);
+    ASSERT_TRUE(results);
+    EXPECT_LE(size, skai::kMaxDetectionSeiBytes);
+    ASSERT_EQ(results->size(), 2U);
+    EXPECT_EQ((*results)[0].dt, 7200U);
+    EXPECT_EQ((*results)[1].dt, 3600U);
+    EXPECT_EQ(selector.stats().results_dropped, 2U);
+    EXPECT_EQ(selector.stats().results_attached, 2U);
+}
+
+TEST(SeiResultSelector, OversizedSingleResultKeepsTheHighestScoresThatFit) {
+    skai::SeiResultSelector selector;
+    selector.add(source(kSecond, 40, 1, "baseball glove"));
+    std::size_t size = 0;
+    const auto results = take(selector, kSecond + kFrame, 1, &size);
+    ASSERT_TRUE(results);
+    EXPECT_LE(size, skai::kMaxDetectionSeiBytes);
+    ASSERT_EQ(results->size(), 1U);
+    const auto& boxes = (*results)[0].boxes;
+    ASSERT_GE(boxes.size(), 16U);
+    ASSERT_LT(boxes.size(), 40U);
+    for (const auto& box : boxes) {
+        EXPECT_GT(box.score, 0.5 + (39.0 - static_cast<double>(boxes.size())) / 1000.0);
+    }
+    EXPECT_EQ(selector.stats().boxes_dropped, 40U - boxes.size());
+    EXPECT_EQ(selector.stats().results_attached, 1U);
+    EXPECT_EQ(selector.stats().results_dropped, 0U);
+}
+
+TEST(SeiResultSelector, BoundsPendingResultsByDroppingTheOldest) {
+    skai::SeiResultSelector selector(4);
+    for (int i = 0; i < 6; ++i) selector.add(source(kSecond + i * kFrame, 0));
+    EXPECT_EQ(selector.pending(), 4U);
+    EXPECT_EQ(selector.stats().results_dropped, 2U);
+    const auto results = take(selector, kSecond + 6 * kFrame);
+    ASSERT_TRUE(results);
+    ASSERT_EQ(results->size(), 4U);
+    EXPECT_EQ((*results)[0].dt, 4U * 3600U);
+}
+
+TEST(SeiResultSelector, ReportsDtPercentilesOfAttachedResults) {
+    skai::SeiResultSelector selector;
+    EXPECT_FALSE(selector.dt_percentile(0.5));
+    for (int lag = 1; lag <= 4; ++lag) {
+        selector.add(source(lag * kSecond));
+        ASSERT_TRUE(take(selector, lag * kSecond + lag * kFrame));
+    }
+    EXPECT_EQ(selector.dt_percentile(0.5), 7200U);
+    EXPECT_EQ(selector.dt_percentile(0.95), 14400U);
+    EXPECT_EQ(selector.dt_percentile(1.0), 14400U);
+}

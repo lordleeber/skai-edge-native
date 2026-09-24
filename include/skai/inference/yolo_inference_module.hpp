@@ -10,8 +10,10 @@
 #include "skai/video/annotator.hpp"
 
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <thread>
+#include <vector>
 
 namespace skai {
 
@@ -31,6 +33,11 @@ public:
                         std::shared_ptr<ApiState> api = {},
                         std::shared_ptr<EventChannel> events = {},
                         std::shared_ptr<AlertManager> alerts = {});
+
+    // Receives each committed result on the inference thread; must not block.
+    using DetectionSink =
+        std::function<void(const Frame& frame, const std::vector<DetectionDto>& detections)>;
+    void set_detection_sink(DetectionSink sink) { detection_sink_ = std::move(sink); }
 
     bool initialize(const Config& config) override;
     bool start() override;
@@ -53,6 +60,7 @@ private:
     std::shared_ptr<ApiState> api_;
     std::shared_ptr<EventChannel> events_;
     std::shared_ptr<AlertManager> alerts_;
+    DetectionSink detection_sink_;
     BoundedQueue<AlertWork> alert_queue_{2};
     AnnotationOptions annotation_;
     std::unique_ptr<TensorRtBootstrap> bootstrap_;

@@ -15,6 +15,8 @@ struct EncodedAccessUnit {
     bool keyframe = false;
     // True for the first AU after the RTSP media pipeline is (re)created.
     bool discontinuity = false;
+    // Identifies the RTSP media pipeline instance; PTS restarts when it changes.
+    std::uint64_t source_generation = 0;
     std::vector<std::uint8_t> bytes;
 };
 

@@ -3,10 +3,10 @@
 #include "skai/application.hpp"
 #include "skai/core/bounded_queue.hpp"
 #include "skai/video/encoded_access_unit.hpp"
+#include "skai/webrtc/detection_sei.hpp"
 
 #include <atomic>
 #include <condition_variable>
-#include <cstdint>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -25,6 +25,8 @@ public:
     void wait() noexcept override;
     std::string last_error() const override { return last_error_; }
     void publish_access_unit(const EncodedAccessUnit& unit) noexcept;
+    // Non-blocking; the result rides as SEI on a later access unit WHIP sends.
+    void publish_detections(SeiSourceResult result) noexcept;
 
 private:
     void run() noexcept;
@@ -34,14 +36,8 @@ private:
     WhipConfig config_;
     std::string token_;
     std::string last_error_;
-    struct QueuedUnit {
-        EncodedAccessUnit unit;
-        std::uint64_t restart_generation = 0;
-    };
-
-    BoundedQueue<QueuedUnit> media_queue_{8};
-    // Counts RTSP restarts on the producer side; survives queue discards.
-    std::atomic<std::uint64_t> restart_generation_{0};
+    BoundedQueue<EncodedAccessUnit> media_queue_{8};
+    BoundedQueue<SeiSourceResult> detection_queue_{32};
     std::atomic<bool> stopping_{false};
     std::mutex wait_mutex_;
     std::condition_variable wait_changed_;

@@ -124,6 +124,7 @@ private:
     MonotonicCounter pipeline_packets_late_;
     std::uint64_t access_unit_sequence_ = 0;
     bool first_access_unit_ = true;
+    std::uint64_t pipeline_generation_ = 0;
     std::mutex media_status_mutex_;
     bool media_status_known_ = false;
     bool media_available_ = false;

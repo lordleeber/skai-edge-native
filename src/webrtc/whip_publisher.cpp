@@ -144,6 +144,7 @@ bool WhipPublisher::initialize(const Config& config) {
         return false;
     }
     media_queue_.reset();
+    detection_queue_.reset();
     stopping_ = false;
     return true;
 }
@@ -162,6 +163,7 @@ bool WhipPublisher::start() {
 void WhipPublisher::stop() noexcept {
     stopping_ = true;
     media_queue_.shutdown();
+    detection_queue_.shutdown();
     wait_changed_.notify_all();
 }
 
@@ -172,11 +174,12 @@ void WhipPublisher::wait() noexcept {
 
 void WhipPublisher::publish_access_unit(const EncodedAccessUnit& unit) noexcept {
     if (!config_.enabled || stopping_) return;
-    try {
-        const auto generation = unit.discontinuity ? restart_generation_.fetch_add(1) + 1
-                                                   : restart_generation_.load();
-        media_queue_.push(QueuedUnit{unit, generation});
-    } catch (...) {}
+    try { media_queue_.push(unit); } catch (...) {}
+}
+
+void WhipPublisher::publish_detections(SeiSourceResult result) noexcept {
+    if (!config_.enabled || stopping_) return;
+    try { detection_queue_.push(std::move(result)); } catch (...) {}
 }
 
 void WhipPublisher::run() noexcept {
@@ -235,7 +238,25 @@ void WhipPublisher::publish_once() {
     track->setMediaHandler(packetizer);
     std::string location;
     std::uint64_t sent_units = 0;
-    const auto close_resource = [this, &location, &sent_units] {
+    SeiResultSelector detections;
+    const auto feed_dropped_at_start = detection_queue_.stats().dropped;
+    const auto sei_summary = [this, &detections, feed_dropped_at_start] {
+        const auto& stats = detections.stats();
+        const auto feed_dropped = detection_queue_.stats().dropped - feed_dropped_at_start;
+        std::string summary = "; sei units=" + std::to_string(stats.sei_units) +
+            " results attached=" + std::to_string(stats.results_attached) +
+            " results dropped=" + std::to_string(stats.results_dropped + feed_dropped) +
+            " boxes dropped=" + std::to_string(stats.boxes_dropped);
+        const auto p50 = detections.dt_percentile(0.5);
+        const auto p95 = detections.dt_percentile(0.95);
+        const auto max = detections.dt_percentile(1.0);
+        if (p50 && p95 && max) {
+            summary += " dt p50=" + std::to_string(*p50) + " p95=" + std::to_string(*p95) +
+                       " max=" + std::to_string(*max);
+        }
+        return summary;
+    };
+    const auto close_resource = [this, &location, &sent_units, &sei_summary] {
         if (location.empty()) return;
         std::atomic<bool> allow_cleanup{false};
         try {
@@ -248,7 +269,7 @@ void WhipPublisher::publish_once() {
                             std::to_string(response.status));
             } else {
                 logger_.log(LogLevel::Info, "whip", "publisher session closed; access units sent=" +
-                            std::to_string(sent_units));
+                            std::to_string(sent_units) + sei_summary());
             }
         } catch (const std::exception& error) {
             logger_.log(LogLevel::Warning, "whip", error.what());
@@ -309,16 +330,23 @@ void WhipPublisher::publish_once() {
             }
             media_opened = true;
             track_closed_at.reset();
-            auto queued = media_queue_.pop_for(std::chrono::milliseconds(100));
-            if (!queued) continue;
-            const auto* unit = &queued->unit;
+            auto unit = media_queue_.pop_for(std::chrono::milliseconds(100));
+            while (auto result = detection_queue_.pop_for(std::chrono::milliseconds(0))) {
+                detections.add(std::move(*result));
+            }
+            if (!unit) continue;
             const auto drops = media_queue_.stats().dropped;
             if (unit->discontinuity || drops != observed_drops) waiting_for_keyframe = true;
             observed_drops = drops;
             if (waiting_for_keyframe && !unit->keyframe) continue;
             waiting_for_keyframe = false;
-            rtp->timestamp = clock.timestamp(queued->restart_generation, unit->has_pts,
+            rtp->timestamp = clock.timestamp(unit->source_generation, unit->has_pts,
                                              unit->pts_ns);
+            if (unit->has_pts) {
+                // Only this copy changes; LAN WHEP and recording keep their own.
+                const auto sei = detections.take_for(unit->pts_ns, unit->source_generation);
+                if (!sei.empty()) insert_before_first_vcl(unit->bytes, sei);
+            }
             if (rtp->timestampToSeconds(rtp->timestamp -
                                         reporter->lastReportedTimestamp()) > 1.0) {
                 reporter->setNeedsToReport();

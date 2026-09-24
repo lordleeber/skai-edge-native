@@ -159,7 +159,8 @@ add_library(skai-webrtc-runtime src/webrtc/ice_runtime_module.cpp
     src/webrtc/webrtc_manager.cpp src/webrtc/whip_policy.cpp
     src/webrtc/whip_publisher.cpp)
 target_include_directories(skai-webrtc-runtime PUBLIC include PRIVATE src)
-target_link_libraries(skai-webrtc-runtime PUBLIC skai-application skai_ice::skai_ice
+target_link_libraries(skai-webrtc-runtime PUBLIC skai-application skai-detection-sei
+    skai_ice::skai_ice
     LibDataChannel::LibDataChannel CURL::libcurl)
 
 add_library(skai-storage src/storage/database.cpp src/storage/alert_repository.cpp)

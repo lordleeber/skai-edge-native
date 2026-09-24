@@ -120,8 +120,20 @@ int main(int argc, char* argv[]) {
 #if SKAI_HAS_YOLO_PIPELINE
     auto alert_manager = std::make_shared<skai::AlertManager>(
         gps_state, events, alert_repository, &logger);
-    modules.detector = std::make_unique<skai::YoloInferenceModule>(
+    auto detector = std::make_unique<skai::YoloInferenceModule>(
         inference_frames, logger, runtime_status, api_state, events, alert_manager);
+    detector->set_detection_sink([whip_sink](const skai::Frame& frame,
+                                             const std::vector<skai::DetectionDto>& detections) {
+        skai::SeiSourceResult result{frame.pts_ns, frame.source_generation, {}};
+        result.boxes.reserve(detections.size());
+        for (const auto& detection : detections) {
+            result.boxes.push_back(skai::normalize_sei_box(
+                detection.x1, detection.y1, detection.x2, detection.y2, frame.width,
+                frame.height, detection.class_name, detection.confidence));
+        }
+        whip_sink->publish_detections(std::move(result));
+    });
+    modules.detector = std::move(detector);
 #else
     api_state->set_detector_supported(false);
     logger.log(skai::LogLevel::Warning, "detector",

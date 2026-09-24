@@ -110,8 +110,12 @@ must support the same browser-compatible passthrough used by WHEP.
 
 Step 28 carries detections to cloud viewers as H.264 SEI on the WHIP stream
 (contract in `ROADMAP.md`). `step-28-a` adds the tested SEI helpers and keeps
-the WHIP RTP timestamp moving forward across RTSP reconnects; SEI insertion
-into the live WHIP stream arrives in `step-28-b`.
+the WHIP RTP timestamp moving forward across RTSP reconnects. `step-28-b`
+inserts each inference result into the next access unit WHIP sends; LAN WHEP
+and recordings receive their own unmodified copies. Each WHIP session-close log
+line reports SEI units, attached and dropped results, and `dt` percentiles.
+The loopback end-to-end check and the on-camera `dt` measurement follow in
+`step-28-c`.
 
 For an executable-only build without GoogleTest or the RTSP-server fixture:
 
