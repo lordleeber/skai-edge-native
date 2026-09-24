@@ -96,8 +96,8 @@ TEST(WhipRtpClock, UnitsWithoutPtsStepOneFrame) {
 
 TEST(WhipRtpClock, NewRestartGenerationContinuesAfterShortSessionWithoutFlag) {
     // The flagged unit may be discarded by queue overflow or a WHIP pause, and
-    // a short session leaves only a small backward PTS step; the generation
-    // stamped by the producer still identifies the restart.
+    // a short session leaves only a small backward PTS step; the source
+    // generation carried by every unit still identifies the restart.
     skai::WhipRtpClock clock(0);
     clock.timestamp(4, true, 520'000'000);
     const auto last = clock.timestamp(4, true, 520'000'000 + kFrame25);

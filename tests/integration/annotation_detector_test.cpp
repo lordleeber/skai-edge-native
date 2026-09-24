@@ -213,3 +213,60 @@ TEST(AnnotationDetector, RtspPipelinePublishesAnnotationsAndHonorsDisableFlag) {
     EXPECT_EQ(passthrough->bgr, original_pixels);
     EXPECT_EQ(published_events.size(), events_before_disable);
 }
+
+TEST(AnnotationDetector, DetectionSinkReceivesCommittedResultsWithSourceIdentity) {
+    int devices = 0;
+    if (cudaGetDeviceCount(&devices) != cudaSuccess || devices == 0) {
+        GTEST_SKIP() << "CUDA device unavailable";
+    }
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    skai::BoundedQueue<skai::Frame> input(2);
+    skai::BoundedQueue<skai::Frame> output(2);
+    auto status = std::make_shared<skai::RuntimeStatus>();
+    auto api = std::make_shared<skai::ApiState>(status);
+    skai::YoloInferenceModule module(input, output, logger, status, api);
+    std::mutex mutex;
+    std::condition_variable received;
+    std::vector<std::pair<skai::Frame, std::vector<skai::DetectionDto>>> sunk;
+    module.set_detection_sink([&](const skai::Frame& frame,
+                                  const std::vector<skai::DetectionDto>& detections) {
+        std::lock_guard<std::mutex> lock(mutex);
+        skai::Frame identity;
+        identity.pts_ns = frame.pts_ns;
+        identity.source_generation = frame.source_generation;
+        identity.width = frame.width;
+        identity.height = frame.height;
+        sunk.emplace_back(identity, detections);
+        received.notify_all();
+    });
+    skai::Config config;
+    config.detector.engine = SKAI_YOLO_ENGINE;
+    config.detector.confidence = 0.1;
+    config.detector.annotate = true;
+    ASSERT_TRUE(module.initialize(config));
+    ASSERT_TRUE(module.start());
+    auto frame = reference_frame();
+    frame.source_generation = 7;
+    ASSERT_TRUE(input.push(frame));
+    ASSERT_TRUE(output.pop_for(std::chrono::seconds(2)).has_value()) << logs.str();
+    const auto latest = api->latest_detections();
+    api->set_detector_enabled(false);
+    ASSERT_TRUE(input.push(reference_frame()));
+    ASSERT_TRUE(output.pop_for(std::chrono::seconds(2)).has_value()) << logs.str();
+    module.stop();
+    module.wait();
+
+    std::lock_guard<std::mutex> lock(mutex);
+    ASSERT_EQ(sunk.size(), 1U) << "disabled detector results must not reach the sink";
+    EXPECT_EQ(sunk[0].first.pts_ns, 123U);
+    EXPECT_EQ(sunk[0].first.source_generation, 7U);
+    EXPECT_EQ(sunk[0].first.width, 640);
+    EXPECT_EQ(sunk[0].first.height, 640);
+    ASSERT_FALSE(latest.detections.empty());
+    ASSERT_EQ(sunk[0].second.size(), latest.detections.size());
+    for (std::size_t i = 0; i < latest.detections.size(); ++i) {
+        EXPECT_EQ(sunk[0].second[i].class_name, latest.detections[i].class_name);
+        EXPECT_FLOAT_EQ(sunk[0].second[i].x1, latest.detections[i].x1);
+    }
+}

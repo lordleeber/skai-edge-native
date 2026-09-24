@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <tuple>
 
 namespace skai {
 namespace {
@@ -155,6 +156,107 @@ bool insert_before_first_vcl(std::vector<std::uint8_t>& access_unit,
         i += 2;
     }
     return false;
+}
+
+} // namespace skai
+
+namespace skai {
+
+namespace {
+
+constexpr std::uint64_t kResultWindowNs = 1'000'000'000ULL;
+constexpr std::size_t kRecentDtSamples = 4096;
+
+std::vector<std::uint8_t> encode_results(const std::vector<SeiResult>& results) {
+    return encode_user_data_sei_nal(kDetectionSeiUuid, detection_sei_json(results));
+}
+
+} // namespace
+
+void SeiResultSelector::add(SeiSourceResult result) {
+    pending_.push_back(std::move(result));
+    if (pending_.size() > max_pending_) {
+        const auto oldest = std::min_element(
+            pending_.begin(), pending_.end(), [](const auto& a, const auto& b) {
+                return std::tie(a.source_generation, a.source_pts_ns) <
+                       std::tie(b.source_generation, b.source_pts_ns);
+            });
+        pending_.erase(oldest);
+        ++stats_.results_dropped;
+    }
+}
+
+std::vector<std::uint8_t> SeiResultSelector::take_for(std::uint64_t attach_pts_ns,
+                                                      std::uint64_t attach_generation) {
+    std::vector<SeiSourceResult> due;
+    std::vector<SeiSourceResult> later;
+    for (auto& result : pending_) {
+        if (result.source_generation > attach_generation) {
+            later.push_back(std::move(result)); // its pipeline's units are not sent yet
+        } else if (result.source_generation < attach_generation ||
+                   result.source_pts_ns > attach_pts_ns ||
+                   attach_pts_ns - result.source_pts_ns > kResultWindowNs) {
+            ++stats_.results_dropped;
+        } else {
+            due.push_back(std::move(result));
+        }
+    }
+    pending_ = std::move(later);
+    if (due.empty()) return {};
+    std::stable_sort(due.begin(), due.end(), [](const auto& a, const auto& b) {
+        return a.source_pts_ns < b.source_pts_ns;
+    });
+
+    std::vector<SeiResult> results;
+    results.reserve(due.size());
+    for (auto& result : due) {
+        results.push_back({*sei_dt_ticks(attach_pts_ns, result.source_pts_ns),
+                           std::move(result.boxes)});
+    }
+    auto nal = encode_results(results);
+    while (nal.size() > kMaxDetectionSeiBytes && results.size() > 1) {
+        results.erase(results.begin());
+        ++stats_.results_dropped;
+        nal = encode_results(results);
+    }
+    if (nal.size() > kMaxDetectionSeiBytes) {
+        // The newest result alone is too large: keep its highest-score boxes.
+        auto boxes = std::move(results.front().boxes);
+        std::stable_sort(boxes.begin(), boxes.end(),
+                         [](const auto& a, const auto& b) { return a.score > b.score; });
+        std::size_t fits = 0;
+        std::size_t too_many = boxes.size();
+        while (fits + 1 < too_many) {
+            const auto count = (fits + too_many) / 2;
+            results.front().boxes.assign(boxes.begin(), boxes.begin() + count);
+            if (encode_results(results).size() <= kMaxDetectionSeiBytes) fits = count;
+            else too_many = count;
+        }
+        results.front().boxes.assign(boxes.begin(), boxes.begin() + fits);
+        stats_.boxes_dropped += boxes.size() - fits;
+        nal = encode_results(results);
+    }
+
+    ++stats_.sei_units;
+    stats_.results_attached += results.size();
+    for (const auto& result : results) {
+        if (recent_dt_.size() < kRecentDtSamples) {
+            recent_dt_.push_back(result.dt);
+        } else {
+            recent_dt_[next_dt_] = result.dt;
+            next_dt_ = (next_dt_ + 1) % kRecentDtSamples;
+        }
+    }
+    return nal;
+}
+
+std::optional<std::uint32_t> SeiResultSelector::dt_percentile(double q) const {
+    if (recent_dt_.empty()) return std::nullopt;
+    auto sorted = recent_dt_;
+    std::sort(sorted.begin(), sorted.end());
+    const auto rank = static_cast<std::size_t>(
+        std::ceil(std::clamp(q, 0.0, 1.0) * static_cast<double>(sorted.size())));
+    return sorted[std::max<std::size_t>(rank, 1) - 1];
 }
 
 } // namespace skai

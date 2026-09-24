@@ -153,6 +153,7 @@ bool RtspSource::open_pipeline(std::string& error) {
     sink_ = nullptr;
     encoded_sink_ = nullptr;
     first_access_unit_ = true;
+    ++pipeline_generation_;
     publish_media_status(false, "RTSP source is reconnecting");
     pipeline_ = gst::Pipeline::create_empty(logger_, error);
     if (!pipeline_) return false;
@@ -475,6 +476,7 @@ bool RtspSource::capture_sample(GstSample* sample, RtspRecovery& recovery) {
         frame.timestamp = std::chrono::steady_clock::now();
         frame.pts_ns = GST_CLOCK_TIME_IS_VALID(GST_BUFFER_PTS(buffer))
                            ? GST_BUFFER_PTS(buffer) : 0;
+        frame.source_generation = pipeline_generation_;
         frame.width = width;
         frame.height = height;
         frame.stride = width * 3;
@@ -532,6 +534,7 @@ bool RtspSource::capture_access_unit(GstSample* sample) {
     unit.keyframe = !GST_BUFFER_FLAG_IS_SET(buffer, GST_BUFFER_FLAG_DELTA_UNIT);
     unit.discontinuity = first_access_unit_ ||
                          GST_BUFFER_FLAG_IS_SET(buffer, GST_BUFFER_FLAG_DISCONT);
+    unit.source_generation = pipeline_generation_;
     unit.bytes.assign(mapped.data, mapped.data + mapped.size);
     gst_buffer_unmap(buffer, &mapped);
     first_access_unit_ = false;

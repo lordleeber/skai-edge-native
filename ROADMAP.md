@@ -1905,17 +1905,23 @@ Split and progress:
   encoding with emulation prevention, insertion before the first VCL NAL, box
   normalization, `dt`, JSON) and WHIP RTP timestamp continuity via
   `WhipRtpClock`. SEI is not yet inserted into the live stream.
-- `step-28-b`: detection feed from `YoloInferenceModule`, pending-result
-  selection and insertion in `WhipPublisher`, counters, the WHEP/recording
-  byte-for-byte check, throughput check, and the `dt` re-measurement.
+- `step-28-b` (done): detection feed from `YoloInferenceModule` through
+  `set_detection_sink` to `WhipPublisher::publish_detections`, pending-result
+  selection in `SeiResultSelector`, SEI insertion into the WHIP copy of each
+  sent unit, and counters in the WHIP session-close log (SEI units, results
+  attached and dropped, boxes dropped, `dt` p50/p95/max).
+- `step-28-c`: loopback WHIP end-to-end test (SEI recovery, RTP continuity
+  across a restart, byte-for-byte check against the unmodified units), the
+  throughput check, and the `dt` re-measurement on the target camera.
 
 Decisions made in `step-28-a`:
 
 - a WHIP pause or queue overflow can discard the unit carrying the
-  `discontinuity` flag, so `WhipPublisher` stamps each queued unit with a
-  producer-side restart generation and `WhipRtpClock` continues from the last
-  sent timestamp when the generation changes; PTS that merely fails to advance
-  within one generation does not rebase, so the offset cannot drift ahead
+  `discontinuity` flag, so `WhipRtpClock` continues from the last sent
+  timestamp when the unit's restart generation changes; PTS that merely fails
+  to advance within one generation does not rebase, so the offset cannot drift
+  ahead (`step-28-b` replaced the publisher-side counter with
+  `source_generation`, see below)
 - the first PTS after units without PTS also continues from the last sent
   timestamp
 - the frame interval used for continuation is the last PTS step between two
@@ -1927,8 +1933,21 @@ Decisions made in `step-28-a`:
   in front of its `zero_byte`
 - numbers in the JSON use the shortest locale-independent form (`0.5`, `1`)
 
-Open for `step-28-b`: a single newest result whose boxes alone exceed 1 KB
-needs a rule (for example keep the highest-score boxes that fit).
+Decisions made in `step-28-b`:
+
+- `RtspSource` stamps every `Frame` and `EncodedAccessUnit` with
+  `source_generation`, incremented each time the media pipeline is created.
+  Results are matched to units by it: an older generation is dropped, a newer
+  one waits for its pipeline's units. `WhipRtpClock` uses the same value, so a
+  `GST_BUFFER_FLAG_DISCONT` inside one pipeline no longer rebases the clock.
+- the size cap covers the whole SEI NAL including its start code
+  (`kMaxDetectionSeiBytes` = 1024). When the newest result alone exceeds it,
+  its highest-score boxes that fit are kept and the rest are counted as boxes
+  dropped; the spec is unchanged, so about 16-22 boxes fit depending on class
+  name length.
+- results wait in `WhipPublisher` only while it is sending: a bounded feed
+  queue (32, drop-oldest) and at most 64 pending results. Units without PTS
+  never carry SEI; their results wait for the next unit with PTS.
 
 ---
 

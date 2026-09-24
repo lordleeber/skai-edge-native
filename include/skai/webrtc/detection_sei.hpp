@@ -52,4 +52,45 @@ std::vector<std::uint8_t> encode_user_data_sei_nal(
 bool insert_before_first_vcl(std::vector<std::uint8_t>& access_unit,
                              const std::vector<std::uint8_t>& nal);
 
+// One inference result waiting for a WHIP access unit. `source_generation`
+// identifies the RTSP pipeline that produced the inferred frame.
+struct SeiSourceResult {
+    std::uint64_t source_pts_ns = 0;
+    std::uint64_t source_generation = 0;
+    std::vector<SeiBox> boxes;
+};
+
+struct SeiUplinkStats {
+    std::uint64_t sei_units = 0;
+    std::uint64_t results_attached = 0;
+    std::uint64_t results_dropped = 0;
+    std::uint64_t boxes_dropped = 0;
+};
+
+inline constexpr std::size_t kMaxDetectionSeiBytes = 1024;
+
+// Applies the Step 28 emission rules to results waiting for the next access
+// unit WHIP sends: 1 s window, no results from an earlier RTSP pipeline or
+// newer than the unit, oldest first, and at most kMaxDetectionSeiBytes.
+class SeiResultSelector {
+public:
+    explicit SeiResultSelector(std::size_t max_pending = 64) : max_pending_(max_pending) {}
+
+    void add(SeiSourceResult result);
+    // The SEI NAL for the unit about to be sent, or empty when none is due.
+    std::vector<std::uint8_t> take_for(std::uint64_t attach_pts_ns,
+                                       std::uint64_t attach_generation);
+    std::size_t pending() const { return pending_.size(); }
+    const SeiUplinkStats& stats() const { return stats_; }
+    // Nearest-rank percentile of recently attached dt values, q in [0, 1].
+    std::optional<std::uint32_t> dt_percentile(double q) const;
+
+private:
+    std::size_t max_pending_;
+    std::vector<SeiSourceResult> pending_;
+    std::vector<std::uint32_t> recent_dt_;
+    std::size_t next_dt_ = 0;
+    SeiUplinkStats stats_;
+};
+
 } // namespace skai

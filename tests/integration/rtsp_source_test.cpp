@@ -5,6 +5,8 @@
 
 #include <gtest/gtest.h>
 
+#include <optional>
+
 #include <chrono>
 #include <atomic>
 #include <filesystem>
@@ -172,6 +174,47 @@ TEST(RtspSource, PublishesSourceH264AccessUnitsWithoutReencoding) {
     EXPECT_TRUE(saw_keyframe);
     EXPECT_TRUE(saw_pts);
     source.stop();
+}
+
+TEST(RtspSource, StampsFramesAndAccessUnitsWithThePipelineGeneration) {
+    std::string error;
+    ASSERT_TRUE(skai::gst::initialize_once(error)) << error;
+    skai::test::RtspTestServer server;
+    ASSERT_TRUE(server.start(error)) << error;
+    skai::BoundedQueue<skai::Frame> frames(2);
+    skai::BoundedQueue<skai::EncodedAccessUnit> access_units(8);
+    std::ostringstream output;
+    skai::Logger logger(output);
+    skai::RtspSource source(frames, logger, skai::DecodeMode::Software, true, {},
+                            &access_units);
+    skai::VideoConfig config;
+    config.rtsp_url = server.url();
+    config.transport = "tcp";
+    config.latency_ms = 50;
+    ASSERT_TRUE(source.start(config, error)) << error << output.str();
+    const auto first_frame = frames.pop_for(std::chrono::seconds(3));
+    const auto first_unit = access_units.pop_for(std::chrono::seconds(3));
+    ASSERT_TRUE(first_frame && first_unit) << output.str();
+    EXPECT_GT(first_frame->source_generation, 0U);
+    EXPECT_EQ(first_unit->source_generation, first_frame->source_generation);
+
+    server.stop();
+    ASSERT_TRUE(wait_for_health(source, skai::SourceHealth::Reconnecting,
+                                std::chrono::seconds(3))) << output.str();
+    ASSERT_TRUE(server.start(error)) << error;
+    std::optional<skai::Frame> frame;
+    std::optional<skai::EncodedAccessUnit> unit;
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (std::chrono::steady_clock::now() < deadline &&
+           (!frame || frame->source_generation == first_frame->source_generation ||
+            !unit || unit->source_generation == first_unit->source_generation)) {
+        if (auto next = frames.pop_for(std::chrono::milliseconds(50))) frame = std::move(next);
+        if (auto next = access_units.pop_for(std::chrono::milliseconds(50))) unit = std::move(next);
+    }
+    source.stop();
+    ASSERT_TRUE(frame && unit) << output.str();
+    EXPECT_GT(frame->source_generation, first_frame->source_generation) << output.str();
+    EXPECT_EQ(unit->source_generation, frame->source_generation);
 }
 
 TEST(RtspSource, RejectsHighProfileH264PassthroughButStillDecodesForInference) {

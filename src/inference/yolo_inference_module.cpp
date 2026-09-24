@@ -170,7 +170,7 @@ void YoloInferenceModule::run() noexcept {
             }
         }
         std::vector<DetectionDto> published;
-        if (api_) {
+        if (api_ || detection_sink_) {
             published.reserve(detections.detections.size());
             for (const auto& detection : detections.detections) {
                 published.push_back({detection.class_id, class_name(detection.class_id),
@@ -179,6 +179,9 @@ void YoloInferenceModule::run() noexcept {
                                      detection.y2});
             }
         }
+        // commit_detections() takes `published` by value, so the sink keeps a copy.
+        std::vector<DetectionDto> sink_detections;
+        if (detection_sink_) sink_detections = published;
         std::optional<AlertWork> alert_work;
         if (alerts_) {
             alert_work = AlertWork{detections, output_ ? annotated : *frame,
@@ -198,6 +201,7 @@ void YoloInferenceModule::run() noexcept {
                 events_->publish(EventType::Detection,
                                  detection_event_data(detections, *frame));
             }
+            if (detection_sink_) detection_sink_(*frame, sink_detections);
             if (alerts_) {
                 const auto dropped = alert_queue_.stats().dropped;
                 alert_queue_.push(std::move(*alert_work));

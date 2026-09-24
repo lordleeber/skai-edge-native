@@ -49,8 +49,8 @@ class WhipRtpClock {
 public:
     explicit WhipRtpClock(std::uint32_t start_timestamp) : start_(start_timestamp) {}
 
-    // `generation` counts RTSP restarts and is stamped when a unit is queued, so
-    // a restart is seen even when its flagged unit was discarded or skipped.
+    // `generation` is the unit's EncodedAccessUnit::source_generation, carried by
+    // every unit, so a restart is seen even when its flagged unit was discarded.
     std::uint32_t timestamp(std::uint64_t generation, bool has_pts, std::uint64_t pts_ns);
 
 private:
