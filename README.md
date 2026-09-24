@@ -114,8 +114,9 @@ the WHIP RTP timestamp moving forward across RTSP reconnects. `step-28-b`
 inserts each inference result into the next access unit WHIP sends; LAN WHEP
 and recordings receive their own unmodified copies. Each WHIP session-close log
 line reports SEI units, attached and dropped results, and `dt` percentiles.
-The loopback end-to-end check and the on-camera `dt` measurement follow in
-`step-28-c`.
+`tests/integration/whip_sei_test.cpp` checks the path end to end through a
+loopback WHIP endpoint, and `scripts/measure_whip_sei.sh CONFIG SECONDS [PORT]
+[RECORDING_DIR]` repeats the on-camera measurement recorded in `ROADMAP.md`.
 
 For an executable-only build without GoogleTest or the RTSP-server fixture:
 

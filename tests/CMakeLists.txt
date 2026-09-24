@@ -53,6 +53,7 @@ gtest_discover_tests(skai-recording-tests PROPERTIES TIMEOUT 20)
 add_executable(skai-detection-sei-tests unit/detection_sei_test.cpp)
 target_link_libraries(skai-detection-sei-tests PRIVATE skai-detection-sei skai-gstreamer
     PkgConfig::GST_VIDEO_APP GTest::gtest_main)
+target_include_directories(skai-detection-sei-tests PRIVATE support)
 gtest_discover_tests(skai-detection-sei-tests PROPERTIES TIMEOUT 30)
 
 add_executable(skai-webrtc-tests integration/webrtc_dependency_test.cpp
@@ -61,6 +62,12 @@ target_include_directories(skai-webrtc-tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(skai-webrtc-tests PRIVATE skai-webrtc-runtime
     LibDataChannel::LibDataChannel GTest::gtest_main)
 gtest_discover_tests(skai-webrtc-tests PROPERTIES LABELS webrtc TIMEOUT 15)
+
+add_executable(skai-whip-sei-tests integration/whip_sei_test.cpp)
+target_include_directories(skai-whip-sei-tests PRIVATE support)
+target_link_libraries(skai-whip-sei-tests PRIVATE skai-webrtc-runtime skai-gstreamer
+    PkgConfig::GST_VIDEO_APP LibDataChannel::LibDataChannel Boost::system GTest::gtest_main)
+gtest_discover_tests(skai-whip-sei-tests PROPERTIES LABELS webrtc TIMEOUT 60)
 
 add_executable(skai-whep-tests integration/whep_session_test.cpp)
 target_link_libraries(skai-whep-tests PRIVATE skai-web
