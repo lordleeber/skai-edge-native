@@ -175,7 +175,7 @@ details[open] summary { margin-bottom: .5rem; }
 <nav class="pagenav" aria-label="章節導覽">
   <span>← 沒有前一章</span>
   <a href="index.html">目錄</a>
-  <span>沒有下一章 →</span>
+  <a href="step28-sei-overlay.html">Step 28：雲端疊框 →</a>
 </nav>
 
 <header class="hero">
@@ -953,6 +953,10 @@ No such element or plugin 'whipsink'</pre>
   <li><b>cpp</b>：把 PTS 設成「不知道」（<code>GST_BUFFER_PTS(buf) = GST_CLOCK_TIME_NONE</code>），讓 <code>appsrc do-timestamp=true</code> 用「畫面抵達的時間」自動蓋。簡單，但網路或 ROS 傳遞的抖動會直接變成播放的抖動。</li>
   <li><b>本 repo</b>：用攝影機給的 PTS（呈現時間，奈秒）換算：<code>h264_rtp_timestamp</code> 就是「秒 × 90000 ＋ 餘數換算」。攝影機沒給 PTS 時，退回每張 +3000（等於假設 30 fps）。</li>
 </ul>
+<div class="note">
+  <p><b>Step 28 改了這一段</b>：上面節錄的 <code>timestamp_ready</code> 寫法是 Step 27 的版本。RTSP 重連後 PTS 會從 0 重新開始，這樣算出來的 WHIP 時間戳會倒退；
+  Step 28 改用 <code>WhipRtpClock</code>，重連時從上一個送出的值加一幀接續。區網 WHEP 仍是直接從 PTS 換算。見 <a href="step28-sei-overlay.html#restart">Step 28 第 9 節</a>。</p>
+</div>
 <div class="src">include/skai/video/encoded_access_unit.hpp</div>
 <pre class="code" data-src="include/skai/video/encoded_access_unit.hpp">inline std::uint32_t h264_rtp_timestamp(std::uint64_t pts_ns) noexcept {
     const std::uint64_t seconds = pts_ns / 1'000'000'000ULL;
@@ -1088,6 +1092,7 @@ No such element or plugin 'whipsink'</pre>
   <b>第一版（<code>8754f65</code>）不是這樣</b>：它把 <code>Disconnected</code> 當成 <code>Failed</code>，Wi-Fi 閃斷一下就要付出「DELETE、等 3 秒、重新 POST、等下一張 keyframe」的代價。
   這是 Step 27 code review 指出的問題，<code>29c3da1</code> 改成上面的寬限做法，並補了單元測試 <code>tests/unit/whip_publisher_test.cpp</code>。
 </p>
+<p>（上面節錄裡的 <code>timestamp_ready = false;</code> 在 Step 28 已經拿掉，恢復之後的時間戳改由 <code>WhipRtpClock</code> 處理，見 <a href="step28-sei-overlay.html#restart">Step 28 第 9 節</a>。）</p>
 
 <!-- ============================================================ -->
 <h2 id="teardown">11. 收尾：DELETE 與關機（步驟 ⑨）</h2>
@@ -1459,7 +1464,7 @@ exit=2<span class="mk">4</span></pre>
 <nav class="pagenav" aria-label="章節導覽">
   <span>← 沒有前一章</span>
   <a href="index.html">目錄</a>
-  <span>沒有下一章 →</span>
+  <a href="step28-sei-overlay.html">Step 28：雲端疊框 →</a>
 </nav>
 
 </div>
