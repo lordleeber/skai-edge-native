@@ -1,5 +1,7 @@
 #include "webrtc/whip_policy.hpp"
 
+#include "skai/video/encoded_access_unit.hpp"
+
 #include <algorithm>
 
 namespace skai {
@@ -69,6 +71,28 @@ bool WhipPeerState::wait_for_gathering(const std::atomic<bool>& stopping,
         changed_.wait_until(lock, next_check);
     }
     return gathered_ && !failed_ && !stopping;
+}
+
+std::uint32_t WhipRtpClock::timestamp(bool has_pts, std::uint64_t pts_ns) {
+    std::uint32_t next = has_last_ ? last_ + frame_ticks_ : start_;
+    if (has_pts) {
+        const auto ticks = h264_rtp_timestamp(pts_ns);
+        const auto step = last_pts_ticks_
+            ? static_cast<std::int32_t>(ticks - *last_pts_ticks_) : 1;
+        // PTS going backward also means a restart whose flagged unit was dropped.
+        if (has_last_ && (rebase_ || step <= 0)) {
+            offset_ = next - ticks;
+        } else if (step > 0 && step <= 9000) {
+            // Learn the frame interval from consecutive units at 10 fps or faster.
+            frame_ticks_ = static_cast<std::uint32_t>(step);
+        }
+        rebase_ = false;
+        next = ticks + offset_;
+        last_pts_ticks_ = ticks;
+    }
+    last_ = next;
+    has_last_ = true;
+    return next;
 }
 
 } // namespace skai

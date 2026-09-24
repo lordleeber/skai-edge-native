@@ -269,7 +269,7 @@ void WhipPublisher::publish_once() {
                                                     rtc::Description::Type::Answer));
         logger_.log(LogLevel::Info, "whip", "publisher session created");
         bool waiting_for_keyframe = true;
-        bool timestamp_ready = false;
+        WhipRtpClock clock(rtp->startTimestamp);
         bool media_opened = false;
         bool awaiting_resume = false;
         std::optional<std::chrono::steady_clock::time_point> track_closed_at;
@@ -301,7 +301,6 @@ void WhipPublisher::publish_once() {
             }
             if (awaiting_resume) {
                 waiting_for_keyframe = true;
-                timestamp_ready = false;
                 awaiting_resume = false;
             }
             media_opened = true;
@@ -309,22 +308,12 @@ void WhipPublisher::publish_once() {
             auto unit = media_queue_.pop_for(std::chrono::milliseconds(100));
             if (!unit) continue;
             const auto drops = media_queue_.stats().dropped;
-            if (unit->discontinuity || drops != observed_drops) {
-                waiting_for_keyframe = true;
-                timestamp_ready = false;
-            }
+            if (unit->discontinuity) clock.mark_discontinuity();
+            if (unit->discontinuity || drops != observed_drops) waiting_for_keyframe = true;
             observed_drops = drops;
             if (waiting_for_keyframe && !unit->keyframe) continue;
             waiting_for_keyframe = false;
-            if (unit->has_pts) {
-                rtp->timestamp = h264_rtp_timestamp(unit->pts_ns);
-                timestamp_ready = true;
-            } else if (!timestamp_ready) {
-                rtp->timestamp = rtp->startTimestamp;
-                timestamp_ready = true;
-            } else {
-                rtp->timestamp += 3000;
-            }
+            rtp->timestamp = clock.timestamp(unit->has_pts, unit->pts_ns);
             if (rtp->timestampToSeconds(rtp->timestamp -
                                         reporter->lastReportedTimestamp()) > 1.0) {
                 reporter->setNeedsToReport();

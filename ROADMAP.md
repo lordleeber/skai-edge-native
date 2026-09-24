@@ -1899,6 +1899,30 @@ Acceptance:
 Out of scope: object tracking and `track_id`, `/watch` changes, a WebSocket or
 HTTP metadata side channel, RTP header extensions, and WebRTC data channels.
 
+Split and progress:
+
+- `step-28-a` (done): SEI helpers in `skai/webrtc/detection_sei.hpp` (NAL
+  encoding with emulation prevention, insertion before the first VCL NAL, box
+  normalization, `dt`, JSON) and WHIP RTP timestamp continuity via
+  `WhipRtpClock`. SEI is not yet inserted into the live stream.
+- `step-28-b`: detection feed from `YoloInferenceModule`, pending-result
+  selection and insertion in `WhipPublisher`, counters, the WHEP/recording
+  byte-for-byte check, throughput check, and the `dt` re-measurement.
+
+Decisions made in `step-28-a`:
+
+- a WHIP pause or queue overflow can discard the unit carrying the
+  `discontinuity` flag, so `WhipRtpClock` also continues from the last sent
+  timestamp whenever the PTS-derived timestamp does not move forward
+- the frame interval used for continuation is the last PTS step between sent
+  units when it is at most 9000 ticks (10 fps or faster), else 3000
+- a 4-byte start code before the first slice stays whole; the SEI is inserted
+  in front of its `zero_byte`
+- numbers in the JSON use the shortest locale-independent form (`0.5`, `1`)
+
+Open for `step-28-b`: a single newest result whose boxes alone exceed 1 KB
+needs a rule (for example keep the highest-score boxes that fit).
+
 ---
 
 # Phase 12 — Observability and Diagnostics

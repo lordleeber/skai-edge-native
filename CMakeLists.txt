@@ -152,6 +152,9 @@ add_library(skai-application src/application.cpp)
 target_include_directories(skai-application PUBLIC include)
 target_link_libraries(skai-application PUBLIC skai-config skai-logging Threads::Threads)
 
+add_library(skai-detection-sei src/webrtc/detection_sei.cpp)
+target_include_directories(skai-detection-sei PUBLIC include)
+
 add_library(skai-webrtc-runtime src/webrtc/ice_runtime_module.cpp
     src/webrtc/webrtc_manager.cpp src/webrtc/whip_policy.cpp
     src/webrtc/whip_publisher.cpp)
