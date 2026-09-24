@@ -204,11 +204,17 @@ void validate(const Config& config) {
         check_range(!interface.empty() && interface.find_first_of(" /\t\r\n") == std::string::npos,
                     "webrtc.host_interfaces", "must contain interface names without spaces or slashes");
     }
+    check_range(!config.whip.enabled || config.whip.url.rfind("https://", 0) == 0,
+                "whip.url", "must use https when whip.enabled is true");
+    check_range(!config.whip.enabled ||
+                    (config.whip.url.size() > 8 &&
+                     config.whip.url.find_first_of(" \t\r\n#") == std::string::npos),
+                "whip.url", "must be a valid HTTPS endpoint");
 }
 
 Config parse(const YAML::Node& root) {
     check_keys(root, "", {"video", "detector", "web", "recording", "storage",
-                           "alerts", "gps", "webrtc", "logging"});
+                           "alerts", "gps", "webrtc", "whip", "logging"});
     if (!root["video"] || !root["video"].IsMap() || !root["video"]["rtsp_url"]) {
         throw std::invalid_argument("video.rtsp_url is required");
     }
@@ -318,6 +324,11 @@ Config parse(const YAML::Node& root) {
                 config.webrtc.host_interfaces.push_back(item.as<std::string>());
             }
         }
+    }
+    if (const auto section = root["whip"]) {
+        check_keys(section, "whip", {"enabled", "url"});
+        read_scalar(section, "enabled", "whip", config.whip.enabled);
+        read_scalar(section, "url", "whip", config.whip.url);
     }
     if (const auto section = root["logging"]) {
         check_keys(section, "logging", {"level"});

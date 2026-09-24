@@ -57,5 +57,10 @@ webrtc:
   host_interfaces: [eth0, wlan0]
   ice_log_verbosity: 1
 
+whip:
+  enabled: true
+  url: https://skai-cam.duckdns.org/sfu/cam1/whip
+  # Publisher token is loaded from WHIP_TOKEN in the environment or .env.
+
 logging:
   level: info

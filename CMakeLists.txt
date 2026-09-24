@@ -15,6 +15,7 @@ pkg_check_modules(GST_VIDEO_APP REQUIRED IMPORTED_TARGET
 find_package(OpenCV REQUIRED COMPONENTS core imgproc imgcodecs)
 find_package(Boost 1.74 REQUIRED COMPONENTS system)
 find_package(SQLite3 REQUIRED)
+find_package(CURL REQUIRED)
 
 set(SKAI_ICE_BUILD_SERVICE OFF CACHE BOOL "" FORCE)
 set(SKAI_ICE_BUILD_TESTS OFF CACHE BOOL "" FORCE)
@@ -152,10 +153,10 @@ target_include_directories(skai-application PUBLIC include)
 target_link_libraries(skai-application PUBLIC skai-config skai-logging Threads::Threads)
 
 add_library(skai-webrtc-runtime src/webrtc/ice_runtime_module.cpp
-    src/webrtc/webrtc_manager.cpp)
+    src/webrtc/webrtc_manager.cpp src/webrtc/whip_publisher.cpp)
 target_include_directories(skai-webrtc-runtime PUBLIC include)
 target_link_libraries(skai-webrtc-runtime PUBLIC skai-application skai_ice::skai_ice
-    LibDataChannel::LibDataChannel)
+    LibDataChannel::LibDataChannel CURL::libcurl)
 
 add_library(skai-storage src/storage/database.cpp src/storage/alert_repository.cpp)
 target_include_directories(skai-storage PUBLIC include)

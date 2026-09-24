@@ -13,6 +13,7 @@
 #include "skai/web/http_server.hpp"
 #include "skai/webrtc/ice_runtime_module.hpp"
 #include "skai/webrtc/webrtc_manager.hpp"
+#include "skai/webrtc/whip_publisher.hpp"
 #if SKAI_HAS_YOLO_PIPELINE
 #include "skai/alerts/alert_manager.hpp"
 #include "skai/inference/yolo_inference_module.hpp"
@@ -101,12 +102,15 @@ int main(int argc, char* argv[]) {
     auto alert_repository = std::make_shared<skai::AlertRepository>(*database);
     auto recording_control = std::make_shared<skai::RecordingController>();
     auto webrtc_manager = std::make_shared<skai::WebRtcManager>(logger);
+    auto whip_publisher = std::make_unique<skai::WhipPublisher>(logger);
+    auto* whip_sink = whip_publisher.get();
     recording_control->set_media_available(
         false, "waiting for a browser-compatible H.264 source");
     webrtc_manager->set_media_available(
         false, "waiting for a browser-compatible H.264 source");
     modules.storage = std::move(database);
     modules.webrtc = std::make_unique<skai::IceRuntimeModule>(logger);
+    modules.whip = std::move(whip_publisher);
     modules.web = std::make_unique<skai::web::HttpServer>(logger, runtime_status,
                                                           api_state, events,
                                                           alert_repository, recording_control,
@@ -125,8 +129,9 @@ int main(int argc, char* argv[]) {
 #endif
     modules.video = std::make_unique<skai::RtspVideoModule>(
         inference_frames, encoded_access_units, logger, runtime_status,
-        [webrtc_manager](const skai::EncodedAccessUnit& unit) {
+        [webrtc_manager, whip_sink](const skai::EncodedAccessUnit& unit) {
             webrtc_manager->publish_access_unit(unit);
+            whip_sink->publish_access_unit(unit);
         },
         [recording_control, webrtc_manager](bool available,
                                              const std::string& reason) {

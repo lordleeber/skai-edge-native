@@ -52,6 +52,7 @@ bool Application::initialize() {
 
     const ModuleRef ordered[] = {
         {"storage", modules_.storage.get()}, {"webrtc", modules_.webrtc.get()},
+        {"whip", modules_.whip.get()},
         {"web", modules_.web.get()},
         {"encoder", modules_.encoder.get()}, {"detector", modules_.detector.get()},
         {"recording", modules_.recording.get()},
