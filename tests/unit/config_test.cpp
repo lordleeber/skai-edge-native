@@ -56,6 +56,30 @@ TEST(Config, CanDisableDetectorAnnotation) {
     EXPECT_FALSE(result.config.detector.annotate);
 }
 
+TEST(Config, ParsesWhipPublisherSettings) {
+    const auto result = skai::parse_config(
+        "video: {rtsp_url: 'rtsp://camera/stream'}\n"
+        "whip: {enabled: true, url: 'https://skai-cam.duckdns.org/sfu/cam1/whip'}\n");
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_TRUE(result.config.whip.enabled);
+    EXPECT_EQ(result.config.whip.url,
+              "https://skai-cam.duckdns.org/sfu/cam1/whip");
+}
+
+TEST(Config, ExampleDoesNotPublishToCloudByDefault) {
+    const auto result = skai::load_config(SKAI_EXAMPLE_CONFIG);
+    ASSERT_TRUE(result.ok) << result.error;
+    EXPECT_FALSE(result.config.whip.enabled);
+}
+
+TEST(Config, RejectsInsecureWhipUrl) {
+    const auto result = skai::parse_config(
+        "video: {rtsp_url: 'rtsp://camera/stream'}\n"
+        "whip: {enabled: true, url: 'http://example.com/whip'}\n");
+    EXPECT_FALSE(result.ok);
+    EXPECT_NE(result.error.find("whip.url"), std::string::npos);
+}
+
 TEST(Config, UsesStableProductionStorageDefaults) {
     const auto result = skai::parse_config(
         "video: {rtsp_url: 'rtsp://camera/stream'}\n");

@@ -55,7 +55,8 @@ GStreamer development packages (`libgstreamer1.0-dev`,
 `libgstreamer-plugins-base1.0-dev`), and GStreamer plugins from the base, good, ugly
 (H.264), libav (software H.264/H.265 decode), and bad (optional H.265) sets,
 OpenCV development files (`libopencv-dev`), then install GoogleTest
-(`libgtest-dev`), SQLite (`libsqlite3-dev`), and the test-only RTSP server
+(`libgtest-dev`), SQLite (`libsqlite3-dev`), libcurl (`libcurl4-openssl-dev`),
+and the test-only RTSP server
 development package (`libgstrtspserver-1.0-dev`) to run tests. Node.js 18+ is
 used only for dependency-free browser-state tests; no npm packages or frontend
 build step are required:
@@ -96,6 +97,16 @@ Step 24 exposes non-trickle WHEP signaling at `POST /api/v1/webrtc/whep`.
 Successful `application/sdp` offers return `201 Created`; deleting the returned
 `Location` closes the peer. Sessions enforce `webrtc.max_peers`, stale cleanup,
 and shutdown cleanup. H.264 media forwarding follows in Step 25.
+
+Step 27 adds an optional WHIP publisher. Set `whip.enabled: true` and
+`whip.url: https://skai-cam.duckdns.org/sfu/cam1/whip` in YAML, then provide
+`WHIP_TOKEN` in the process environment or in an ignored `.env` file in the
+working directory. The publisher sends the existing H.264 access units through
+libdatachannel, performs WHIP signaling over HTTPS, retries failed sessions,
+and deletes the server resource on shutdown. The minisfu requires the token on
+both the POST and DELETE signaling requests; RTP media does not use it. The
+token is never written to logs or YAML. The configured H.264 source
+must support the same browser-compatible passthrough used by WHEP.
 
 For an executable-only build without GoogleTest or the RTSP-server fixture:
 

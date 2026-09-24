@@ -1787,6 +1787,11 @@ Acceptance:
 
 ## Step 27 — RTSP output
 
+Deployment update: the cloud server requires a WHIP publisher at
+`https://skai-cam.duckdns.org/sfu/cam1/whip`, so Step 27 implements optional
+WHIP uplink from the shared H.264 stream. RTSP output remains optional and is
+not part of this deployment step.
+
 Implement only if a non-browser RTSP consumer is still required.
 
 Possible implementations:

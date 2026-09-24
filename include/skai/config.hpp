@@ -83,6 +83,11 @@ struct WebrtcConfig {
     int ice_log_verbosity = 1;
 };
 
+struct WhipConfig {
+    bool enabled = false;
+    std::string url;
+};
+
 struct LoggingConfig {
     LogLevel level = LogLevel::Info;
 };
@@ -96,6 +101,7 @@ struct Config {
     std::vector<AlertRuleConfig> alerts;
     GpsConfig gps;
     WebrtcConfig webrtc;
+    WhipConfig whip;
     LoggingConfig logging;
 };
 

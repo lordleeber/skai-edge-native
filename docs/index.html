@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>skai-edge-native 教材目錄</title>
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #10141a; --bg-panel: #161c24; --fg: #dde5ec; --muted: #93a1af;
+  --accent: #58a6ff; --ok: #56d364; --bad: #f47067; --hairline: #2b3540; --code-bg: #171d25;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+    --bg: #f7f8fa; --bg-panel: #ffffff; --fg: #1d2530; --muted: #5a6776;
+    --accent: #0a5fc2; --ok: #1a7f37; --bad: #c62828; --hairline: #d5dbe2; --code-bg: #f0f3f6;
+  }
+}
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f7f8fa; --bg-panel: #ffffff; --fg: #1d2530; --muted: #5a6776;
+  --accent: #0a5fc2; --ok: #1a7f37; --bad: #c62828; --hairline: #d5dbe2; --code-bg: #f0f3f6;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); line-height: 1.9; font-size: 1.0625rem;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif; }
+.wrap { max-width: 1080px; margin: 0 auto; padding: 1.5rem 16px 4rem; }
+a { color: var(--accent); }
+code { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: .9em; background: var(--code-bg); padding: .1em .35em; border-radius: 4px; }
+b.hl-key { color: var(--accent); }
+.hero { padding: 1.6rem; background: var(--bg-panel); border: 1px solid var(--hairline); border-radius: 14px; }
+.hero h1 { margin: 0 0 .5rem; font-size: 1.9rem; line-height: 1.4; }
+.cards { display: grid; gap: 1rem; margin-top: 1.5rem; }
+.card { display: block; padding: 1.1rem 1.3rem; background: var(--bg-panel); border: 1px solid var(--hairline); border-radius: 12px;
+  text-decoration: none; color: var(--fg); }
+.card:hover { border-color: var(--accent); }
+.card .no { font-size: .8rem; font-weight: 700; color: var(--accent); letter-spacing: .05em; }
+.card h2 { margin: .2rem 0 .3rem; font-size: 1.2rem; line-height: 1.5; }
+.card p { margin: 0; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="hero">
+  <h1>skai-edge-native 教材</h1>
+  <p>
+    <code>skai-edge-native</code> 是跑在 Jetson 上的單一 C++ 執行檔：從攝影機拉 RTSP 影像、做物件偵測與警報、錄影，
+    並用 WebRTC 讓瀏覽器觀看（區網用 WHEP，雲端用 WHIP 推流）。它是 ROS 2 版本 <code>skai-edge-cpp</code> 的重寫，
+    開發順序照 repo 根目錄的 <code>ROADMAP.md</code>，一個 step 就是一個 PR。
+  </p>
+  <p>
+    這份教材跟著開發一章一章長出來。<b class="hl-key">目前只有一章</b>，從 Step 27 開始；更早的 step 還沒有對應的章節。
+  </p>
+</header>
+
+<div class="cards">
+  <a class="card" href="step27-whip-compare.html">
+    <span class="no">STEP 27</span>
+    <h2>把影像推上雲端：兩種 WHIP 推流實作的比較</h2>
+    <p>從零講 WebRTC 推流要做哪些事（SDP、ICE、NAT、DTLS/SRTP、WHIP），再逐層對照 skai-edge-cpp 的 GStreamer webrtcbin 與本 repo 的 libdatachannel 實作，附可自己跑的驗證指令。適合沒碰過 WebRTC 的讀者。</p>
+  </a>
+</div>
+</div>
+</body>
+</html>
