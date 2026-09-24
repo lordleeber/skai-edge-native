@@ -49,9 +49,9 @@ class WhipRtpClock {
 public:
     explicit WhipRtpClock(std::uint32_t start_timestamp) : start_(start_timestamp) {}
 
-    // Latched until the next sent unit, so keyframe gating cannot lose it.
-    void mark_discontinuity() { rebase_ = true; }
-    std::uint32_t timestamp(bool has_pts, std::uint64_t pts_ns);
+    // `generation` counts RTSP restarts and is stamped when a unit is queued, so
+    // a restart is seen even when its flagged unit was discarded or skipped.
+    std::uint32_t timestamp(std::uint64_t generation, bool has_pts, std::uint64_t pts_ns);
 
 private:
     std::uint32_t start_;
@@ -59,8 +59,8 @@ private:
     std::uint32_t last_ = 0;
     std::uint32_t frame_ticks_ = 3000;
     std::optional<std::uint32_t> last_pts_ticks_;
+    std::uint64_t generation_ = 0;
     bool has_last_ = false;
-    bool rebase_ = false;
 };
 
 } // namespace skai

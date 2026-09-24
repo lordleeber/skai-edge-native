@@ -9,11 +9,18 @@ namespace {
 
 double round4(double value) { return std::round(value * 10000.0) / 10000.0; }
 
-double clamp_unit(double value) { return std::clamp(value, 0.0, 1.0); }
+double clamp_unit(double value) {
+    return std::isfinite(value) ? std::clamp(value, 0.0, 1.0) : 0.0;
+}
 
 // Locale-independent, shortest form of a value already rounded to 4 decimals.
 void append_number(std::string& out, double value) {
-    const auto scaled = static_cast<long long>(std::llround(value * 10000.0));
+    if (!std::isfinite(value) || std::abs(value) > 1e9) value = 0.0;
+    auto scaled = static_cast<long long>(std::llround(value * 10000.0));
+    if (scaled < 0) {
+        out += '-';
+        scaled = -scaled;
+    }
     out += std::to_string(scaled / 10000);
     auto fraction = scaled % 10000;
     if (fraction == 0) return;

@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 
 #include <cmath>
+#include <limits>
 #include <optional>
 #include <regex>
 #include <string>
@@ -209,6 +210,24 @@ TEST(DetectionSei, NormalizesBoxesToTopLeftSizeWithFourDecimals) {
     EXPECT_DOUBLE_EQ(clipped.w, 1.0);
     EXPECT_DOUBLE_EQ(clipped.h, 1.0);
     EXPECT_DOUBLE_EQ(clipped.score, 1.0);
+}
+
+TEST(DetectionSei, NonFiniteModelOutputBecomesZero) {
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const float inf = std::numeric_limits<float>::infinity();
+    const auto box = skai::normalize_sei_box(nan, 10, inf, nan, 100, 100, "person", nan);
+    EXPECT_DOUBLE_EQ(box.x, 0.0);
+    EXPECT_DOUBLE_EQ(box.y, 0.1);
+    EXPECT_DOUBLE_EQ(box.w, 0.0);
+    EXPECT_DOUBLE_EQ(box.h, 0.0);
+    EXPECT_DOUBLE_EQ(box.score, 0.0);
+}
+
+TEST(DetectionSei, SerializesAnySeiBoxAsValidJsonNumbers) {
+    skai::SeiBox box{-0.5, -1.25, std::nan(""), std::numeric_limits<double>::infinity(),
+                     "car", 0.00004};
+    EXPECT_EQ(skai::detection_sei_json({{1, {box}}}),
+              R"({"v":1,"r":[{"dt":1,"b":[[-0.5,-1.25,0,0,"car",0]]}]})");
 }
 
 TEST(DetectionSei, ComputesDtInNinetyKilohertzTicks) {

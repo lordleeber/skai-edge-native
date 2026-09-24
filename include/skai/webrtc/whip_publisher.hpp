@@ -6,6 +6,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <cstdint>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -33,7 +34,14 @@ private:
     WhipConfig config_;
     std::string token_;
     std::string last_error_;
-    BoundedQueue<EncodedAccessUnit> media_queue_{8};
+    struct QueuedUnit {
+        EncodedAccessUnit unit;
+        std::uint64_t restart_generation = 0;
+    };
+
+    BoundedQueue<QueuedUnit> media_queue_{8};
+    // Counts RTSP restarts on the producer side; survives queue discards.
+    std::atomic<std::uint64_t> restart_generation_{0};
     std::atomic<bool> stopping_{false};
     std::mutex wait_mutex_;
     std::condition_variable wait_changed_;

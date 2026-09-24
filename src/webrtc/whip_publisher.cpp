@@ -172,7 +172,11 @@ void WhipPublisher::wait() noexcept {
 
 void WhipPublisher::publish_access_unit(const EncodedAccessUnit& unit) noexcept {
     if (!config_.enabled || stopping_) return;
-    try { media_queue_.push(unit); } catch (...) {}
+    try {
+        const auto generation = unit.discontinuity ? restart_generation_.fetch_add(1) + 1
+                                                   : restart_generation_.load();
+        media_queue_.push(QueuedUnit{unit, generation});
+    } catch (...) {}
 }
 
 void WhipPublisher::run() noexcept {
@@ -305,15 +309,16 @@ void WhipPublisher::publish_once() {
             }
             media_opened = true;
             track_closed_at.reset();
-            auto unit = media_queue_.pop_for(std::chrono::milliseconds(100));
-            if (!unit) continue;
+            auto queued = media_queue_.pop_for(std::chrono::milliseconds(100));
+            if (!queued) continue;
+            const auto* unit = &queued->unit;
             const auto drops = media_queue_.stats().dropped;
-            if (unit->discontinuity) clock.mark_discontinuity();
             if (unit->discontinuity || drops != observed_drops) waiting_for_keyframe = true;
             observed_drops = drops;
             if (waiting_for_keyframe && !unit->keyframe) continue;
             waiting_for_keyframe = false;
-            rtp->timestamp = clock.timestamp(unit->has_pts, unit->pts_ns);
+            rtp->timestamp = clock.timestamp(queued->restart_generation, unit->has_pts,
+                                             unit->pts_ns);
             if (rtp->timestampToSeconds(rtp->timestamp -
                                         reporter->lastReportedTimestamp()) > 1.0) {
                 reporter->setNeedsToReport();

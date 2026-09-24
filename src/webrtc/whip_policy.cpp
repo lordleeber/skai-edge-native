@@ -73,20 +73,21 @@ bool WhipPeerState::wait_for_gathering(const std::atomic<bool>& stopping,
     return gathered_ && !failed_ && !stopping;
 }
 
-std::uint32_t WhipRtpClock::timestamp(bool has_pts, std::uint64_t pts_ns) {
+std::uint32_t WhipRtpClock::timestamp(std::uint64_t generation, bool has_pts,
+                                      std::uint64_t pts_ns) {
+    if (has_last_ && generation != generation_) last_pts_ticks_.reset();
+    generation_ = generation;
     std::uint32_t next = has_last_ ? last_ + frame_ticks_ : start_;
     if (has_pts) {
         const auto ticks = h264_rtp_timestamp(pts_ns);
-        const auto step = last_pts_ticks_
-            ? static_cast<std::int32_t>(ticks - *last_pts_ticks_) : 1;
-        // PTS going backward also means a restart whose flagged unit was dropped.
-        if (has_last_ && (rebase_ || step <= 0)) {
+        if (has_last_ && !last_pts_ticks_) {
+            // First PTS after a restart or after units without PTS.
             offset_ = next - ticks;
-        } else if (step > 0 && step <= 9000) {
+        } else if (last_pts_ticks_) {
+            const auto step = static_cast<std::int32_t>(ticks - *last_pts_ticks_);
             // Learn the frame interval from consecutive units at 10 fps or faster.
-            frame_ticks_ = static_cast<std::uint32_t>(step);
+            if (step > 0 && step <= 9000) frame_ticks_ = static_cast<std::uint32_t>(step);
         }
-        rebase_ = false;
         next = ticks + offset_;
         last_pts_ticks_ = ticks;
     }
