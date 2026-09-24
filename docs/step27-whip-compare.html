@@ -192,6 +192,7 @@ details[open] summary { margin-bottom: .5rem; }
   <div class="chips">
     <span class="chip new">src/webrtc/whip_publisher.cpp（新增）</span>
     <span class="chip new">include/skai/webrtc/whip_publisher.hpp（新增）</span>
+    <span class="chip new">src/webrtc/whip_policy.cpp / .hpp（新增）</span>
     <span class="chip">src/main.cpp</span>
     <span class="chip">src/config.cpp</span>
     <span class="chip">config/config.example.yaml</span>
@@ -200,8 +201,9 @@ details[open] summary { margin-bottom: .5rem; }
 </header>
 
 <div class="note">
-  <p><b>這一章對應的版本</b>：<code>skai-edge-native</code> 的 commit <code>8754f65</code>（2026-09-24，分支 <code>step-27-whip-publisher</code>），
-  以及 <code>skai-edge-cpp</code> 的 commit <code>da27afe</code>（2026-09-14）。程式碼摘錄保留當時版本；第 13 節的操作步驟與末尾的限制說明已反映 Step 27 code review 後的修正。</p>
+  <p><b>這一章對應的版本</b>：<code>skai-edge-native</code> 的 commit <code>29c3da1</code>（2026-09-24，分支 <code>step-27-whip-publisher</code>，Step 27 code review 修正之後），
+  以及 <code>skai-edge-cpp</code> 的 commit <code>da27afe</code>（2026-09-14）。程式碼節錄與第 13 節的輸出都以這兩個版本為準；
+  Step 27 第一版（<code>8754f65</code>）與現在不同的地方，會在第 10、11 節與「目前限制」裡註明。程式碼繼續演進之後，行號與細節可能對不上，以當時的 repo 為準。</p>
   <p>文中 <code>skai-edge-cpp</code> 的檔案路徑都相對於它的 repo 根目錄；本 repo 的路徑相對於 <code>skai-edge-native</code> 根目錄。</p>
 </div>
 
@@ -445,7 +447,7 @@ details[open] summary { margin-bottom: .5rem; }
   <rect x="260" y="320" width="300" height="44" rx="8" class="s-box own"/>
   <text class="s-lbl" x="410" y="347" text-anchor="middle">只連一次，失敗就停</text>
   <rect x="580" y="320" width="300" height="44" rx="8" class="s-box own"/>
-  <text class="s-lbl" x="730" y="347" text-anchor="middle">每 3 秒整個重來</text>
+  <text class="s-lbl" x="730" y="347" text-anchor="middle">斷線超過 10 秒才整個重來</text>
 </svg>
 <figcaption>圖 27.3 — 兩邊都自己寫 WHIP 的 HTTP 那一層。最大的差別在 ICE：cpp 用成熟的 libnice，本 repo 用的是自己寫、目前只做區網情境的 skai-ice。</figcaption>
 </figure>
@@ -767,7 +769,7 @@ a=candidate:15 1 TCP 843055615 203.0.113.7 56725 typ srflx raddr 172.16.1.50 rpo
 
 <h3>那本 repo 怎麼連到雲端？</h3>
 <div class="warn">
-  <p><b>以下是推論，本章沒有實測本 repo 對雲端的端到端推流。</b></p>
+  <p><b>以下是推論。</b>本章作者沒有實測本 repo 對雲端的端到端推流；Step 27 修正時另有一次在這台 Jetson 的網路上成功的回報（見<a href="#limits">目前限制</a>），但沒有記錄當時的 NAT 情況，所以下面的條件仍然是推論。</p>
   <p>
     Jetson 的 offer 裡只有 <code>172.16.1.50</code>，雲端伺服器從網路上連不到這個位址。
     但伺服器的 answer 裡會有<b>它自己的公開位址</b>。Jetson 照著 answer 去打那個位址時，封包經過 NAT 出去，
@@ -839,11 +841,14 @@ No such element or plugin 'whipsink'</pre>
 </p>
 
 <h3>Location：session 的網址</h3>
-<div class="src">src/webrtc/whip_publisher.cpp</div>
-<pre class="code" data-src="src/webrtc/whip_publisher.cpp">std::string resource_url(const std::string&amp; endpoint, const std::string&amp; location) {
+<div class="src">src/webrtc/whip_policy.cpp</div>
+<pre class="code" data-src="src/webrtc/whip_policy.cpp">std::string whip_resource_url(const std::string&amp; endpoint,
+                              const std::string&amp; location) {
     const auto authority_end = endpoint.find('/', 8);
     const auto origin = endpoint.substr(0, authority_end);
-    if (location.empty()) throw std::runtime_error("WHIP 201 omitted Location");
+    if (location.empty()) {
+<span class="hl">        throw UnrecoverableWhipError("WHIP 201 omitted Location; automatic retry stopped");</span>
+    }
     if (location.front() == '/' &amp;&amp; (location.size() &lt; 2 || location[1] != '/')) {
         return origin + location;
     }
@@ -852,7 +857,8 @@ No such element or plugin 'whipsink'</pre>
         const auto path_end = endpoint.find_last_of('/');
         return endpoint.substr(0, path_end + 1) + location;
     }
-<span class="hl">    throw std::runtime_error("WHIP Location must share the configured origin");</span>
+<span class="hl">    throw UnrecoverableWhipError(</span>
+        "WHIP Location has a different origin; automatic retry stopped");
 }</pre>
 <div class="src">skai-edge-cpp：src/skai_edge_perception/src/nodes/selfhost_publisher_node.cpp</div>
 <pre class="code" data-src="~/poyi/skai-edge-cpp/src/skai_edge_perception/src/nodes/selfhost_publisher_node.cpp">  if (location.rfind("http://", 0) == 0 || location.rfind("https://", 0) == 0)
@@ -862,7 +868,7 @@ No such element or plugin 'whipsink'</pre>
 <p>
   <b>origin</b>（來源）指網址開頭的 <code>https://主機名稱[:埠]</code> 這一段，不含後面的路徑。程式裡 <code>endpoint.find('/', 8)</code> 的 8 就是 <code>https://</code> 的長度，從那之後找到的第一個 <code>/</code> 就是 origin 的結尾；<code>//</code> 開頭的 Location 是「換一台主機」的寫法，所以不算相對路徑。
   兩邊都會把相對路徑（例如 <code>/sfu/cam1/whip/abc</code>）補成完整網址。差別在「伺服器回一個<b>別的網域</b>的網址」時：
-  cpp 照單全收；本 repo 直接拒絕。理由是 DELETE 會帶著 token：如果 Location 指向別的網域，照著送 DELETE 就等於把 token 交給那個網域。
+  cpp 照單全收；本 repo 直接拒絕，而且丟的是特別的 <code>UnrecoverableWhipError</code>：<code>run()</code> 收到它就<b>停止自動重試</b>（第 10 節）。理由是 DELETE 會帶著 token：如果 Location 指向別的網域，照著送 DELETE 就等於把 token 交給那個網域。
   本 repo 的做法比較安全，但有一個副作用，見<a href="#pitfalls">常見錯誤</a>裡的「Location 被拒」那一格。
 </p>
 
@@ -892,7 +898,7 @@ No such element or plugin 'whipsink'</pre>
 <span class="hl">        const auto response = request(config_.url, "POST", std::string(*offer), token_, stopping_);</span>
         if (response.status != 201) {
 …
-        location = resource_url(config_.url, response.location);
+        location = whip_resource_url(config_.url, response.location);
 <span class="hl">        peer-&gt;setRemoteDescription(rtc::Description(response.body,</span>
                                                     rtc::Description::Type::Answer));</pre>
 
@@ -936,7 +942,7 @@ No such element or plugin 'whipsink'</pre>
             }</pre>
 <p>
   cpp 只在程式啟動後等<b>第一張</b>。本 repo 在兩種情況會<b>重新等</b>：攝影機的 RTSP 連線重建過（<code>discontinuity</code>），或佇列滿了、有畫面被丟掉（<code>dropped</code> 計數變了）。
-  中間少了畫面，後面的差異畫面就接不上，所以要等下一張 keyframe 重新開始。
+  中間少了畫面，後面的差異畫面就接不上，所以要等下一張 keyframe 重新開始。第 10 節會看到第三種情況：連線短暫中斷又恢復之後，也會重新等。
 </p>
 
 <h3>RTP 時間戳</h3>
@@ -959,7 +965,7 @@ No such element or plugin 'whipsink'</pre>
 <h2 id="retry">10. 斷線之後怎麼辦（圖 27.2 之外）</h2>
 
 <figure class="fig">
-<svg viewBox="0 0 900 250" role="img" aria-label="斷線後 skai-edge-cpp 停止，skai-edge-native 每三秒重來一次的對照">
+<svg viewBox="0 0 900 250" role="img" aria-label="斷線後 skai-edge-cpp 停止，skai-edge-native 在斷線超過 10 秒後等 3 秒整個重來的對照">
   <defs>
     <marker id="ar5" markerWidth="9" markerHeight="9" refX="7" refY="3.2" orient="auto">
       <path d="M0,0 L7,3.2 L0,6.4 z" fill="var(--muted)"/>
@@ -984,7 +990,8 @@ No such element or plugin 'whipsink'</pre>
   <rect x="200" y="158" width="150" height="48" rx="8" class="s-box lib"/>
   <text class="s-sm" x="275" y="187" text-anchor="middle">推流中</text>
   <rect x="380" y="158" width="150" height="48" rx="8" class="s-box net"/>
-  <text class="s-sm" x="455" y="187" text-anchor="middle">Failed 或 Disconnected</text>
+  <text class="s-sm" x="455" y="180" text-anchor="middle">Failed，或</text>
+  <text class="s-sm" x="455" y="197" text-anchor="middle">斷線超過 10 秒</text>
   <rect x="560" y="158" width="150" height="48" rx="8" class="s-box own"/>
   <text class="s-sm" x="635" y="180" text-anchor="middle">關 peer、DELETE</text>
   <text class="s-sm" x="635" y="197" text-anchor="middle">清空佇列</text>
@@ -997,7 +1004,7 @@ No such element or plugin 'whipsink'</pre>
   <path d="M810,206 L810,232 L95,232 L95,210" class="s-line" marker-end="url(#ar5)"/>
   <text class="s-ok" x="452" y="226" text-anchor="middle">重建 PeerConnection、重新 POST、等下一張 keyframe</text>
 </svg>
-<figcaption>圖 27.5 — cpp 遇到斷線只記錄，不會恢復；本 repo 會自己重來，但連「暫時斷線」也會觸發整套重來。</figcaption>
+<figcaption>圖 27.5 — cpp 遇到斷線只記錄，不會恢復；本 repo 先給同一個 session 10 秒自己恢復，恢復不了才整套重來。</figcaption>
 </figure>
 
 <h3>skai-edge-cpp：只連一次</h3>
@@ -1025,6 +1032,9 @@ No such element or plugin 'whipsink'</pre>
     while (!stopping_) {
         try {
 <span class="hl">            publish_once();</span>
+        } catch (const UnrecoverableWhipError&amp; error) {
+            if (!stopping_) logger_.log(LogLevel::Error, "whip", error.what());
+<span class="hl">            return;</span>
         } catch (const std::exception&amp; error) {
             if (!stopping_) logger_.log(LogLevel::Error, "whip", error.what());
         } catch (...) {
@@ -1037,18 +1047,46 @@ No such element or plugin 'whipsink'</pre>
     }
 }</pre>
 <p>
-  <code>publish_once()</code> 裡任何一步出錯都丟例外：ICE gathering 5 秒沒完成、POST 不是 201、媒體 track 15 秒沒打開（<code>track-&gt;isOpen()</code>，ICE 與 DTLS 都完成後才會是 true）、連線狀態變差。
-  例外被 <code>run()</code> 接住、記 log、清空佇列、等 3 秒，然後從頭建一個新的 <code>PeerConnection</code>。
+  <code>publish_once()</code> 裡任何一步出錯都丟例外：ICE gathering 5 秒沒完成、POST 不是 201、媒體 track 15 秒沒打開（<code>track-&gt;isOpen()</code>，ICE 與 DTLS 都完成後才會是 true）、連線持續中斷。
+  一般的例外被 <code>run()</code> 接住、記 log、清空佇列、等 3 秒，然後從頭建一個新的 <code>PeerConnection</code>。
   <b class="hl-ok">這讓本 repo 能在伺服器重啟、網路斷掉一陣子之後自己恢復</b>，cpp 做不到。
+  唯一的例外是第 8 節的 <code>UnrecoverableWhipError</code>（Location 缺少或跨網域）：<code>run()</code> 直接 <code>return</code>，推流停止到程式重啟為止。
 </p>
-<p>但「連線狀態變差」的判斷太敏感：</p>
+<p>「連線持續中斷」怎麼判斷？libdatachannel 回報連線狀態時，程式把它記進 <code>WhipPeerState</code>：</p>
 <div class="src">src/webrtc/whip_publisher.cpp</div>
 <pre class="code" data-src="src/webrtc/whip_publisher.cpp">    peer-&gt;onStateChange([weak](rtc::PeerConnection::State value) {
-        if (value != rtc::PeerConnection::State::Failed &amp;&amp;
-<span class="hl">            value != rtc::PeerConnection::State::Disconnected) return;</span></pre>
+        if (auto state = weak.lock()) {
+            if (value == rtc::PeerConnection::State::Connected) state-&gt;connected();
+            else if (value == rtc::PeerConnection::State::Disconnected) {
+<span class="hl">                state-&gt;disconnected(WhipPeerState::Clock::now());</span>
+            } else if (value == rtc::PeerConnection::State::Failed ||
+                       value == rtc::PeerConnection::State::Closed) state-&gt;failed();
+        }
+    });</pre>
+<p>送影像的迴圈每一輪都問它一次「該不該重連」：</p>
+<div class="src">src/webrtc/whip_publisher.cpp（節錄）</div>
+<pre class="code" data-src="src/webrtc/whip_publisher.cpp"><span class="hl">            if (state-&gt;should_reconnect(now, std::chrono::seconds(10))) {</span>
+                throw std::runtime_error("WHIP ICE connection failed or remained disconnected");
+            }
+            const bool track_open = track-&gt;isOpen();
+            if (state-&gt;is_disconnected() || !track_open) {
+…
+<span class="hl">                if (!awaiting_resume) media_queue_.discard_all();</span>
+                awaiting_resume = true;
+…
+            if (awaiting_resume) {
+<span class="hl">                waiting_for_keyframe = true;</span>
+                timestamp_ready = false;
+                awaiting_resume = false;
+            }</pre>
+<ul>
+  <li><code>Failed</code> 或 <code>Closed</code>：立刻重連。</li>
+  <li><code>Disconnected</code>（暫時收不到封包，例如 Wi-Fi 閃斷）：先<b>不重連</b>，記下開始斷線的時間；期間丟掉佇列裡的畫面、暫停送出。10 秒內回到 <code>Connected</code> 就在<b>同一個 session</b> 繼續送，從下一張 keyframe 開始。超過 10 秒才丟例外、整套重來。</li>
+  <li>track 打開過之後又關掉超過 10 秒：丟 <code>WHIP media track remained closed</code>，同樣整套重來。</li>
+</ul>
 <p>
-  在 8754f65 版本裡，<code>Disconnected</code> 被當成 <code>Failed</code>；短暫 Wi-Fi 閃斷也會付出「DELETE、等 3 秒、重新 POST、等下一張 keyframe」的代價。
-  Step 27 code review 後已改成允許同一個 session 在寬限時間內恢復，見本章末的<a href="#recap">後續修正</a>。
+  <b>第一版（<code>8754f65</code>）不是這樣</b>：它把 <code>Disconnected</code> 當成 <code>Failed</code>，Wi-Fi 閃斷一下就要付出「DELETE、等 3 秒、重新 POST、等下一張 keyframe」的代價。
+  這是 Step 27 code review 指出的問題，<code>29c3da1</code> 改成上面的寬限做法，並補了單元測試 <code>tests/unit/whip_publisher_test.cpp</code>。
 </p>
 
 <!-- ============================================================ -->
@@ -1059,7 +1097,7 @@ No such element or plugin 'whipsink'</pre>
 </p>
 <ul>
   <li><b>cpp</b>：只在 node 關閉（解構子）時送一次，逾時是連線 3 秒、總共 5 秒。關閉順序寫得很小心：先停 GLib main loop、等 HTTP 執行緒結束，才 DELETE、才拆 pipeline，避免 callback 在拆到一半時觸發。</li>
-  <li><b>本 repo</b>：每一次 <code>publish_once()</code> 結束（包括每次重連前）都送 DELETE，逾時是連線 5 秒、總共 10 秒，而且<b>不能被 <code>stop()</code> 中斷</b>。<code>request()</code> 的第五個參數是「要不要中止」的旗標：POST 時傳的是 <code>stopping_</code>，<code>stop()</code> 一設它，請求就中止；收尾的 DELETE 傳的卻是 <code>close_resource</code> 裡新宣告、永遠是 false 的 <code>std::atomic&lt;bool&gt; allow_cleanup{false}</code>，所以 <code>stop()</code> 管不到它。遇到沒回應的伺服器，關機最久會多卡約 10 秒。</li>
+  <li><b>本 repo</b>：每一次 <code>publish_once()</code> 結束（包括每次重連前）都送 DELETE，逾時是總共 2 秒（POST 仍是 10 秒），而且<b>不能被 <code>stop()</code> 中斷</b>。<code>request()</code> 的第五個參數是「要不要中止」的旗標：POST 時傳的是 <code>stopping_</code>，<code>stop()</code> 一設它，請求就中止；收尾的 DELETE 傳的卻是 <code>close_resource</code> 裡新宣告、永遠是 false 的 <code>std::atomic&lt;bool&gt; allow_cleanup{false}</code>，所以 <code>stop()</code> 管不到它。遇到沒回應的伺服器，關機最久多卡約 2 秒。第一版（<code>8754f65</code>）的 DELETE 逾時是 10 秒，而且 ICE gathering 的 5 秒等待也叫不醒；現在的 <code>wait_for_gathering</code> 每 100 毫秒檢查一次停止訊號。</li>
 </ul>
 
 <!-- ============================================================ -->
@@ -1078,7 +1116,7 @@ No such element or plugin 'whipsink'</pre>
     <tr><td>認證</td><td>Bearer；沒有 token 時退回 HTTP Basic</td><td>只有 Bearer；每次重連都重讀 <code>WHIP_TOKEN</code></td></tr>
     <tr><td>Location</td><td>接受任何絕對網址</td><td>只接受同一個來源（origin），否則拒絕</td></tr>
     <tr><td>keyframe</td><td>只等第一張</td><td>掉畫面或來源重連後重新等</td></tr>
-    <tr><td>斷線</td><td>只記 log，不恢復</td><td>每 3 秒整個重來（<code>Disconnected</code> 也算）</td></tr>
+    <tr><td>斷線</td><td>只記 log，不恢復</td><td>斷線 10 秒內在同一個 session 恢復；<code>Failed</code> 或斷線超過 10 秒才等 3 秒、整個重來；Location 無效則停止重試</td></tr>
     <tr><td>錯誤訊息</td><td>401 / 403 / 404 附中文提示</td><td>只印 HTTP 狀態碼</td></tr>
   </tbody>
 </table>
@@ -1267,15 +1305,19 @@ a=candidate:15 1 TCP 843055615 203.0.113.7 56725 typ srflx raddr 172.16.1.50 rpo
 <p>最後一行的括號讓裡面的指令在子 shell 執行，<code>cd</code> 不會改到你原本的終端機；<code>$OLDPWD</code> 是 shell 記住的「上一次 cd 之前的目錄」，也就是 repo 根目錄，用來找到 <code>build/skai-edge</code>。如果 <code>$DEMO</code> 裡已經有 <code>.env</code>（例如你以前在這個目錄做過別的實驗），它會印「停止：…存在，先把它移走」而不啟動程式。</p>
 <pre class="shell">sed -e "s/host_interfaces: \[eth0, wlan0\]/host_interfaces: [$IFACE]/" \
     -e "s#/var/lib/skai-edge#$DEMO/var#" \
-    -e "s/  enabled: false/  enabled: true/" \
+    -e "/^whip:/,/^[a-z]/ s/enabled: false/enabled: true/" \
     config/config.example.yaml &gt; "$DEMO/whip.yaml"
+grep -A1 '^whip:' "$DEMO/whip.yaml"
 (cd "$DEMO" &amp;&amp; if [ -e .env ]; then echo "停止：$DEMO/.env 存在，先把它移走"; else
   env -u WHIP_TOKEN "$OLDPWD/build/skai-edge" --config whip.yaml; echo "exit=$?"; fi)</pre>
-<pre class="out">timestamp="2026-09-24T06:50:47.969Z" level=info module=config message="configuration validated"<span class="mk">1</span>
-timestamp="2026-09-24T06:50:47.970Z" level=info module=webrtc message="configured mode=lan-only host interfaces=[wlP1p1s0] ice_log_verbosity=1"<span class="mk">2</span>
-timestamp="2026-09-24T06:50:47.971Z" level=error module=whip message="WHIP_TOKEN is required when whip.enabled is true"<span class="mk">3</span>
+<pre class="out">whip:
+  enabled: true<span class="mk">0</span>
+timestamp="2026-09-24T07:22:00.038Z" level=info module=config message="configuration validated"<span class="mk">1</span>
+timestamp="2026-09-24T07:22:00.048Z" level=info module=webrtc message="configured mode=lan-only host interfaces=[wlP1p1s0] ice_log_verbosity=1"<span class="mk">2</span>
+timestamp="2026-09-24T07:22:00.050Z" level=error module=whip message="WHIP_TOKEN is required when whip.enabled is true"<span class="mk">3</span>
 exit=2<span class="mk">4</span></pre>
 <ol class="readout">
+  <li><span class="mk">0</span>第三個 <code>-e</code> 只在 <code>whip:</code> 區段裡把 <code>false</code> 改成 <code>true</code>（範例裡 <code>recording</code>、<code>gps</code>、<code>webrtc</code> 也有 <code>enabled</code>，本來就是 <code>true</code>）。<code>grep</code> 那一行印出改完的結果，確認 WHIP 真的打開了。</li>
   <li><span class="mk">1</span>設定檔格式正確，<code>whip.url</code> 是 https（<code>src/config.cpp</code> 會檢查）。</li>
   <li><span class="mk">2</span>ICE 模組先初始化：<code>mode=lan-only</code>，只用 <code>wlP1p1s0</code>。這就是<a href="#ice">第 7 節</a>講的 host-only。</li>
   <li><span class="mk">3</span>WHIP 模組初始化時，環境變數與 <code>$DEMO/.env</code> 都沒有 token，拒絕啟動。</li>
@@ -1327,10 +1369,10 @@ exit=2<span class="mk">4</span></pre>
   </div>
   <div>
     <h4>Location 被拒，session 沒收掉</h4>
-    <p class="sym">症狀：本 repo 一直印 <code>WHIP Location must share the configured origin</code> 或 <code>WHIP 201 omitted Location</code>，每 3 秒一次。</p>
-    <p class="res">後果：伺服器已經回 201、建了 session，但 <code>location</code> 還沒設就丟例外，收尾時跳過 DELETE。每次重試都在伺服器上多留一個 session。</p>
-    <p class="fix">後續修正：收到無法安全清理的 201 後停止自動重試，避免每 3 秒再累積一個 session；部署時仍須確認伺服器回同 origin 的 Location。</p>
-    <p class="src-tag">出處：Step 27 code review（<code>src/webrtc/whip_publisher.cpp</code> 的 POST 之後那段）</p>
+    <p class="sym">症狀：本 repo 印一次 <code>WHIP 201 omitted Location; automatic retry stopped</code> 或 <code>WHIP Location has a different origin; automatic retry stopped</code>，之後推流就停了。</p>
+    <p class="res">後果：伺服器已經回 201、建了 session，但 <code>location</code> 在賦值前就丟例外，收尾時跳過 DELETE，所以<b>這一個</b> session 要等伺服器自己逾時清理。第一版（<code>8754f65</code>）還會每 3 秒重試、每次多留一個；<code>29c3da1</code> 改成停止重試，只會留這一個。</p>
+    <p class="fix">正解：部署前確認伺服器回的是同網域的 Location。出現這行 log 時，修好伺服器設定再重啟程式。</p>
+    <p class="src-tag">出處：Step 27 code review；<code>src/webrtc/whip_policy.cpp</code> 的 <code>whip_resource_url</code></p>
   </div>
   <div>
     <h4>兩個專案同時推同一個 channel</h4>
@@ -1363,7 +1405,7 @@ exit=2<span class="mk">4</span></pre>
           然後在 repo 根目錄執行 <code>./build/skai-edge --config &lt;你的設定檔&gt;</code>。</p>
           <p><b class="hl-ok">算連上</b>：log 依序出現 <code>module=whip message="publisher session created"</code> 與 <code>message="first H.264 access unit sent"</code>，
           之後不再出現 <code>whip</code> 的錯誤；再用瀏覽器開 <code>https://skai-cam.duckdns.org/watch</code>（skai-edge-cpp 設定檔註解寫的觀看入口）看得到畫面。</p>
-          <p><b class="hl-bad">算沒連上</b>：出現 <code>publisher session created</code> 之後，約 15 秒出現 <code>WHIP media track did not open</code>，並每隔幾秒重複整個循環。
+          <p><b class="hl-bad">算沒連上</b>：出現 <code>publisher session created</code> 之後，約 15 秒內出現 <code>WHIP media track did not open</code> 或 <code>WHIP ICE connection failed or remained disconnected</code>，並每隔幾秒重複整個循環。
           這代表 HTTP 那一段通了（伺服器收下 offer、回了 answer），但 ICE 找不到能通的 UDP 路，正是第 7 節那些條件有一個不成立。</p>
           <p><b>沒連上之後</b>：這時才在下面兩條之間選。想守住 ROADMAP 的架構，選 2；急著在這個場地上線、願意改架構，選 3。無論選哪條，先把「哪個場地、什麼網路、失敗的 log」記下來，那是說服別人改架構的依據。</p>
         </div>
@@ -1379,7 +1421,7 @@ exit=2<span class="mk">4</span></pre>
   <li><b>短暫 <code>Disconnected</code></b> 可在同一個 session 恢復；超過寬限時間才重連。</li>
   <li><b>201 缺少或跨 origin 的 Location</b> 仍可能留下一個無法安全刪除的伺服器 session；用戶端會停止自動重試，避免持續累積。</li>
   <li><b>停止等待</b>：ICE gathering 約每 100 毫秒檢查停止訊號，DELETE 最長等待 2 秒。</li>
-  <li>本章原先沒有實測本 repo 對雲端的推流；Step 27 後續實測已取得 201、ICE 完成，並送出 H.264 access unit。</li>
+  <li><b>對雲端的端到端推流</b>：本章作者沒有實測。另一個 session 在 Step 27 修正時回報，曾在這台 Jetson 目前的網路上實測取得 201、ICE 完成並送出 H.264 access unit；那次的輸出沒有收進本章，這裡也無法重現。換到其他部署場地時，仍要照選項 1 各測一次。</li>
 </ul>
 
 <h3>自我測驗</h3>
@@ -1390,7 +1432,7 @@ exit=2<span class="mk">4</span></pre>
 <details>
   <summary>Q2. 本 repo 的 offer 只有 <code>172.16.1.50</code> 一個候選位址，為什麼還有機會連上雲端？什麼情況會連不上？</summary>
   <p>雲端伺服器有公開 IP，會寫在 answer 裡。Jetson 先往那個位址送 ICE 檢查封包，NAT 就會為這個埠開一條回程的路，伺服器可以沿著它回應（peer-reflexive）。
-  如果對外 UDP 被擋、NAT 太嚴格、或伺服器不接受 peer-reflexive，就連不上，而且沒有 TURN 可以退。（本章對這點是推論，沒有實測。）</p>
+  如果對外 UDP 被擋、NAT 太嚴格、或伺服器不接受 peer-reflexive，就連不上，而且沒有 TURN 可以退。（本章對這點是推論；另有一次在這台 Jetson 網路上成功的回報，見目前限制。）</p>
 </details>
 <details>
   <summary>Q3. 為什麼本 repo 在佇列掉畫面之後，要丟掉後面的畫面直到下一張 keyframe？</summary>
@@ -1406,7 +1448,7 @@ exit=2<span class="mk">4</span></pre>
 </details>
 <details>
   <summary>Q6. 如果伺服器重開機，兩個專案各自會發生什麼事？</summary>
-  <p>cpp：連線變成 FAILED，印一行 log，之後不再嘗試，要人工重啟 node。本 repo：<code>publish_once()</code> 丟例外，<code>run()</code> 等 3 秒後重建 PeerConnection 重新 POST，伺服器回來之後會自己接上。</p>
+  <p>cpp：連線變成 FAILED，印一行 log，之後不再嘗試，要人工重啟 node。本 repo：連線變成 <code>Failed</code>，或斷線超過 10 秒，<code>publish_once()</code> 就丟例外，<code>run()</code> 等 3 秒後重建 PeerConnection 重新 POST；伺服器回來之後會自己接上。</p>
 </details>
 
 <details>
