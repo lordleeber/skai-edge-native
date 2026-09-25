@@ -357,6 +357,39 @@ TEST(HttpServer, WebSocketBroadcastsEventsToMultipleClients) {
     server.wait();
 }
 
+TEST(HttpServer, ReportsLiveWebSocketAndQueueMetrics) {
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    auto status = std::make_shared<skai::RuntimeStatus>();
+    auto api = std::make_shared<skai::ApiState>();
+    auto events = std::make_shared<skai::EventChannel>();
+    skai::web::HttpServer server(logger, status, api, events, {}, {}, {}, [] {
+        skai::MetricsSnapshot metrics;
+        metrics.inference_queue.dropped = 6;
+        return metrics;
+    });
+    skai::Config config;
+    config.web.bind = "127.0.0.1";
+    config.web.port = 0;
+    ASSERT_TRUE(server.initialize(config)) << logs.str();
+    ASSERT_TRUE(server.start());
+
+    asio::io_context context;
+    websocket::stream<tcp::socket> client(context);
+    connect_websocket(client, server.port());
+    const auto response = request(server.port(),
+                                  {http::verb::get, "/api/v1/metrics", 11});
+    EXPECT_EQ(response.result(), http::status::ok);
+    EXPECT_NE(response.body().find("\"websocket_clients\":1"), std::string::npos);
+    EXPECT_NE(response.body().find("\"dropped\":6"), std::string::npos);
+    EXPECT_NE(response.body().find("\"memory_rss_bytes\":"), std::string::npos);
+    EXPECT_NE(response.body().find("\"disk_free_bytes\":"), std::string::npos);
+
+    client.close(websocket::close_code::normal);
+    server.stop();
+    server.wait();
+}
+
 TEST(HttpServer, ShutdownClosesConnectedWebSocketPromptly) {
     std::ostringstream logs;
     skai::Logger logger(logs);

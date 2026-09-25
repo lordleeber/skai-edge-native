@@ -126,6 +126,64 @@ std::string status_json(const StatusSnapshot& status, bool detector_enabled,
     return output.str();
 }
 
+std::string metrics_json(const StatusSnapshot& status, const MetricsSnapshot& metrics,
+                         ApiState& api, WebRtcManager* webrtc) {
+    std::ostringstream output;
+    output.imbue(std::locale::classic());
+    output << std::setprecision(6) << "{\"ingest_fps\":";
+    if (status.video_fps) output << *status.video_fps;
+    else output << "null";
+    output << ",\"inference_fps\":";
+    if (status.detector_fps) output << *status.detector_fps;
+    else output << "null";
+    output << ",\"inference_latency_ms\":";
+    if (status.last_inference_ms) output << *status.last_inference_ms;
+    else output << "null";
+    output << ",\"inference_queue\":{\"depth\":" << metrics.inference_queue_depth
+           << ",\"dropped\":" << metrics.inference_queue.dropped
+           << ",\"discarded\":" << metrics.inference_queue.discarded
+           << "},\"encoder_fps\":";
+    if (metrics.encoder_fps) output << *metrics.encoder_fps;
+    else output << "null";
+    output << ",\"encoder_mode\":"
+           << json_string(status.encoder ? "encode" : "passthrough")
+           << ",\"encoded_media_queue\":{\"depth\":"
+           << metrics.encoded_queue_depth << ",\"dropped\":"
+           << metrics.encoded_queue.dropped << ",\"discarded\":"
+           << metrics.encoded_queue.discarded
+           << "},\"whip\":{\"enabled\":" << json_bool(metrics.whip.enabled)
+           << ",\"peer_state\":" << json_string(metrics.whip.peer_state)
+           << ",\"ice_state\":" << json_string(metrics.whip.ice_state)
+           << ",\"access_units_sent\":" << metrics.whip.access_units_sent
+           << ",\"media_queue_drops\":" << metrics.whip.media_queue_drops
+           << "},\"websocket_clients\":" << metrics.websocket_clients
+           << ",\"webrtc\":";
+    if (webrtc) output << webrtc_diagnostics_json(webrtc->diagnostics());
+    else output << webrtc_diagnostics_json({});
+    output << ",\"gps\":";
+    if (const auto fix = api.latest_gps()) {
+        output << "{\"source\":" << json_string(fix->source)
+               << ",\"age_s\":null}";
+    } else output << "null";
+    output << ",\"alert_count\":";
+    if (metrics.alert_count) output << *metrics.alert_count;
+    else output << "null";
+    output << ",\"system\":{\"memory_rss_bytes\":";
+    if (metrics.memory_rss_bytes) output << *metrics.memory_rss_bytes;
+    else output << "null";
+    output << ",\"cpu_percent\":";
+    if (metrics.cpu_percent) output << *metrics.cpu_percent;
+    else output << "null";
+    output << ",\"gpu_percent\":";
+    if (metrics.gpu_percent) output << *metrics.gpu_percent;
+    else output << "null";
+    output << ",\"disk_free_bytes\":";
+    if (metrics.disk_free_bytes) output << *metrics.disk_free_bytes;
+    else output << "null";
+    output << "}}\n";
+    return output.str();
+}
+
 std::string config_json(const PublicConfigDto& config, bool detector_enabled) {
     std::ostringstream output;
     output.imbue(std::locale::classic());
@@ -263,7 +321,8 @@ bool alert_route(const std::string& path) {
 
 Response route_request(const Request& request, const StatusSnapshot& status,
                        ApiState& api, AlertRepository* alerts,
-                       RecordingController* recording, WebRtcManager* webrtc) {
+                       RecordingController* recording, WebRtcManager* webrtc,
+                       const MetricsSnapshot* metrics) {
     const std::string target(request.target());
     const auto query = target.find('?');
     const std::string path = target.substr(0, query);
@@ -305,10 +364,9 @@ Response route_request(const Request& request, const StatusSnapshot& status,
                              status_json(status, api.detector_enabled(), webrtc));
     }
     if (path == "/api/v1/metrics") {
-        const auto diagnostics = webrtc ? webrtc->diagnostics() : WebRtcDiagnostics{};
         return json_response(http::status::ok, request.version(),
-                             std::string("{\"webrtc\":") +
-                                 webrtc_diagnostics_json(diagnostics) + "}\n");
+                             metrics_json(status, metrics ? *metrics : MetricsSnapshot{},
+                                          api, webrtc));
     }
     if (path == "/api/v1/config") {
         PublicConfigDto config;

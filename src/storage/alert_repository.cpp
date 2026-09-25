@@ -107,6 +107,23 @@ std::vector<AlertEvent> query_alerts(sqlite3* connection, const char* sql,
 
 AlertRepository::AlertRepository(Database& database) : database_(database) {}
 
+std::optional<std::uint64_t> AlertRepository::count(std::string& error) const {
+    std::lock_guard<std::mutex> lock(database_.mutex_);
+    error.clear();
+    auto* connection = database_.connection_;
+    if (!connection) {
+        error = "database is not open";
+        return std::nullopt;
+    }
+    Statement query(connection, "SELECT COUNT(*) FROM alerts;", error);
+    if (!query.get()) return std::nullopt;
+    if (sqlite3_step(query.get()) != SQLITE_ROW) {
+        error = sqlite3_errmsg(connection);
+        return std::nullopt;
+    }
+    return static_cast<std::uint64_t>(sqlite3_column_int64(query.get(), 0));
+}
+
 bool AlertRepository::insert(const AlertEvent& alert, std::string& error) {
     std::lock_guard<std::mutex> lock(database_.mutex_);
     error.clear();

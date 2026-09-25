@@ -135,7 +135,7 @@ bool RtspSource::start(const VideoConfig& config, std::string& error) {
         diagnostics_.url_configured = !config.rtsp_url.empty();
         diagnostics_.transport = config.transport;
         last_frame_time_ = {};
-        prior_frame_time_ = {};
+        ingest_rate_.reset();
     }
     try {
         running_ = true;
@@ -154,6 +154,7 @@ bool RtspSource::open_pipeline(std::string& error) {
     encoded_sink_ = nullptr;
     first_access_unit_ = true;
     ++pipeline_generation_;
+    ingest_rate_.reset();
     publish_media_status(false, "RTSP source is reconnecting");
     pipeline_ = gst::Pipeline::create_empty(logger_, error);
     if (!pipeline_) return false;
@@ -496,13 +497,9 @@ bool RtspSource::capture_sample(GstSample* sample, RtspRecovery& recovery) {
             diagnostics_.height = height;
             diagnostics_.fps_num = info.fps_n;
             diagnostics_.fps_den = info.fps_d;
-            if (info.fps_n > 0 && info.fps_d > 0) {
-                diagnostics_.fps_in = static_cast<double>(info.fps_n) / info.fps_d;
-            } else if (prior_frame_time_ != std::chrono::steady_clock::time_point{}) {
-                const auto seconds = std::chrono::duration<double>(frame.timestamp - prior_frame_time_).count();
-                if (seconds > 0) diagnostics_.fps_in = 1.0 / seconds;
+            if (const auto fps = ingest_rate_.observe(frame.timestamp)) {
+                diagnostics_.fps_in = *fps;
             }
-            prior_frame_time_ = frame.timestamp;
             last_frame_time_ = frame.timestamp;
             if (status_ && diagnostics_.fps_in > 0.0) {
                 status_->update_video(diagnostics_.fps_in);

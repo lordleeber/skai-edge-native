@@ -179,7 +179,7 @@ target_link_libraries(skai-alerts PUBLIC skai-config skai-events skai-gps
 target_include_directories(skai-alerts PRIVATE ${OpenCV_INCLUDE_DIRS})
 target_link_libraries(skai-alerts PRIVATE ${OpenCV_LIBS})
 
-add_library(skai-web src/web/http_server.cpp src/web/router.cpp
+add_library(skai-web src/metrics.cpp src/web/http_server.cpp src/web/router.cpp
     src/web/static_file_handler.cpp src/web/websocket_session.cpp)
 target_include_directories(skai-web PUBLIC include)
 target_link_libraries(skai-web PUBLIC skai-application skai-events skai-gps

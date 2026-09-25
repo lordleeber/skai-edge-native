@@ -7,6 +7,7 @@
 #include "skai/video/gstreamer_runtime.hpp"
 #include "skai/video/rtsp_recovery.hpp"
 #include "skai/video/rtsp_metrics.hpp"
+#include "skai/metrics.hpp"
 #include "skai/status.hpp"
 
 #include <gst/gst.h>
@@ -116,7 +117,7 @@ private:
     std::condition_variable diagnostics_changed_;
     RtspDiagnostics diagnostics_;
     std::chrono::steady_clock::time_point last_frame_time_{};
-    std::chrono::steady_clock::time_point prior_frame_time_{};
+    IngestRate ingest_rate_;
     std::mutex jitter_mutex_;
     GstElement* jitterbuffer_ = nullptr; // owned reference while active
     std::vector<GstElement*> managers_; // owned references until signal disconnect

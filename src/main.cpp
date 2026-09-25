@@ -111,10 +111,19 @@ int main(int argc, char* argv[]) {
     modules.storage = std::move(database);
     modules.webrtc = std::make_unique<skai::IceRuntimeModule>(logger);
     modules.whip = std::move(whip_publisher);
+    const auto runtime_metrics = [&inference_frames, &encoded_access_units, whip_sink] {
+        skai::MetricsSnapshot metrics;
+        metrics.inference_queue = inference_frames.stats();
+        metrics.inference_queue_depth = inference_frames.size();
+        metrics.encoded_queue = encoded_access_units.stats();
+        metrics.encoded_queue_depth = encoded_access_units.size();
+        metrics.whip = whip_sink->metrics();
+        return metrics;
+    };
     modules.web = std::make_unique<skai::web::HttpServer>(logger, runtime_status,
                                                           api_state, events,
                                                           alert_repository, recording_control,
-                                                          webrtc_manager);
+                                                          webrtc_manager, runtime_metrics);
     modules.recording = std::make_unique<skai::RecordingModule>(
         encoded_access_units, logger, recording_control, events);
 #if SKAI_HAS_YOLO_PIPELINE

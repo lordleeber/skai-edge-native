@@ -38,6 +38,7 @@ public:
                 std::shared_ptr<AlertRepository> alerts,
                 std::shared_ptr<RecordingController> recording,
                 std::shared_ptr<WebRtcManager> webrtc,
+                std::function<MetricsSnapshot()> metrics_provider,
                 asio::thread_pool& signaling_pool,
                 std::atomic_size_t& signaling_jobs,
                 std::size_t signaling_limit,
@@ -49,6 +50,7 @@ public:
           alerts_(std::move(alerts)),
           recording_(std::move(recording)),
           webrtc_(std::move(webrtc)),
+          metrics_provider_(std::move(metrics_provider)),
           signaling_pool_(signaling_pool), signaling_jobs_(signaling_jobs),
           signaling_limit_(signaling_limit),
           static_files_(std::move(static_files)),
@@ -102,6 +104,11 @@ private:
         if (path == "/api/v1/webrtc/whep" &&
             parser_.get().method() == http::verb::post && webrtc_) {
             return dispatch_whep(parser_.release(), status);
+        }
+        if (path == "/api/v1/metrics") {
+            const auto metrics = metrics_provider_();
+            return send(route_request(parser_.get(), status, *api_, alerts_.get(),
+                                      recording_.get(), webrtc_.get(), &metrics));
         }
         send(route_request(parser_.get(), status, *api_, alerts_.get(),
                            recording_.get(), webrtc_.get()));
@@ -170,6 +177,7 @@ private:
     std::shared_ptr<AlertRepository> alerts_;
     std::shared_ptr<RecordingController> recording_;
     std::shared_ptr<WebRtcManager> webrtc_;
+    std::function<MetricsSnapshot()> metrics_provider_;
     asio::thread_pool& signaling_pool_;
     std::atomic_size_t& signaling_jobs_;
     const std::size_t signaling_limit_;
@@ -189,7 +197,9 @@ struct HttpServer::State {
           std::shared_ptr<RecordingController> recording,
           std::shared_ptr<WebRtcManager> webrtc,
           std::size_t config_max_peers,
-          const std::string& web_root)
+          const std::string& web_root,
+          const std::string& recording_directory,
+          std::function<MetricsSnapshot()> metrics_provider)
         : acceptor(context), shutdown_timer(context), logger(logger),
           status(std::move(status)), api(std::move(api)),
           events(std::move(events)),
@@ -197,7 +207,20 @@ struct HttpServer::State {
           recording(std::move(recording)),
           webrtc(std::move(webrtc)),
           signaling_limit(std::max<std::size_t>(1, config_max_peers)),
-          static_files(std::make_shared<StaticFileHandler>(web_root)) {}
+          static_files(std::make_shared<StaticFileHandler>(web_root)),
+          system_metrics(recording_directory),
+          metrics_provider(std::move(metrics_provider)) {}
+
+    MetricsSnapshot snapshot_metrics() {
+        auto metrics = metrics_provider ? metrics_provider() : MetricsSnapshot{};
+        sessions.erase(std::remove_if(sessions.begin(), sessions.end(),
+            [](const auto& weak) { return weak.expired(); }), sessions.end());
+        metrics.websocket_clients = sessions.size();
+        std::string error;
+        if (alerts) metrics.alert_count = alerts->count(error);
+        static_cast<SystemMetrics&>(metrics) = system_metrics.sample();
+        return metrics;
+    }
 
     void accept() {
         acceptor.async_accept([this](beast::error_code error, tcp::socket socket) {
@@ -207,6 +230,7 @@ struct HttpServer::State {
                                               alerts,
                                               recording,
                                               webrtc,
+                                              [this] { return snapshot_metrics(); },
                                               signaling_pool,
                                               signaling_jobs,
                                               signaling_limit,
@@ -249,6 +273,8 @@ struct HttpServer::State {
     std::size_t signaling_limit;
     asio::thread_pool signaling_pool{2};
     std::shared_ptr<StaticFileHandler> static_files;
+    SystemMetricsSampler system_metrics;
+    std::function<MetricsSnapshot()> metrics_provider;
     std::vector<std::weak_ptr<WebSocketSession>> sessions;
     std::thread worker;
     std::chrono::steady_clock::time_point started;
@@ -279,13 +305,14 @@ HttpServer::HttpServer(Logger& logger, std::shared_ptr<RuntimeStatus> status,
                        std::shared_ptr<EventChannel> events,
                        std::shared_ptr<AlertRepository> alerts,
                        std::shared_ptr<RecordingController> recording,
-                       std::shared_ptr<WebRtcManager> webrtc)
+                       std::shared_ptr<WebRtcManager> webrtc,
+                       std::function<MetricsSnapshot()> metrics_provider)
     : logger_(logger), status_(status ? std::move(status)
                                      : std::make_shared<RuntimeStatus>()),
       api_(api ? std::move(api) : std::make_shared<ApiState>()),
       events_(events ? std::move(events) : std::make_shared<EventChannel>()),
       alerts_(std::move(alerts)), recording_(std::move(recording)),
-      webrtc_(std::move(webrtc)) {
+      webrtc_(std::move(webrtc)), metrics_provider_(std::move(metrics_provider)) {
     api_->bind_runtime_status(status_);
 }
 
@@ -298,7 +325,8 @@ bool HttpServer::initialize(const Config& config) {
     if (state_) return false;
     api_->configure(config);
     auto next = std::make_unique<State>(logger_, status_, api_, events_, alerts_, recording_,
-                                        webrtc_, config.webrtc.max_peers, config.web.root);
+                                        webrtc_, config.webrtc.max_peers, config.web.root,
+                                        config.recording.directory, metrics_provider_);
     if (!next->static_files->valid()) {
         logger_.log(LogLevel::Error, "web", next->static_files->error());
         return false;

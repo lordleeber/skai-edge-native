@@ -1,6 +1,7 @@
 #include "skai/web/router.hpp"
 #include "skai/api_state.hpp"
 #include "skai/gps/gps_state.hpp"
+#include "skai/metrics.hpp"
 
 #include <gtest/gtest.h>
 
@@ -78,6 +79,48 @@ TEST(HttpRouter, ExposesLanOnlyWebrtcDiagnosticsInStatusAndMetrics) {
     EXPECT_NE(metrics.body().find("\"sessions_created\":0"), std::string::npos);
     EXPECT_NE(metrics.body().find("\"signaling_errors\":0"), std::string::npos);
     EXPECT_NE(metrics.body().find("\"recently_closed\":[]"), std::string::npos);
+}
+
+TEST(HttpRouter, ExposesRuntimeMetricsAndUnavailableValues) {
+    skai::ApiState api;
+    skai::RuntimeStatusSnapshot status;
+    status.video_fps = 24.5;
+    status.detector_fps = 18.0;
+    status.last_inference_ms = 38.5;
+    skai::MetricsSnapshot metrics;
+    metrics.inference_queue_depth = 1;
+    metrics.inference_queue.dropped = 3;
+    metrics.encoded_queue.dropped = 2;
+    metrics.websocket_clients = 4;
+    metrics.whip.media_queue_drops = 5;
+    metrics.whip.enabled = true;
+    metrics.whip.peer_state = "connected";
+    metrics.whip.ice_state = "completed";
+    metrics.whip.access_units_sent = 91;
+    metrics.alert_count = 7;
+    metrics.memory_rss_bytes = 4096;
+    metrics.disk_free_bytes = 8192;
+    metrics.cpu_percent = 12.5;
+    metrics.gpu_percent = 47.0;
+
+    const auto response = skai::web::route_request(
+        {http::verb::get, "/api/v1/metrics", 11}, status, api,
+        nullptr, nullptr, nullptr, &metrics);
+    EXPECT_EQ(response.result(), http::status::ok);
+    EXPECT_NE(response.body().find("\"ingest_fps\":24.5"), std::string::npos);
+    EXPECT_NE(response.body().find("\"inference_fps\":18"), std::string::npos);
+    EXPECT_NE(response.body().find("\"inference_latency_ms\":38.5"), std::string::npos);
+    EXPECT_NE(response.body().find("\"depth\":1,\"dropped\":3"), std::string::npos);
+    EXPECT_NE(response.body().find("\"whip\":{\"enabled\":true,\"peer_state\":\"connected\",\"ice_state\":\"completed\",\"access_units_sent\":91,\"media_queue_drops\":5"), std::string::npos);
+    EXPECT_NE(response.body().find("\"websocket_clients\":4"), std::string::npos);
+    EXPECT_NE(response.body().find("\"alert_count\":7"), std::string::npos);
+    EXPECT_NE(response.body().find("\"memory_rss_bytes\":4096"), std::string::npos);
+    EXPECT_NE(response.body().find("\"cpu_percent\":12.5"), std::string::npos);
+    EXPECT_NE(response.body().find("\"gpu_percent\":47"), std::string::npos);
+    EXPECT_NE(response.body().find("\"disk_free_bytes\":8192"), std::string::npos);
+    EXPECT_NE(response.body().find("\"encoder_fps\":null"), std::string::npos);
+    EXPECT_NE(response.body().find("\"encoder_mode\":\"passthrough\""),
+              std::string::npos);
 }
 
 TEST(HttpRouter, RejectsUnknownRoutesAndUnsupportedMethods) {

@@ -4,12 +4,14 @@
 #include "skai/api_state.hpp"
 #include "skai/events.hpp"
 #include "skai/logging.hpp"
+#include "skai/metrics.hpp"
 #include "skai/status.hpp"
 #include "skai/storage/alert_repository.hpp"
 #include "skai/video/recording_control.hpp"
 #include "skai/webrtc/webrtc_manager.hpp"
 
 #include <memory>
+#include <functional>
 
 namespace skai::web {
 
@@ -27,7 +29,8 @@ public:
                std::shared_ptr<EventChannel> events,
                std::shared_ptr<AlertRepository> alerts,
                std::shared_ptr<RecordingController> recording = {},
-               std::shared_ptr<WebRtcManager> webrtc = {});
+               std::shared_ptr<WebRtcManager> webrtc = {},
+               std::function<MetricsSnapshot()> metrics_provider = {});
     ~HttpServer() override;
 
     bool initialize(const Config& config) override;
@@ -46,6 +49,7 @@ private:
     std::shared_ptr<AlertRepository> alerts_;
     std::shared_ptr<RecordingController> recording_;
     std::shared_ptr<WebRtcManager> webrtc_;
+    std::function<MetricsSnapshot()> metrics_provider_;
     std::unique_ptr<State> state_;
 };
 

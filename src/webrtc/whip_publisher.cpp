@@ -19,6 +19,31 @@
 namespace skai {
 namespace {
 
+const char* peer_state_name(rtc::PeerConnection::State state) {
+    switch (state) {
+    case rtc::PeerConnection::State::New: return "new";
+    case rtc::PeerConnection::State::Connecting: return "connecting";
+    case rtc::PeerConnection::State::Connected: return "connected";
+    case rtc::PeerConnection::State::Disconnected: return "disconnected";
+    case rtc::PeerConnection::State::Failed: return "failed";
+    case rtc::PeerConnection::State::Closed: return "closed";
+    }
+    return "unknown";
+}
+
+const char* ice_state_name(rtc::PeerConnection::IceState state) {
+    switch (state) {
+    case rtc::PeerConnection::IceState::New: return "new";
+    case rtc::PeerConnection::IceState::Checking: return "checking";
+    case rtc::PeerConnection::IceState::Connected: return "connected";
+    case rtc::PeerConnection::IceState::Completed: return "completed";
+    case rtc::PeerConnection::IceState::Failed: return "failed";
+    case rtc::PeerConnection::IceState::Disconnected: return "disconnected";
+    case rtc::PeerConnection::IceState::Closed: return "closed";
+    }
+    return "unknown";
+}
+
 std::string trim(std::string value) {
     const auto first = value.find_first_not_of(" \t\r\n");
     if (first == std::string::npos) return {};
@@ -131,6 +156,12 @@ std::uint32_t random_ssrc() {
 
 bool WhipPublisher::initialize(const Config& config) {
     config_ = config.whip;
+    access_units_sent_ = 0;
+    {
+        std::lock_guard<std::mutex> lock(connection_metrics_->mutex);
+        connection_metrics_->peer_state = config_.enabled ? "new" : "disabled";
+        connection_metrics_->ice_state = config_.enabled ? "new" : "disabled";
+    }
     token_.clear();
     last_error_.clear();
     if (!config_.enabled) return true;
@@ -167,6 +198,17 @@ void WhipPublisher::stop() noexcept {
     wait_changed_.notify_all();
 }
 
+WhipMetrics WhipPublisher::metrics() const {
+    WhipMetrics result;
+    result.enabled = config_.enabled;
+    result.access_units_sent = access_units_sent_.load();
+    result.media_queue_drops = media_queue_.stats().dropped;
+    std::lock_guard<std::mutex> lock(connection_metrics_->mutex);
+    result.peer_state = connection_metrics_->peer_state;
+    result.ice_state = connection_metrics_->ice_state;
+    return result;
+}
+
 void WhipPublisher::wait() noexcept {
     if (worker_.joinable()) worker_.join();
     token_.clear();
@@ -194,6 +236,11 @@ void WhipPublisher::run() noexcept {
         } catch (...) {
             if (!stopping_) logger_.log(LogLevel::Error, "whip", "unknown publisher error");
         }
+        {
+            std::lock_guard<std::mutex> lock(connection_metrics_->mutex);
+            connection_metrics_->peer_state = stopping_ ? "stopped" : "retrying";
+            connection_metrics_->ice_state = stopping_ ? "closed" : "disconnected";
+        }
         if (stopping_) break;
         media_queue_.discard_all();
         std::unique_lock<std::mutex> lock(wait_mutex_);
@@ -204,16 +251,26 @@ void WhipPublisher::run() noexcept {
 void WhipPublisher::publish_once() {
     token_ = load_token();
     if (token_.empty()) throw std::runtime_error("WHIP_TOKEN is unavailable");
+    {
+        std::lock_guard<std::mutex> lock(connection_metrics_->mutex);
+        connection_metrics_->peer_state = "new";
+        connection_metrics_->ice_state = "new";
+    }
     auto peer = std::make_shared<rtc::PeerConnection>();
     auto state = std::make_shared<WhipPeerState>();
     const std::weak_ptr<WhipPeerState> weak = state;
+    const auto connection_metrics = connection_metrics_;
     peer->onGatheringStateChange([weak](rtc::PeerConnection::GatheringState value) {
         if (value != rtc::PeerConnection::GatheringState::Complete) return;
         if (auto state = weak.lock()) {
             state->gathered();
         }
     });
-    peer->onStateChange([weak](rtc::PeerConnection::State value) {
+    peer->onStateChange([weak, connection_metrics](rtc::PeerConnection::State value) {
+        {
+            std::lock_guard<std::mutex> lock(connection_metrics->mutex);
+            connection_metrics->peer_state = peer_state_name(value);
+        }
         if (auto state = weak.lock()) {
             if (value == rtc::PeerConnection::State::Connected) state->connected();
             else if (value == rtc::PeerConnection::State::Disconnected) {
@@ -221,6 +278,10 @@ void WhipPublisher::publish_once() {
             } else if (value == rtc::PeerConnection::State::Failed ||
                        value == rtc::PeerConnection::State::Closed) state->failed();
         }
+    });
+    peer->onIceStateChange([connection_metrics](rtc::PeerConnection::IceState value) {
+        std::lock_guard<std::mutex> lock(connection_metrics->mutex);
+        connection_metrics->ice_state = ice_state_name(value);
     });
     const auto ssrc = random_ssrc();
     auto video = rtc::Description::Video("video");
@@ -358,6 +419,7 @@ void WhipPublisher::publish_once() {
             if (++sent_units == 1) {
                 logger_.log(LogLevel::Info, "whip", "first H.264 access unit sent");
             }
+            ++access_units_sent_;
         }
     } catch (...) {
         peer->resetCallbacks();

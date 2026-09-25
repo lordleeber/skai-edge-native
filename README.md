@@ -118,6 +118,16 @@ line reports SEI units, attached and dropped results, and `dt` percentiles.
 loopback WHIP endpoint, and `scripts/measure_whip_sei.sh CONFIG SECONDS [PORT]
 [RECORDING_DIR]` repeats the on-camera measurement recorded in `ROADMAP.md`.
 
+Step 29 exposes JSON runtime metrics at `GET /api/v1/metrics`. Ingest FPS counts
+decoded frames received by the application, rather than the camera's advertised
+rate. The endpoint includes inference timing, queue drops, connected WebSocket
+clients, LAN peer and ICE diagnostics, WHIP uplink state, fixed GPS source,
+persisted alert count,
+process RSS and CPU use, GPU load when the Jetson sysfs counter is available,
+and free space on the recording filesystem. CPU percentage is process CPU time
+per wall-clock interval, so multi-core work can exceed 100%; the first sample
+is `null`. Encoder FPS is `null` for the current H.264 passthrough path.
+
 For an executable-only build without GoogleTest or the RTSP-server fixture:
 
 ```sh
