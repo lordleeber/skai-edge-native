@@ -36,6 +36,9 @@ add_test(NAME Frontend.LiveStatusStateMachine
     COMMAND ${SKAI_NODE_EXECUTABLE} --test
             ${CMAKE_CURRENT_SOURCE_DIR}/frontend/live_status_ui_test.js)
 set_tests_properties(Frontend.LiveStatusStateMachine PROPERTIES TIMEOUT 15)
+add_test(NAME Frontend.DiagnosticsPage
+    COMMAND ${SKAI_NODE_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/frontend/diagnostics_ui_test.js)
+set_tests_properties(Frontend.DiagnosticsPage PROPERTIES TIMEOUT 15)
 
 add_executable(skai-gstreamer-tests unit/gstreamer_runtime_test.cpp)
 target_link_libraries(skai-gstreamer-tests PRIVATE skai-gstreamer GTest::gtest_main)

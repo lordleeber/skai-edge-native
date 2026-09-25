@@ -63,19 +63,6 @@ bool browser_compatible_h264_caps(GstCaps* caps, std::string& reason) {
     return true;
 }
 
-const char* health_name(SourceHealth health) {
-    switch (health) {
-    case SourceHealth::Stopped: return "stopped";
-    case SourceHealth::Connecting: return "connecting";
-    case SourceHealth::Connected: return "connected";
-    case SourceHealth::Degraded: return "degraded";
-    case SourceHealth::Stalled: return "stalled";
-    case SourceHealth::Reconnecting: return "reconnecting";
-    case SourceHealth::Error: return "error";
-    }
-    return "unknown";
-}
-
 } // namespace
 
 std::string serialize_rtsp_metrics(const RtspDiagnostics& d) {
@@ -83,7 +70,7 @@ std::string serialize_rtsp_metrics(const RtspDiagnostics& d) {
     json << "{\"url_configured\":" << (d.url_configured ? "true" : "false")
          << ",\"connected\":" << ((d.health == SourceHealth::Connected ||
                                       d.health == SourceHealth::Degraded) ? "true" : "false")
-         << ",\"health\":\"" << health_name(d.health) << "\""
+         << ",\"health\":\"" << source_health_name(d.health) << "\""
          << ",\"transport\":\"" << d.transport << "\""
          << ",\"codec\":\"" << d.codec << "\""
          << ",\"width\":" << d.width << ",\"height\":" << d.height

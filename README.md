@@ -131,6 +131,12 @@ WHIP `media_queue_drops` counts queue overflow, while `media_queue_discarded`
 counts pending access units removed during reconnect or disconnect. WHIP
 `last_error` records the latest uplink error, including a fatal session error.
 
+Step 30 adds `GET /diagnostics` to the local web console. It refreshes RTSP
+health, frame age, pipeline queues and timing, WHIP and LAN WebRTC state,
+recording and GPS details, and the ten most recent system errors. The page
+shows the selected local WebRTC interface and candidate for active LAN peers;
+the configured RTSP URL is not part of the source metrics.
+
 For an executable-only build without GoogleTest or the RTSP-server fixture:
 
 ```sh

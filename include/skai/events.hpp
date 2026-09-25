@@ -8,6 +8,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace skai {
 
@@ -25,11 +26,13 @@ public:
     std::uint64_t subscribe(Subscriber subscriber);
     void unsubscribe(std::uint64_t id);
     void publish(EventType type, const std::string& data_json) const;
+    std::vector<std::string> recent_errors() const;
 
 private:
     mutable std::mutex mutex_;
     std::uint64_t next_id_ = 1;
     std::unordered_map<std::uint64_t, Subscriber> subscribers_;
+    mutable std::deque<std::string> recent_errors_;
 };
 
 class EventQueue {

@@ -214,6 +214,7 @@ struct HttpServer::State {
 
     MetricsSnapshot snapshot_metrics() {
         auto metrics = metrics_provider ? metrics_provider() : MetricsSnapshot{};
+        if (events) metrics.recent_errors = events->recent_errors();
         sessions.erase(std::remove_if(sessions.begin(), sessions.end(),
             [](const auto& weak) { return weak.expired(); }), sessions.end());
         metrics.websocket_clients = sessions.size();

@@ -82,10 +82,19 @@ void EventChannel::publish(EventType type, const std::string& data_json) const {
     std::vector<Subscriber> subscribers;
     {
         std::lock_guard<std::mutex> lock(mutex_);
+        if (type == EventType::SystemError) {
+            if (recent_errors_.size() == 10) recent_errors_.pop_front();
+            recent_errors_.push_back(event);
+        }
         subscribers.reserve(subscribers_.size());
         for (const auto& item : subscribers_) subscribers.push_back(item.second);
     }
     for (const auto& subscriber : subscribers) subscriber(event);
+}
+
+std::vector<std::string> EventChannel::recent_errors() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return {recent_errors_.begin(), recent_errors_.end()};
 }
 
 EventQueue::EventQueue(std::size_t capacity) : capacity_(capacity) {

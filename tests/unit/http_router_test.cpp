@@ -1,5 +1,6 @@
 #include "skai/web/router.hpp"
 #include "skai/api_state.hpp"
+#include "skai/events.hpp"
 #include "skai/gps/gps_state.hpp"
 #include "skai/metrics.hpp"
 
@@ -104,6 +105,17 @@ TEST(HttpRouter, ExposesRuntimeMetricsAndUnavailableValues) {
     metrics.disk_free_bytes = 8192;
     metrics.cpu_percent = 12.5;
     metrics.gpu_percent = 47.0;
+    skai::RtspDiagnostics source;
+    source.health = skai::SourceHealth::Reconnecting;
+    source.codec = "H264";
+    source.transport = "tcp";
+    source.reconnect_count = 3;
+    source.last_frame_age_ms = 2300;
+    source.last_error = "RTSP failed: \"timeout\"";
+    metrics.rtsp = source;
+    metrics.recent_errors = {skai::make_event_json(
+        skai::EventType::SystemError,
+        skai::make_system_error_data("video", "source unavailable"))};
 
     const auto response = skai::web::route_request(
         {http::verb::get, "/api/v1/metrics", 11}, status, api,
@@ -122,6 +134,15 @@ TEST(HttpRouter, ExposesRuntimeMetricsAndUnavailableValues) {
     EXPECT_NE(response.body().find("\"disk_free_bytes\":8192"), std::string::npos);
     EXPECT_NE(response.body().find("\"encoder_fps\":null"), std::string::npos);
     EXPECT_NE(response.body().find("\"encoder_mode\":\"passthrough\""),
+              std::string::npos);
+    EXPECT_NE(response.body().find("\"rtsp\":{\"health\":\"reconnecting\""),
+              std::string::npos);
+    EXPECT_NE(response.body().find("\"reconnect_count\":3"), std::string::npos);
+    EXPECT_NE(response.body().find("\"last_frame_age_ms\":2300"),
+              std::string::npos);
+    EXPECT_NE(response.body().find("RTSP failed: \\\"timeout\\\""),
+              std::string::npos);
+    EXPECT_NE(response.body().find("\"recent_errors\":[{\"type\":\"system_error\""),
               std::string::npos);
 }
 
@@ -273,6 +294,10 @@ TEST(HttpRouter, ControlsConfiguredRecording) {
         &recording);
     EXPECT_EQ(stopped.result(), http::status::ok);
     EXPECT_NE(stopped.body().find("\"state\":\"stopped\""), std::string::npos);
+    recording.set_error("disk full");
+    const auto failed = skai::web::route_request(
+        {http::verb::get, "/api/v1/recordings", 11}, status, api, nullptr, &recording);
+    EXPECT_NE(failed.body().find("\"last_error\":\"disk full\""), std::string::npos);
 }
 
 TEST(HttpRouter, TreatsUnconfiguredRecordingControllerAsUnavailable) {

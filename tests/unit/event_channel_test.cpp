@@ -48,3 +48,19 @@ TEST(EventQueue, DropsOldestPendingEventWhenClientIsSlow) {
     EXPECT_EQ(queue.pop(), "three");
     EXPECT_FALSE(queue.pop().has_value());
 }
+
+TEST(EventChannel, RetainsOnlyTheTenMostRecentSystemErrors) {
+    skai::EventChannel channel;
+    channel.publish(skai::EventType::Status, "{}");
+    for (int index = 0; index < 12; ++index) {
+        channel.publish(skai::EventType::SystemError,
+                        skai::make_system_error_data("video", "failure " +
+                                                     std::to_string(index)));
+    }
+    const auto errors = channel.recent_errors();
+    ASSERT_EQ(errors.size(), 10U);
+    EXPECT_NE(errors.front().find("failure 2"), std::string::npos);
+    EXPECT_NE(errors.back().find("failure 11"), std::string::npos);
+    EXPECT_NE(errors.back().find("\"timestamp\":"), std::string::npos);
+    EXPECT_EQ(errors.back().find("failure 0"), std::string::npos);
+}

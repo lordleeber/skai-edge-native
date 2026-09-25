@@ -19,6 +19,8 @@ h1 { font-size: clamp(1.45rem, 3vw, 2rem); letter-spacing: -.04em; }
 h2 { font-size: 1.05rem; }
 .eyebrow { margin-bottom: 7px; color: var(--accent); font: 700 .68rem/1 monospace; letter-spacing: .14em; }
 .connection { display: flex; gap: 9px; align-items: center; color: var(--muted); font-size: .84rem; }
+.header-link { color: var(--accent); font-size: .8rem; text-decoration: none; }
+.header-link:hover { text-decoration: underline; }
 #connection-dot { width: 8px; height: 8px; border-radius: 50%; background: #efb366; box-shadow: 0 0 12px currentColor; }
 #connection-dot.online { background: var(--accent); }
 #connection-dot.offline { background: #ff7272; }

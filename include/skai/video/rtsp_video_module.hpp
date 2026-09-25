@@ -4,6 +4,8 @@
 #include "skai/video/rtsp_source.hpp"
 
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <utility>
 
 namespace skai {
@@ -28,6 +30,7 @@ public:
     bool start() override;
     void stop() noexcept override;
     void wait() noexcept override;
+    std::optional<RtspDiagnostics> diagnostics() const;
 
 private:
     BoundedQueue<Frame>& frames_;
@@ -37,6 +40,7 @@ private:
     RtspSource::AccessUnitSink access_unit_sink_;
     RtspSource::MediaStatusSink media_status_sink_;
     VideoConfig config_;
+    mutable std::mutex source_mutex_;
     std::unique_ptr<RtspSource> source_;
 };
 

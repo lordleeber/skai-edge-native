@@ -13,7 +13,10 @@ bool RtspVideoModule::initialize(const Config& config) {
     config_ = config.video;
     frames_.reset();
     if (encoded_access_units_) encoded_access_units_->reset();
-    source_ = std::move(source);
+    {
+        std::lock_guard<std::mutex> lock(source_mutex_);
+        source_ = std::move(source);
+    }
     return true;
 }
 
@@ -33,11 +36,20 @@ void RtspVideoModule::stop() noexcept {
 }
 
 void RtspVideoModule::wait() noexcept {
-    if (source_) source_->stop();
+    {
+        std::lock_guard<std::mutex> lock(source_mutex_);
+        if (source_) source_->stop();
+        source_.reset();
+    }
     if (status_) status_->clear_video();
     frames_.shutdown();
     if (encoded_access_units_) encoded_access_units_->shutdown();
-    source_.reset();
+}
+
+std::optional<RtspDiagnostics> RtspVideoModule::diagnostics() const {
+    std::lock_guard<std::mutex> lock(source_mutex_);
+    if (!source_) return std::nullopt;
+    return source_->diagnostics();
 }
 
 } // namespace skai

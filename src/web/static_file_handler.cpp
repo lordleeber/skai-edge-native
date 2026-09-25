@@ -11,7 +11,9 @@ namespace {
 namespace http = boost::beast::http;
 
 constexpr std::uintmax_t maximum_asset_bytes = 1024 * 1024;
-constexpr const char* asset_names[] = {"index.html", "app.js", "style.css"};
+constexpr const char* asset_names[] = {"index.html", "app.js", "style.css",
+                                       "diagnostics.html", "diagnostics.js",
+                                       "diagnostics.css"};
 
 Response text_response(http::status status, const std::string& message) {
     Response response{status, 11};
@@ -141,8 +143,9 @@ Response StaticFileHandler::handle(const Request& request) const {
     if (!decode_path(request.target(), decoded)) {
         return text_response(http::status::bad_request, "invalid request target");
     }
-    auto relative = decoded == "/" ? std::filesystem::path("index.html")
-                                    : std::filesystem::path(decoded.substr(1));
+    auto relative = decoded == "/" ? std::filesystem::path("index.html") :
+                    decoded == "/diagnostics" ? std::filesystem::path("diagnostics.html") :
+                    std::filesystem::path(decoded.substr(1));
     std::error_code error;
     const auto candidate = std::filesystem::weakly_canonical(root_ / relative, error);
     if (error) return text_response(http::status::not_found, "not found");
