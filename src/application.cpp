@@ -140,4 +140,9 @@ std::string Application::last_error_module() const {
     return last_error_module_;
 }
 
+Config Application::config() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return config_;
+}
+
 } // namespace skai

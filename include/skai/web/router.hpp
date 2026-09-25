@@ -3,6 +3,7 @@
 #include <boost/beast/http.hpp>
 
 #include "skai/api_state.hpp"
+#include "skai/health.hpp"
 #include "skai/metrics.hpp"
 #include "skai/storage/alert_repository.hpp"
 #include "skai/status.hpp"
@@ -24,6 +25,7 @@ Response route_request(const Request& request, const StatusSnapshot& status,
                        ApiState& api, AlertRepository* alerts = nullptr,
                        RecordingController* recording = nullptr,
                        WebRtcManager* webrtc = nullptr,
-                       const MetricsSnapshot* metrics = nullptr);
+                       const MetricsSnapshot* metrics = nullptr,
+                       const HealthSnapshot* health = nullptr);
 
 } // namespace skai::web

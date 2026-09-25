@@ -3,6 +3,7 @@
 #include "skai/web/router.hpp"
 
 #include <gtest/gtest.h>
+#include <sqlite3.h>
 
 #include <atomic>
 #include <cmath>
@@ -54,6 +55,16 @@ skai::AlertEvent make_alert(std::string id, std::int64_t timestamp_ms) {
 
 } // namespace
 
+namespace skai {
+class DatabaseTestAccess {
+public:
+    static int make_read_only(Database& database) {
+        std::lock_guard<std::mutex> lock(database.mutex_);
+        return sqlite3_exec(database.connection_, "PRAGMA query_only = ON;", nullptr, nullptr, nullptr);
+    }
+};
+} // namespace skai
+
 TEST(Database, CreatesParentDirectoryAndAppliesMigrationIdempotently) {
     TemporaryDatabase temporary;
     ASSERT_FALSE(temporary.path().empty());
@@ -84,6 +95,25 @@ TEST(Database, LifecycleClosesAndCanReopenTheDatabase) {
     EXPECT_FALSE(database.is_open());
     ASSERT_TRUE(database.initialize(config));
     database.wait();
+}
+
+TEST(Database, OperationalWriteFailureLatchesHealthUntilReopen) {
+    TemporaryDatabase temporary;
+    skai::Database database(temporary.path());
+    std::string error;
+    ASSERT_TRUE(database.open(error)) << error;
+    skai::AlertRepository repository(database);
+    EXPECT_TRUE(database.health_error().empty());
+    ASSERT_EQ(skai::DatabaseTestAccess::make_read_only(database), SQLITE_OK);
+    EXPECT_FALSE(repository.insert(make_alert("readonly", 1), error));
+    EXPECT_TRUE(database.is_open());
+    EXPECT_NE(database.health_error().find("readonly"), std::string::npos);
+    EXPECT_EQ(skai::database_health(database.health_error()).state, skai::HealthState::Failed);
+    EXPECT_EQ(repository.count(error), 0U);
+    EXPECT_FALSE(database.health_error().empty());
+    database.close();
+    ASSERT_TRUE(database.open(error)) << error;
+    EXPECT_TRUE(database.health_error().empty());
 }
 
 TEST(Database, LifecycleReloadsConfigOwnedPathButPreservesExplicitPath) {

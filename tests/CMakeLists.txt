@@ -8,7 +8,7 @@ add_executable(skai-unit-tests unit/command_line_test.cpp unit/config_test.cpp
     unit/logging_test.cpp unit/application_test.cpp unit/bounded_queue_test.cpp
     unit/rtsp_recovery_test.cpp unit/metrics_test.cpp unit/tensor_layout_test.cpp
     unit/preprocess_reference_test.cpp unit/yolo_postprocess_test.cpp
-    unit/annotator_test.cpp unit/http_router_test.cpp unit/event_channel_test.cpp
+    unit/annotator_test.cpp unit/http_router_test.cpp unit/health_test.cpp unit/event_channel_test.cpp
     unit/gps_source_test.cpp unit/storage_test.cpp unit/alert_manager_test.cpp)
 target_link_libraries(skai-unit-tests PRIVATE skai-cli skai-config skai-logging
     skai-application skai-core skai-tensor-layout skai-preprocess-reference
@@ -69,7 +69,7 @@ gtest_discover_tests(skai-webrtc-tests PROPERTIES LABELS webrtc TIMEOUT 15)
 add_executable(skai-whip-sei-tests integration/whip_sei_test.cpp)
 target_include_directories(skai-whip-sei-tests PRIVATE support)
 target_link_libraries(skai-whip-sei-tests PRIVATE skai-webrtc-runtime skai-gstreamer
-    PkgConfig::GST_VIDEO_APP LibDataChannel::LibDataChannel Boost::system GTest::gtest_main)
+    skai-health PkgConfig::GST_VIDEO_APP LibDataChannel::LibDataChannel Boost::system GTest::gtest_main)
 gtest_discover_tests(skai-whip-sei-tests PROPERTIES LABELS webrtc TIMEOUT 60)
 
 add_executable(skai-whep-tests integration/whep_session_test.cpp)

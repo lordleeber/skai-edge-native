@@ -168,7 +168,12 @@ diagnostic logs go to stderr.
 ## HTTP status server
 
 The service binds `web.bind` and `web.port` with an asynchronous Boost.Asio /
-Boost.Beast server. `GET /health` returns the Step 12 liveness response and
+Boost.Beast server. `GET /health` returns a watchdog snapshot with `state` and
+independent `video_source`, `detector`, `encoder`, `recorder`, `gps`, `web`,
+`webrtc`, and `database` component states. It returns HTTP 200 only for
+`RUNNING`; `STARTING`, `DEGRADED`, `STOPPING`, and `FAILED` return 503. The
+watchdog polls every 500 ms and treats a poll older than two seconds as failed.
+An individual browser peer failure does not fail the WebRTC component.
 `GET /api/v1/status` returns JSON containing service uptime plus live video and
 detector metrics from a shared thread-safe runtime snapshot. Metrics remain
 JSON `null` until their module has produced a measurement; service status is

@@ -152,6 +152,10 @@ add_library(skai-application src/application.cpp)
 target_include_directories(skai-application PUBLIC include)
 target_link_libraries(skai-application PUBLIC skai-config skai-logging Threads::Threads)
 
+add_library(skai-health src/health.cpp)
+target_include_directories(skai-health PUBLIC include)
+target_link_libraries(skai-health PUBLIC skai-core)
+
 add_library(skai-detection-sei src/webrtc/detection_sei.cpp)
 target_include_directories(skai-detection-sei PUBLIC include)
 
@@ -182,7 +186,7 @@ target_link_libraries(skai-alerts PRIVATE ${OpenCV_LIBS})
 add_library(skai-web src/metrics.cpp src/web/http_server.cpp src/web/router.cpp
     src/web/static_file_handler.cpp src/web/websocket_session.cpp)
 target_include_directories(skai-web PUBLIC include)
-target_link_libraries(skai-web PUBLIC skai-application skai-events skai-gps
+target_link_libraries(skai-web PUBLIC skai-application skai-health skai-events skai-gps
     skai-storage skai-recording skai-webrtc-runtime Boost::system)
 
 add_library(skai-gstreamer src/video/gstreamer_runtime.cpp)

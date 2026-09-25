@@ -250,10 +250,10 @@ TEST(HttpServer, ServesRoutesAsynchronouslyAndRejectsOversizedBodies) {
 
     const auto health = request(server.port(),
                                 {http::verb::get, "/health", 11});
-    EXPECT_EQ(health.result(), http::status::ok);
+    EXPECT_EQ(health.result(), http::status::service_unavailable);
     const auto health_with_query = request(
         server.port(), {http::verb::get, "/health?probe=readiness", 11});
-    EXPECT_EQ(health_with_query.result(), http::status::ok);
+    EXPECT_EQ(health_with_query.result(), http::status::service_unavailable);
 
     asio::io_context stalled_context;
     tcp::socket stalled(stalled_context);
@@ -287,6 +287,68 @@ TEST(HttpServer, ServesRoutesAsynchronouslyAndRejectsOversizedBodies) {
     EXPECT_EQ(header_rejected.result(),
               http::status::request_header_fields_too_large);
 
+    server.stop();
+    server.wait();
+}
+
+TEST(HttpServer, HealthReflectsLiveComponentFailuresAndRecovery) {
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    auto status = std::make_shared<skai::RuntimeStatus>();
+    status->set_running(true);
+    auto api = std::make_shared<skai::ApiState>();
+    auto events = std::make_shared<skai::EventChannel>();
+    std::atomic<int> phase{0};
+    skai::web::HttpServer server(logger, status, api, events, {}, {}, {}, {}, [&phase] {
+        skai::HealthSnapshot health;
+        health.state = phase.load() == 0 ? skai::HealthState::Running :
+                       phase.load() == 1 ? skai::HealthState::Degraded :
+                                           skai::HealthState::Failed;
+        for (auto& component : health.components) component.state = skai::HealthState::Running;
+        if (phase.load() == 1) health.components[0] = {skai::HealthState::Degraded, "RTSP offline"};
+        if (phase.load() == 2) health.components[7] = {skai::HealthState::Failed, "database closed"};
+        return health;
+    });
+    skai::Config config;
+    config.web.bind = "127.0.0.1";
+    config.web.port = 0;
+    ASSERT_TRUE(server.initialize(config)) << logs.str();
+    ASSERT_TRUE(server.start());
+
+    EXPECT_EQ(request(server.port(), {http::verb::get, "/health", 11}).result(), http::status::ok);
+    phase = 1;
+    const auto degraded = request(server.port(), {http::verb::get, "/health", 11});
+    EXPECT_EQ(degraded.result(), http::status::service_unavailable);
+    EXPECT_NE(degraded.body().find("RTSP offline"), std::string::npos);
+    phase = 2;
+    EXPECT_EQ(request(server.port(), {http::verb::get, "/health", 11}).result(),
+              http::status::service_unavailable);
+    phase = 0;
+    EXPECT_EQ(request(server.port(), {http::verb::get, "/health", 11}).result(), http::status::ok);
+    server.stop();
+    server.wait();
+}
+
+TEST(HttpServer, ServingStateIsReadyBeforeWatchdogFirstSample) {
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    auto watchdog = std::make_shared<skai::HealthWatchdog>();
+    skai::web::HttpServer server(logger, {}, {}, {}, {}, {}, {}, {},
+        [watchdog] { return watchdog->snapshot(); });
+    for (const auto component : skai::all_health_components) {
+        watchdog->set_probe(component, [] { return skai::ComponentHealth{skai::HealthState::Running, {}}; });
+    }
+    watchdog->set_probe(skai::HealthComponent::Web,
+                        [&server] { return skai::web_health(server.serving()); }, true);
+    skai::Config config;
+    config.web.bind = "127.0.0.1";
+    config.web.port = 0;
+    ASSERT_TRUE(server.initialize(config)) << logs.str();
+    ASSERT_TRUE(server.start());
+    EXPECT_TRUE(server.serving());
+    watchdog->start();
+    EXPECT_EQ(request(server.port(), {http::verb::get, "/health", 11}).result(), http::status::ok);
+    watchdog->stop();
     server.stop();
     server.wait();
 }

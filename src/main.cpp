@@ -3,6 +3,7 @@
 #include "skai/events.hpp"
 #include "skai/gps/gps_module.hpp"
 #include "skai/gps/gps_state.hpp"
+#include "skai/health.hpp"
 #include "skai/logging.hpp"
 #include "skai/storage/database.hpp"
 #include "skai/storage/alert_repository.hpp"
@@ -99,9 +100,11 @@ int main(int argc, char* argv[]) {
     auto api_state = std::make_shared<skai::ApiState>(runtime_status, gps_state);
     skai::Application::Modules modules;
     auto database = std::make_unique<skai::Database>();
+    auto* database_state = database.get();
     auto alert_repository = std::make_shared<skai::AlertRepository>(*database);
     auto recording_control = std::make_shared<skai::RecordingController>();
     auto webrtc_manager = std::make_shared<skai::WebRtcManager>(logger);
+    auto watchdog = std::make_shared<skai::HealthWatchdog>();
     auto whip_publisher = std::make_unique<skai::WhipPublisher>(logger);
     auto* whip_sink = whip_publisher.get();
     recording_control->set_media_available(
@@ -123,10 +126,12 @@ int main(int argc, char* argv[]) {
         metrics.whip = whip_sink->metrics();
         return metrics;
     };
-    modules.web = std::make_unique<skai::web::HttpServer>(logger, runtime_status,
-                                                          api_state, events,
-                                                          alert_repository, recording_control,
-                                                          webrtc_manager, runtime_metrics);
+    auto web_server = std::make_unique<skai::web::HttpServer>(
+        logger, runtime_status, api_state, events, alert_repository,
+        recording_control, webrtc_manager, runtime_metrics,
+        [watchdog] { return watchdog->snapshot(); });
+    auto* web_state = web_server.get();
+    modules.web = std::move(web_server);
     modules.recording = std::make_unique<skai::RecordingModule>(
         encoded_access_units, logger, recording_control, events);
 #if SKAI_HAS_YOLO_PIPELINE
@@ -171,22 +176,56 @@ int main(int argc, char* argv[]) {
         error_logger.log(skai::LogLevel::Error, app.last_error_module(), app.last_error());
         return 2;
     }
+    const auto health_config = app.config();
+    using skai::HealthComponent;
+    watchdog->set_probe(HealthComponent::VideoSource, [video_source, health_config] {
+        return skai::video_health(video_source->diagnostics(), health_config.video.stall_timeout_ms);
+    });
+    watchdog->set_probe(HealthComponent::Detector, [api_state, runtime_status] {
+        return skai::detector_health(api_state->detector_supported(),
+                                     api_state->detector_enabled(), runtime_status->snapshot());
+    });
+    watchdog->set_probe(HealthComponent::Encoder, [runtime_status, webrtc_manager, health_config] {
+        return skai::encoder_health(runtime_status->snapshot(),
+                                    webrtc_manager->diagnostics().media_available,
+                                    health_config.recording.enabled || health_config.webrtc.enabled ||
+                                    health_config.whip.enabled);
+    });
+    watchdog->set_probe(HealthComponent::Recorder, [recording_control, health_config] {
+        return skai::recorder_health(recording_control->status(), recording_control->requested(),
+                                     health_config.recording.enabled);
+    });
+    watchdog->set_probe(HealthComponent::Gps, [gps_state, health_config] {
+        return skai::gps_health(health_config.gps.enabled, gps_state->latest());
+    });
+    watchdog->set_probe(HealthComponent::Web, [web_state] {
+        return skai::web_health(web_state->serving());
+    }, true);
+    watchdog->set_probe(HealthComponent::WebRtc, [webrtc_manager, whip_sink] {
+        return skai::webrtc_health(webrtc_manager->diagnostics(), whip_sink->metrics());
+    });
+    watchdog->set_probe(HealthComponent::Database, [database_state] {
+        return skai::database_health(database_state->health_error());
+    }, true);
     if (!app.start()) {
         skai::Logger error_logger(std::cerr);
         error_logger.log(skai::LogLevel::Error, app.last_error_module(), app.last_error());
         return 1;
     }
     runtime_status->set_running(true);
+    watchdog->start();
     logger.log(skai::LogLevel::Info, "core", "skai-edge ready");
     int signal_number = 0;
     if (sigwait(&shutdown_signals, &signal_number) != 0) {
         logger.log(skai::LogLevel::Error, "core", "failed to wait for shutdown signal");
         runtime_status->set_running(false);
+        watchdog->stop();
         app.stop();
         app.wait();
         return 1;
     }
     runtime_status->set_running(false);
+    watchdog->stop();
     app.stop();
     app.wait();
     logger.log(skai::LogLevel::Info, "core", "skai-edge stopped");

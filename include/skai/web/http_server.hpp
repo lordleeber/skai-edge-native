@@ -3,6 +3,7 @@
 #include "skai/application.hpp"
 #include "skai/api_state.hpp"
 #include "skai/events.hpp"
+#include "skai/health.hpp"
 #include "skai/logging.hpp"
 #include "skai/metrics.hpp"
 #include "skai/status.hpp"
@@ -10,6 +11,7 @@
 #include "skai/video/recording_control.hpp"
 #include "skai/webrtc/webrtc_manager.hpp"
 
+#include <atomic>
 #include <memory>
 #include <functional>
 
@@ -30,7 +32,8 @@ public:
                std::shared_ptr<AlertRepository> alerts,
                std::shared_ptr<RecordingController> recording = {},
                std::shared_ptr<WebRtcManager> webrtc = {},
-               std::function<MetricsSnapshot()> metrics_provider = {});
+               std::function<MetricsSnapshot()> metrics_provider = {},
+               std::function<HealthSnapshot()> health_provider = {});
     ~HttpServer() override;
 
     bool initialize(const Config& config) override;
@@ -39,6 +42,7 @@ public:
     void wait() noexcept override;
 
     unsigned short port() const noexcept;
+    bool serving() const noexcept { return serving_.load(); }
 
 private:
     struct State;
@@ -50,6 +54,8 @@ private:
     std::shared_ptr<RecordingController> recording_;
     std::shared_ptr<WebRtcManager> webrtc_;
     std::function<MetricsSnapshot()> metrics_provider_;
+    std::function<HealthSnapshot()> health_provider_;
+    std::atomic<bool> serving_{false};
     std::unique_ptr<State> state_;
 };
 
