@@ -504,8 +504,11 @@ TEST(RtspVideoModule, PublishesToSharedInferenceQueueAfterRestart) {
         auto frame = frames.pop_for(std::chrono::seconds(3));
         ASSERT_TRUE(frame.has_value()) << output.str();
         EXPECT_EQ(frame->sequence, 1U);
+        ASSERT_TRUE(module.diagnostics().has_value());
+        EXPECT_GE(module.diagnostics()->frames_received, 1U);
         module.stop();
         module.wait();
+        EXPECT_FALSE(module.diagnostics().has_value());
         EXPECT_TRUE(frames.is_shutdown());
         while (frames.pop_for(std::chrono::milliseconds(0)).has_value()) {}
     }

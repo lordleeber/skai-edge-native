@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Diagnostics · SKAI Edge</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/diagnostics.css">
+</head>
+<body>
+  <header class="diag-header">
+    <a class="brand" href="/"><span class="eyebrow">SKAI EDGE</span><strong>Operations Console</strong></a>
+    <nav aria-label="Console"><a href="/">Live view</a><a href="/diagnostics" aria-current="page">Diagnostics</a></nav>
+  </header>
+  <main class="diag-main">
+    <div class="diag-intro">
+      <div><p class="eyebrow">SYSTEM OBSERVABILITY</p><h1>Diagnostics</h1><p class="muted">Live health across the camera, processing pipeline, and viewers.</p></div>
+      <div class="diag-sync" role="status" aria-live="polite"><strong id="fetch-state">Loading telemetry</strong><small id="updated-at">Waiting for update</small></div>
+    </div>
+
+    <section class="diag-summary" aria-label="Current health">
+      <article class="panel summary-card"><span>RTSP source</span><strong id="source-health">—</strong><small id="source-fps">—</small></article>
+      <article class="panel summary-card"><span>Inference</span><strong id="inference-fps">—</strong><small id="inference-latency">—</small></article>
+      <article class="panel summary-card"><span>Cloud uplink</span><strong id="whip-state">—</strong><small>ICE <span id="whip-ice">—</span></small></article>
+      <article class="panel summary-card"><span>Local viewers</span><strong id="peer-count">—</strong><small><span id="websocket-count">—</span> WebSocket clients</small></article>
+    </section>
+
+    <div class="diag-grid">
+      <section class="panel diag-panel" aria-labelledby="rtsp-title">
+        <div class="section-heading"><div><p class="eyebrow">INPUT 01</p><h2 id="rtsp-title">RTSP source</h2></div><span class="tag" id="source-transport">—</span></div>
+        <dl class="readings">
+          <div><dt>Video</dt><dd id="source-format">—</dd></div>
+          <div><dt>Last frame</dt><dd id="source-last-frame">—</dd></div>
+          <div><dt>Frames received</dt><dd id="source-frames">—</dd></div>
+          <div><dt>Reconnections</dt><dd id="source-reconnects">—</dd></div>
+          <div><dt>Queue dropped / discarded</dt><dd id="source-queue-loss">—</dd></div>
+          <div><dt>RTP lost / late</dt><dd id="source-packet-loss">—</dd></div>
+        </dl>
+        <p class="detail-note" id="source-error">No source error reported</p>
+      </section>
+
+      <section class="panel diag-panel" aria-labelledby="pipeline-title">
+        <div class="section-heading"><div><p class="eyebrow">PROCESSING</p><h2 id="pipeline-title">Pipeline</h2></div><span class="tag" id="encoder-mode">—</span></div>
+        <dl class="readings">
+          <div><dt>Inference queue depth</dt><dd id="inference-depth">—</dd></div>
+          <div><dt>Inference dropped / discarded</dt><dd id="inference-loss">—</dd></div>
+          <div><dt>Encoded media queue depth</dt><dd id="encoded-depth">—</dd></div>
+          <div><dt>Encoded dropped / discarded</dt><dd id="encoded-loss">—</dd></div>
+          <div><dt>Encoder FPS</dt><dd id="encoder-fps">—</dd></div>
+        </dl>
+        <p class="detail-note">Inference timing appears once the detector produces a measurement.</p>
+      </section>
+
+      <section class="panel diag-panel" aria-labelledby="uplink-title">
+        <div class="section-heading"><div><p class="eyebrow">DELIVERY</p><h2 id="uplink-title">Cloud and viewers</h2></div><span class="tag">WEBRTC</span></div>
+        <dl class="readings">
+          <div><dt>Cloud access units sent</dt><dd id="whip-sent">—</dd></div>
+          <div><dt>Cloud queue dropped / discarded</dt><dd id="whip-loss">—</dd></div>
+        </dl>
+        <p class="detail-note" id="whip-error">No uplink error reported</p>
+        <h3>Active LAN peers</h3>
+        <div class="table-wrap"><table><thead><tr><th>Session</th><th>Peer / ICE</th><th>Host interface</th><th>Local candidate</th></tr></thead><tbody id="peers"></tbody></table></div>
+      </section>
+
+      <section class="panel diag-panel" aria-labelledby="recording-title">
+        <div class="section-heading"><div><p class="eyebrow">STORAGE</p><h2 id="recording-title">Recording</h2></div><span class="tag" id="recording-state">—</span></div>
+        <dl class="readings"><div><dt>Access units written</dt><dd id="recording-units">—</dd></div></dl>
+        <p class="detail-note" id="recording-error">No recording error reported</p>
+      </section>
+
+      <section class="panel diag-panel" aria-labelledby="gps-title">
+        <div class="section-heading"><div><p class="eyebrow">LOCATION</p><h2 id="gps-title">GPS</h2></div><span class="tag" id="gps-source">—</span></div>
+        <dl class="readings"><div><dt>Position</dt><dd id="gps-position">—</dd></div><div><dt>Fix age</dt><dd id="gps-age">—</dd></div></dl>
+      </section>
+
+      <section class="panel diag-panel errors-panel" aria-labelledby="errors-title">
+        <div class="section-heading"><div><p class="eyebrow">EVENT HISTORY</p><h2 id="errors-title">Recent errors</h2></div><span class="tag">LAST 10</span></div>
+        <ul class="error-list" id="errors"></ul>
+      </section>
+    </div>
+  </main>
+  <footer><span>SKAI Edge Native</span><span>Telemetry updates automatically</span></footer>
+  <script src="/diagnostics.js" defer></script>
+</body>
+</html>

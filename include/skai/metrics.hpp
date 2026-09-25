@@ -1,6 +1,7 @@
 #pragma once
 
 #include "skai/core/bounded_queue.hpp"
+#include "skai/video/rtsp_metrics.hpp"
 
 #include <chrono>
 #include <cstddef>
@@ -10,6 +11,7 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace skai {
 
@@ -56,6 +58,7 @@ struct WhipMetrics {
 };
 
 struct MetricsSnapshot : SystemMetrics {
+    std::optional<RtspDiagnostics> rtsp;
     QueueStats inference_queue;
     std::size_t inference_queue_depth = 0;
     QueueStats encoded_queue;
@@ -64,6 +67,7 @@ struct MetricsSnapshot : SystemMetrics {
     WhipMetrics whip;
     std::optional<std::uint64_t> alert_count;
     std::optional<double> encoder_fps;
+    std::vector<std::string> recent_errors;
 };
 
 class SystemMetricsSampler {

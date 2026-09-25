@@ -39,6 +39,9 @@ public:
         write(root / "index.html", "<!doctype html><title>SKAI Edge</title>");
         write(root / "app.js", "document.body.dataset.ready = 'true';");
         write(root / "style.css", "body { color: #fff; }");
+        write(root / "diagnostics.html", "<!doctype html><title>Diagnostics</title>");
+        write(root / "diagnostics.js", "document.body.dataset.diagnostics = 'true';");
+        write(root / "diagnostics.css", "body { color: #0ff; }");
         write(outside, "private");
         std::filesystem::create_symlink(outside, root / "escape.txt");
     }
@@ -123,6 +126,60 @@ TEST(HttpServer, ServesStaticFrontendWithContentTypes) {
     EXPECT_EQ(style.result(), http::status::ok);
     EXPECT_EQ(style[http::field::content_type], "text/css; charset=utf-8");
 
+    server.stop();
+    server.wait();
+}
+
+TEST(HttpServer, ServesDiagnosticsPageAndOnlyItsApprovedAssets) {
+    TemporaryWebRoot files;
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    skai::web::HttpServer server(logger);
+    skai::Config config;
+    config.web.bind = "127.0.0.1";
+    config.web.port = 0;
+    config.web.root = files.root.string();
+    ASSERT_TRUE(server.initialize(config)) << logs.str();
+    ASSERT_TRUE(std::filesystem::remove(files.root / "diagnostics.js"));
+    ASSERT_TRUE(server.start());
+
+    const auto page = request(server.port(), {http::verb::get, "/diagnostics", 11});
+    EXPECT_EQ(page.result(), http::status::ok);
+    EXPECT_EQ(page[http::field::content_type], "text/html; charset=utf-8");
+    EXPECT_NE(page.body().find("Diagnostics"), std::string::npos);
+    const auto script = request(server.port(), {http::verb::get, "/diagnostics.js", 11});
+    EXPECT_EQ(script.result(), http::status::ok);
+    EXPECT_EQ(script[http::field::content_type], "text/javascript; charset=utf-8");
+    EXPECT_NE(script.body().find("dataset.diagnostics"), std::string::npos);
+    EXPECT_EQ(request(server.port(), {http::verb::get, "/diagnostics.css", 11}).result(),
+              http::status::ok);
+    const auto head = request(server.port(), {http::verb::head, "/diagnostics", 11});
+    EXPECT_EQ(head.result(), http::status::ok);
+    EXPECT_TRUE(head.body().empty());
+    EXPECT_EQ(request(server.port(), {http::verb::post, "/diagnostics", 11}).result(),
+              http::status::method_not_allowed);
+    server.stop();
+    server.wait();
+}
+
+TEST(HttpServer, PublishesRecentSystemErrorsInMetricsAfterPageReload) {
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    auto events = std::make_shared<skai::EventChannel>();
+    skai::web::HttpServer server(logger, {}, {}, events);
+    skai::Config config;
+    config.web.bind = "127.0.0.1";
+    config.web.port = 0;
+    ASSERT_TRUE(server.initialize(config)) << logs.str();
+    events->publish(skai::EventType::SystemError,
+                    skai::make_system_error_data("video", "source unavailable"));
+    ASSERT_TRUE(server.start());
+
+    const auto response = request(server.port(), {http::verb::get, "/api/v1/metrics", 11});
+    EXPECT_EQ(response.result(), http::status::ok);
+    EXPECT_NE(response.body().find("\"recent_errors\":[{\"type\":\"system_error\""),
+              std::string::npos);
+    EXPECT_NE(response.body().find("source unavailable"), std::string::npos);
     server.stop();
     server.wait();
 }

@@ -111,8 +111,11 @@ int main(int argc, char* argv[]) {
     modules.storage = std::move(database);
     modules.webrtc = std::make_unique<skai::IceRuntimeModule>(logger);
     modules.whip = std::move(whip_publisher);
-    const auto runtime_metrics = [&inference_frames, &encoded_access_units, whip_sink] {
+    skai::RtspVideoModule* video_source = nullptr;
+    const auto runtime_metrics = [&inference_frames, &encoded_access_units,
+                                  &video_source, whip_sink] {
         skai::MetricsSnapshot metrics;
+        if (video_source) metrics.rtsp = video_source->diagnostics();
         metrics.inference_queue = inference_frames.stats();
         metrics.inference_queue_depth = inference_frames.size();
         metrics.encoded_queue = encoded_access_units.stats();
@@ -148,7 +151,7 @@ int main(int argc, char* argv[]) {
     logger.log(skai::LogLevel::Warning, "detector",
                "service built without TensorRT/CUDA inference support");
 #endif
-    modules.video = std::make_unique<skai::RtspVideoModule>(
+    auto video_module = std::make_unique<skai::RtspVideoModule>(
         inference_frames, encoded_access_units, logger, runtime_status,
         [webrtc_manager, whip_sink](const skai::EncodedAccessUnit& unit) {
             webrtc_manager->publish_access_unit(unit);
@@ -159,6 +162,8 @@ int main(int argc, char* argv[]) {
             recording_control->set_media_available(available, reason);
             webrtc_manager->set_media_available(available, reason);
         });
+    video_source = video_module.get();
+    modules.video = std::move(video_module);
     modules.gps = std::make_unique<skai::GpsModule>(gps_state);
     skai::Application app(cli.config_path, logger, std::move(modules));
     if (!app.initialize()) {
