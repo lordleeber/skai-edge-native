@@ -1,0 +1,96 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "x86",
+      "displayName": "Portable Linux test build",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "SKAI_ENABLE_TENSORRT": "OFF"
+      }
+    },
+    {
+      "name": "x86-asan-ubsan",
+      "inherits": "x86",
+      "binaryDir": "${sourceDir}/build/x86-asan-ubsan",
+      "cacheVariables": {
+        "CMAKE_GTEST_DISCOVER_TESTS_DISCOVERY_MODE": "PRE_TEST",
+        "CMAKE_C_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer",
+        "CMAKE_CXX_FLAGS": "-fsanitize=address,undefined -fno-omit-frame-pointer",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,undefined",
+        "CMAKE_SHARED_LINKER_FLAGS": "-fsanitize=address,undefined"
+      }
+    },
+    {
+      "name": "x86-tsan",
+      "inherits": "x86",
+      "binaryDir": "${sourceDir}/build/x86-tsan",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_GTEST_DISCOVER_TESTS_DISCOVERY_MODE": "PRE_TEST",
+        "CMAKE_C_FLAGS": "-fsanitize=thread -fno-omit-frame-pointer",
+        "CMAKE_CXX_FLAGS": "-fsanitize=thread -fno-omit-frame-pointer",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=thread",
+        "CMAKE_SHARED_LINKER_FLAGS": "-fsanitize=thread"
+      }
+    },
+    {
+      "name": "x86-coverage",
+      "inherits": "x86",
+      "binaryDir": "${sourceDir}/build/x86-coverage",
+      "cacheVariables": {
+        "CMAKE_C_FLAGS": "--coverage -O0",
+        "CMAKE_CXX_FLAGS": "--coverage -O0",
+        "CMAKE_EXE_LINKER_FLAGS": "--coverage",
+        "CMAKE_SHARED_LINKER_FLAGS": "--coverage"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "x86", "configurePreset": "x86", "jobs": 4 },
+    { "name": "x86-asan-ubsan", "configurePreset": "x86-asan-ubsan", "jobs": 4 },
+    { "name": "x86-tsan", "configurePreset": "x86-tsan", "jobs": 4 },
+    { "name": "x86-coverage", "configurePreset": "x86-coverage", "jobs": 4 }
+  ],
+  "testPresets": [
+    {
+      "name": "x86",
+      "configurePreset": "x86",
+      "output": { "outputOnFailure": true },
+      "filter": { "exclude": { "label": "jetson" } }
+    },
+    {
+      "name": "x86-asan-ubsan",
+      "configurePreset": "x86-asan-ubsan",
+      "output": { "outputOnFailure": true },
+      "filter": { "exclude": { "label": "jetson" } },
+      "environment": {
+        "ASAN_OPTIONS": "detect_leaks=0:halt_on_error=1",
+        "UBSAN_OPTIONS": "halt_on_error=1:print_stacktrace=1"
+      }
+    },
+    {
+      "name": "x86-tsan",
+      "configurePreset": "x86-tsan",
+      "output": { "outputOnFailure": true },
+      "filter": {
+        "include": {
+          "name": "^(BoundedQueue|Application|EventChannel|EventQueue|EventInbox|WebRtcManager|WhepHttpApi)\\.|^HttpServer\\.(WebSocket|GracefulStop|ShutdownClosesConnectedWebSocket|ReportsLiveWebSocket)"
+        },
+        "exclude": { "label": "jetson" }
+      },
+      "environment": {
+        "TSAN_OPTIONS": "halt_on_error=1:suppressions=${sourceDir}/config/tsan.supp"
+      }
+    },
+    {
+      "name": "x86-coverage",
+      "configurePreset": "x86-coverage",
+      "output": { "outputOnFailure": true },
+      "filter": { "exclude": { "label": "jetson" } }
+    }
+  ]
+}

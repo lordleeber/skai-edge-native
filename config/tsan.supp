@@ -1,0 +1,3 @@
+# libdatachannel resets a Track callback concurrently with callback assignment
+# during peer shutdown. Keep the application-side WebRTC session code visible.
+race:rtc::synchronized_stored_callback
