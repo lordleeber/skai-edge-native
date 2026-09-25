@@ -102,6 +102,13 @@ private:
     std::chrono::steady_clock::time_point timestamp_epoch_{};
     std::uint64_t last_input_pts_ns_ = 0;
     bool has_input_pts_ = false;
+    std::atomic<bool> next_access_unit_discontinuity_{true};
+    std::mutex timeline_mutex_;
+    bool has_output_pts_ = false;
+    bool has_pipeline_output_origin_ = false;
+    std::uint64_t last_output_pts_ns_ = 0;
+    std::uint64_t pipeline_raw_pts_origin_ns_ = 0;
+    std::uint64_t pipeline_output_pts_origin_ns_ = 0;
 };
 
 } // namespace skai

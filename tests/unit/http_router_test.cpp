@@ -372,3 +372,33 @@ TEST(ApiState, RejectsObsoleteInferenceAndResetsTransientData) {
     api.configure(skai::Config{});
     EXPECT_FALSE(api.latest_detections().available);
 }
+
+TEST(ApiState, InferenceFailureInvalidatesOnlyTheCurrentGeneration) {
+    skai::ApiState api;
+    api.configure(skai::Config{});
+    const auto obsolete = api.detector_permit();
+    api.set_detector_enabled(false);
+    api.set_detector_enabled(true);
+    const auto current = api.detector_permit();
+    ASSERT_TRUE(api.commit_detections(
+        current, 10, {{0, "person", 0.9f, 1, 2, 3, 4}}, [] {}));
+
+    bool called = false;
+    EXPECT_FALSE(api.invalidate_detections(obsolete,
+        [&](bool) { called = true; }));
+    EXPECT_FALSE(called);
+    EXPECT_TRUE(api.latest_detections().available);
+
+    bool was_available = false;
+    EXPECT_TRUE(api.invalidate_detections(current,
+        [&](bool available) { was_available = available; }));
+    EXPECT_TRUE(was_available);
+    EXPECT_FALSE(api.latest_detections().available);
+    const auto response = skai::web::route_request(
+        {http::verb::get, "/api/v1/detections/latest", 11}, {}, api);
+    EXPECT_EQ(response.result(), http::status::ok);
+    EXPECT_NE(response.body().find("\"available\":false"), std::string::npos);
+    EXPECT_TRUE(api.invalidate_detections(current,
+        [&](bool available) { was_available = available; }));
+    EXPECT_FALSE(was_available);
+}

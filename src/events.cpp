@@ -118,4 +118,28 @@ std::optional<std::string> EventQueue::pop() {
     return event;
 }
 
+EventInbox::EventInbox(std::size_t capacity) : events_(capacity) {}
+
+bool EventInbox::push(std::string event) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    events_.push(std::move(event));
+    if (drain_scheduled_) return false;
+    drain_scheduled_ = true;
+    return true;
+}
+
+std::vector<std::string> EventInbox::drain() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    std::vector<std::string> result;
+    result.reserve(events_.size());
+    while (auto event = events_.pop()) result.push_back(std::move(*event));
+    drain_scheduled_ = false;
+    return result;
+}
+
+std::size_t EventInbox::dropped() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return events_.dropped();
+}
+
 } // namespace skai

@@ -87,6 +87,109 @@ TEST(AnnotationDetector, ProducesAnnotatedFrameWithoutChangingInferenceResult) {
     }
 }
 
+TEST(AnnotationDetector, FailedInferencePassesFrameThroughAndProcessesNextFrame) {
+    int devices = 0;
+    if (cudaGetDeviceCount(&devices) != cudaSuccess || devices == 0) {
+        GTEST_SKIP() << "CUDA device unavailable";
+    }
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    skai::BoundedQueue<skai::Frame> input(2);
+    skai::BoundedQueue<skai::Frame> output(2);
+    auto status = std::make_shared<skai::RuntimeStatus>();
+    auto api = std::make_shared<skai::ApiState>(status);
+    skai::YoloInferenceModule module(input, output, logger, status, api);
+    skai::Config config;
+    config.detector.engine = SKAI_YOLO_ENGINE;
+    config.detector.annotate = true;
+    ASSERT_TRUE(module.initialize(config)) << logs.str();
+    ASSERT_TRUE(module.start());
+
+    auto malformed = reference_frame();
+    malformed.sequence = 1;
+    malformed.bgr.resize(3); // Invalid image buffer reaches detector.run().
+    ASSERT_TRUE(input.push(malformed));
+    const auto fallback = output.pop_for(std::chrono::seconds(2));
+    if (!fallback) {
+        module.stop();
+        module.wait();
+        FAIL() << logs.str();
+    }
+    EXPECT_EQ(fallback->sequence, malformed.sequence);
+    EXPECT_EQ(fallback->bgr, malformed.bgr);
+
+    auto valid = reference_frame();
+    valid.sequence = 2;
+    ASSERT_TRUE(input.push(valid));
+    const auto recovered = output.pop_for(std::chrono::seconds(2));
+    if (!recovered) {
+        module.stop();
+        module.wait();
+        FAIL() << logs.str();
+    }
+    EXPECT_EQ(recovered->sequence, valid.sequence);
+    EXPECT_EQ(recovered->bgr.size(), valid.bgr.size());
+    module.stop();
+    module.wait();
+}
+
+TEST(AnnotationDetector, RepeatedInferenceFailuresInvalidateLatestDetections) {
+    int devices = 0;
+    if (cudaGetDeviceCount(&devices) != cudaSuccess || devices == 0) {
+        GTEST_SKIP() << "CUDA device unavailable";
+    }
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    skai::BoundedQueue<skai::Frame> input(2);
+    skai::BoundedQueue<skai::Frame> output(2);
+    auto status = std::make_shared<skai::RuntimeStatus>();
+    auto api = std::make_shared<skai::ApiState>(status);
+    auto events = std::make_shared<skai::EventChannel>();
+    std::vector<std::string> published;
+    events->subscribe([&](const std::string& event) { published.push_back(event); });
+    skai::YoloInferenceModule module(input, output, logger, status, api, events);
+    skai::Config config;
+    config.detector.engine = SKAI_YOLO_ENGINE;
+    ASSERT_TRUE(module.initialize(config)) << logs.str();
+    ASSERT_TRUE(module.start());
+
+    const auto deliver = [&](skai::Frame value) {
+        return input.push(std::move(value)) &&
+               output.pop_for(std::chrono::seconds(2)).has_value();
+    };
+    auto valid = reference_frame();
+    valid.sequence = 1;
+    if (!deliver(valid)) {
+        module.stop(); module.wait(); FAIL() << logs.str();
+    }
+    EXPECT_TRUE(api->latest_detections().available);
+
+    for (std::uint64_t sequence : {2ULL, 3ULL}) {
+        auto malformed = reference_frame();
+        malformed.sequence = sequence;
+        malformed.bgr.resize(3);
+        if (!deliver(std::move(malformed))) {
+            module.stop(); module.wait(); FAIL() << logs.str();
+        }
+        EXPECT_FALSE(api->latest_detections().available);
+    }
+    const auto unavailable_events = std::count_if(
+        published.begin(), published.end(), [](const auto& event) {
+            return event.find("\"type\":\"detection\"") != std::string::npos &&
+                   event.find("\"available\":false") != std::string::npos;
+        });
+    EXPECT_EQ(unavailable_events, 1);
+
+    valid.sequence = 4;
+    if (!deliver(std::move(valid))) {
+        module.stop(); module.wait(); FAIL() << logs.str();
+    }
+    EXPECT_TRUE(api->latest_detections().available);
+    EXPECT_EQ(api->latest_detections().frame_sequence, 4U);
+    module.stop();
+    module.wait();
+}
+
 TEST(AnnotationDetector, RtspPipelinePublishesAnnotationsAndHonorsDisableFlag) {
     int devices = 0;
     if (cudaGetDeviceCount(&devices) != cudaSuccess || devices == 0) {

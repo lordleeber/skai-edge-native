@@ -137,6 +137,9 @@ recording and GPS details, and the ten most recent system errors. The page
 shows the selected local WebRTC interface and candidate for active LAN peers;
 the configured RTSP URL is not part of the source metrics.
 
+Step 31's failure classes, recovery behavior, and regression tests are listed
+in [failure recovery](docs/step31-failure-recovery.md).
+
 For an executable-only build without GoogleTest or the RTSP-server fixture:
 
 ```sh

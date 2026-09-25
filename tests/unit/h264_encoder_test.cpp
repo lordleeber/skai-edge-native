@@ -88,6 +88,31 @@ TEST(H264Encoder, RejectsFramesOutsideConstrainedBaselineLevel31) {
     EXPECT_EQ(output.stats().pushed, 0U);
 }
 
+TEST(H264Encoder, MalformedFrameDoesNotStopFollowingValidFrame) {
+    std::string error;
+    ASSERT_TRUE(skai::gst::initialize_once(error)) << error;
+    skai::BoundedQueue<skai::Frame> input(2);
+    skai::BoundedQueue<skai::EncodedAccessUnit> output(2);
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    skai::H264Encoder encoder(input, output, logger);
+    ASSERT_TRUE(encoder.start({}, error)) << error;
+    auto malformed = frame(1);
+    malformed.bgr.resize(3);
+    ASSERT_TRUE(input.push(std::move(malformed)));
+    for (int attempt = 0; attempt < 100 &&
+         encoder.metrics().frames_rejected == 0; ++attempt) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    ASSERT_EQ(encoder.metrics().frames_rejected, 1U);
+    ASSERT_TRUE(input.push(frame(2)));
+    const auto recovered = output.pop_for(std::chrono::seconds(3));
+    ASSERT_TRUE(recovered.has_value()) << logs.str() << encoder.metrics().last_error;
+    EXPECT_TRUE(starts_with_annex_b_start_code(recovered->bytes));
+    EXPECT_EQ(encoder.metrics().frames_submitted, 1U);
+    encoder.stop();
+}
+
 TEST(H264Encoder, EncodesBoundedAnnexBAccessUnitsAndReportsMetrics) {
     std::string error;
     ASSERT_TRUE(skai::gst::initialize_once(error)) << error;
@@ -164,6 +189,54 @@ TEST(H264Encoder, RebuildsForDimensionChangesAndEmitsNewKeyframe) {
     EXPECT_EQ(encoder.metrics().frames_rejected, 0U);
     EXPECT_EQ(encoder.metrics().pipeline_rebuilds, 1U);
     EXPECT_TRUE(encoder.metrics().last_error.empty());
+}
+
+TEST(H264Encoder, FailedPipelineRebuildKeepsTimelineAndMarksNextAccessUnit) {
+    std::string error;
+    ASSERT_TRUE(skai::gst::initialize_once(error)) << error;
+    skai::BoundedQueue<skai::Frame> input(2);
+    skai::BoundedQueue<skai::EncodedAccessUnit> output(2);
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    skai::H264Encoder encoder(input, output, logger);
+    ASSERT_TRUE(encoder.start({}, error)) << error;
+    const auto started = std::chrono::steady_clock::now();
+    auto first = frame(1);
+    first.timestamp = started;
+    ASSERT_TRUE(input.push(std::move(first)));
+    const auto before = output.pop_for(std::chrono::seconds(3));
+    ASSERT_TRUE(before.has_value()) << logs.str();
+
+    auto unsupported = frame(2, 0, 1920, 1080);
+    unsupported.timestamp = started + std::chrono::milliseconds(33);
+    ASSERT_TRUE(input.push(std::move(unsupported)));
+    for (int attempt = 0; attempt < 100 &&
+         encoder.metrics().frames_rejected == 0; ++attempt) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    ASSERT_EQ(encoder.metrics().frames_rejected, 1U);
+
+    auto recovered = frame(3);
+    recovered.timestamp = started + std::chrono::milliseconds(66);
+    ASSERT_TRUE(input.push(std::move(recovered)));
+    const auto after = output.pop_for(std::chrono::seconds(3));
+    ASSERT_TRUE(after.has_value()) << logs.str() << encoder.metrics().last_error;
+    EXPECT_TRUE(before->has_pts);
+    EXPECT_TRUE(after->has_pts);
+    EXPECT_GT(after->pts_ns, before->pts_ns);
+    if (before->has_dts && after->has_dts) {
+        EXPECT_GT(after->dts_ns, before->dts_ns);
+    }
+    EXPECT_TRUE(after->keyframe);
+    EXPECT_TRUE(after->discontinuity);
+    auto following = frame(4);
+    following.timestamp = started + std::chrono::milliseconds(99);
+    ASSERT_TRUE(input.push(std::move(following)));
+    const auto next = output.pop_for(std::chrono::seconds(3));
+    ASSERT_TRUE(next.has_value()) << logs.str() << encoder.metrics().last_error;
+    EXPECT_GT(next->pts_ns, after->pts_ns);
+    EXPECT_FALSE(next->discontinuity);
+    encoder.stop();
 }
 
 TEST(H264Encoder, RebaseForeignPtsOntoMonotonicEncoderTimeline) {

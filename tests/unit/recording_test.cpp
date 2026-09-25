@@ -47,6 +47,71 @@ TEST(RecordingController, StartsAndStopsConfiguredRecording) {
     EXPECT_EQ(control.status().state, "stopped");
 }
 
+TEST(RecordingController, KeepsDiskFailureVisibleUntilExplicitRetryOrStop) {
+    skai::RecordingController control;
+    skai::RecordingConfig config;
+    config.enabled = true;
+    control.configure(config);
+
+    control.set_error("insufficient free disk space for recording");
+    control.set_stopped(); // The idle worker still runs after a failed recording.
+    control.set_media_available(false, "RTSP source is reconnecting");
+    EXPECT_EQ(control.status().state, "error");
+    EXPECT_FALSE(control.status().available);
+    EXPECT_EQ(control.status().unavailable_reason, "RTSP source is reconnecting");
+    control.set_media_available(true);
+    EXPECT_EQ(control.status().state, "error");
+    EXPECT_TRUE(control.status().available);
+    EXPECT_FALSE(control.status().active);
+    EXPECT_FALSE(control.requested());
+    EXPECT_EQ(control.status().last_error,
+              "insufficient free disk space for recording");
+
+    std::string error;
+    ASSERT_TRUE(control.start(error)) << error;
+    EXPECT_EQ(control.status().state, "starting");
+    EXPECT_TRUE(control.status().last_error.empty());
+    control.set_error("disk full");
+    ASSERT_TRUE(control.stop(error)) << error;
+    EXPECT_EQ(control.status().state, "stopped");
+}
+
+TEST(RecordingModule, DiskSpaceFailureStaysVisibleWhileWorkerContinues) {
+    std::string error;
+    ASSERT_TRUE(skai::gst::initialize_once(error)) << error;
+    const auto directory = temporary_directory();
+    std::filesystem::create_directories(directory);
+    const auto available = std::filesystem::space(directory).available;
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    skai::BoundedQueue<skai::EncodedAccessUnit> units(2);
+    auto control = std::make_shared<skai::RecordingController>();
+    skai::RecordingModule recorder(units, logger, control);
+    skai::Config config;
+    config.recording.directory = directory.string();
+    config.recording.enabled = true;
+    config.recording.min_free_space_mb = available / (1024ULL * 1024ULL) + 1024;
+    ASSERT_TRUE(recorder.initialize(config));
+    ASSERT_TRUE(recorder.start()) << recorder.last_error();
+    skai::EncodedAccessUnit keyframe;
+    keyframe.keyframe = true;
+    keyframe.bytes = {0, 0, 0, 1, 0x65, 0x88};
+    ASSERT_TRUE(units.push(keyframe));
+    for (int attempt = 0; attempt < 100 &&
+         control->status().state != "error"; ++attempt) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    ASSERT_EQ(control->status().state, "error") << logs.str();
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    EXPECT_EQ(control->status().state, "error");
+    EXPECT_EQ(control->status().last_error,
+              "insufficient free disk space for recording");
+    EXPECT_FALSE(control->status().active);
+    recorder.wait();
+    std::error_code ignored;
+    std::filesystem::remove_all(directory, ignored);
+}
+
 TEST(RecordingModule, FinalizesMp4FromEncodedAccessUnits) {
     std::string error;
     ASSERT_TRUE(skai::gst::initialize_once(error)) << error;

@@ -143,6 +143,18 @@ public:
         return true;
     }
 
+    template <typename Commit>
+    bool invalidate_detections(const DetectorPermit& permit, Commit&& commit) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!detector_enabled_ || permit.generation != detector_generation_) {
+            return false;
+        }
+        const bool was_available = latest_.available;
+        latest_ = {};
+        std::forward<Commit>(commit)(was_available);
+        return true;
+    }
+
     LatestDetectionsDto latest_detections() const {
         std::lock_guard<std::mutex> lock(mutex_);
         return latest_;

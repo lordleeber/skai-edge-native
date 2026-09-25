@@ -525,7 +525,6 @@ bool RtspSource::capture_access_unit(GstSample* sample) {
     unit.source_generation = pipeline_generation_;
     unit.bytes.assign(mapped.data, mapped.data + mapped.size);
     gst_buffer_unmap(buffer, &mapped);
-    first_access_unit_ = false;
     if (unit.bytes.empty()) return false;
     try {
         if (access_unit_sink_) access_unit_sink_(unit);
@@ -537,6 +536,7 @@ bool RtspSource::capture_access_unit(GstSample* sample) {
         logger_.log(LogLevel::Error, "video", "could not publish source H.264 access unit");
         return false;
     }
+    first_access_unit_ = false;
     return true;
 }
 
