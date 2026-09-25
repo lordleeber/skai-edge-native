@@ -39,6 +39,7 @@ public:
                 std::shared_ptr<RecordingController> recording,
                 std::shared_ptr<WebRtcManager> webrtc,
                 std::function<MetricsSnapshot()> metrics_provider,
+                std::function<HealthSnapshot()> health_provider,
                 asio::thread_pool& signaling_pool,
                 std::atomic_size_t& signaling_jobs,
                 std::size_t signaling_limit,
@@ -51,6 +52,7 @@ public:
           recording_(std::move(recording)),
           webrtc_(std::move(webrtc)),
           metrics_provider_(std::move(metrics_provider)),
+          health_provider_(std::move(health_provider)),
           signaling_pool_(signaling_pool), signaling_jobs_(signaling_jobs),
           signaling_limit_(signaling_limit),
           static_files_(std::move(static_files)),
@@ -110,6 +112,12 @@ private:
             const auto metrics = metrics_provider_();
             return send(route_request(parser_.get(), status, *api_, alerts_.get(),
                                       recording_.get(), webrtc_.get(), &metrics));
+        }
+        if (path == "/health" && parser_.get().method() == http::verb::get &&
+            health_provider_) {
+            const auto health = health_provider_();
+            return send(route_request(parser_.get(), status, *api_, alerts_.get(),
+                                      recording_.get(), webrtc_.get(), nullptr, &health));
         }
         send(route_request(parser_.get(), status, *api_, alerts_.get(),
                            recording_.get(), webrtc_.get()));
@@ -179,6 +187,7 @@ private:
     std::shared_ptr<RecordingController> recording_;
     std::shared_ptr<WebRtcManager> webrtc_;
     std::function<MetricsSnapshot()> metrics_provider_;
+    std::function<HealthSnapshot()> health_provider_;
     asio::thread_pool& signaling_pool_;
     std::atomic_size_t& signaling_jobs_;
     const std::size_t signaling_limit_;
@@ -200,7 +209,8 @@ struct HttpServer::State {
           std::size_t config_max_peers,
           const std::string& web_root,
           const std::string& recording_directory,
-          std::function<MetricsSnapshot()> metrics_provider)
+          std::function<MetricsSnapshot()> metrics_provider,
+          std::function<HealthSnapshot()> health_provider)
         : acceptor(context), shutdown_timer(context), logger(logger),
           status(std::move(status)), api(std::move(api)),
           events(std::move(events)),
@@ -210,7 +220,8 @@ struct HttpServer::State {
           signaling_limit(std::max<std::size_t>(1, config_max_peers)),
           static_files(std::make_shared<StaticFileHandler>(web_root)),
           system_metrics(recording_directory),
-          metrics_provider(std::move(metrics_provider)) {}
+          metrics_provider(std::move(metrics_provider)),
+          health_provider(std::move(health_provider)) {}
 
     MetricsSnapshot snapshot_metrics() {
         auto metrics = metrics_provider ? metrics_provider() : MetricsSnapshot{};
@@ -233,6 +244,7 @@ struct HttpServer::State {
                                               recording,
                                               webrtc,
                                               [this] { return snapshot_metrics(); },
+                                              health_provider,
                                               signaling_pool,
                                               signaling_jobs,
                                               signaling_limit,
@@ -277,6 +289,7 @@ struct HttpServer::State {
     std::shared_ptr<StaticFileHandler> static_files;
     SystemMetricsSampler system_metrics;
     std::function<MetricsSnapshot()> metrics_provider;
+    std::function<HealthSnapshot()> health_provider;
     std::vector<std::weak_ptr<WebSocketSession>> sessions;
     std::thread worker;
     std::chrono::steady_clock::time_point started;
@@ -308,13 +321,15 @@ HttpServer::HttpServer(Logger& logger, std::shared_ptr<RuntimeStatus> status,
                        std::shared_ptr<AlertRepository> alerts,
                        std::shared_ptr<RecordingController> recording,
                        std::shared_ptr<WebRtcManager> webrtc,
-                       std::function<MetricsSnapshot()> metrics_provider)
+                       std::function<MetricsSnapshot()> metrics_provider,
+                       std::function<HealthSnapshot()> health_provider)
     : logger_(logger), status_(status ? std::move(status)
                                      : std::make_shared<RuntimeStatus>()),
       api_(api ? std::move(api) : std::make_shared<ApiState>()),
       events_(events ? std::move(events) : std::make_shared<EventChannel>()),
       alerts_(std::move(alerts)), recording_(std::move(recording)),
-      webrtc_(std::move(webrtc)), metrics_provider_(std::move(metrics_provider)) {
+      webrtc_(std::move(webrtc)), metrics_provider_(std::move(metrics_provider)),
+      health_provider_(std::move(health_provider)) {
     api_->bind_runtime_status(status_);
 }
 
@@ -328,7 +343,8 @@ bool HttpServer::initialize(const Config& config) {
     api_->configure(config);
     auto next = std::make_unique<State>(logger_, status_, api_, events_, alerts_, recording_,
                                         webrtc_, config.webrtc.max_peers, config.web.root,
-                                        config.recording.directory, metrics_provider_);
+                                        config.recording.directory, metrics_provider_,
+                                        health_provider_);
     if (!next->static_files->valid()) {
         logger_.log(LogLevel::Error, "web", next->static_files->error());
         return false;
@@ -359,7 +375,11 @@ bool HttpServer::start() {
     if (!state_ || state_->worker.joinable()) return false;
     state_->started = std::chrono::steady_clock::now();
     state_->accept();
-    state_->worker = std::thread([this] { state_->context.run(); });
+    state_->worker = std::thread([this] {
+        serving_.store(true);
+        state_->context.run();
+        serving_.store(false);
+    });
     logger_.log(LogLevel::Info, "web", "HTTP server started");
     return true;
 }

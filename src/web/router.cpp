@@ -36,6 +36,23 @@ Response json_response(http::status result, unsigned version, std::string body) 
     return response;
 }
 
+std::string health_json(const HealthSnapshot& health) {
+    std::ostringstream output;
+    output << "{\"state\":" << json_string(health_state_name(health.state))
+           << ",\"components\":{";
+    bool first = true;
+    for (const auto component : all_health_components) {
+        if (!first) output << ',';
+        first = false;
+        const auto& value = health.components[static_cast<std::size_t>(component)];
+        output << json_string(health_component_name(component)) << ":{\"state\":"
+               << json_string(health_state_name(value.state))
+               << ",\"detail\":" << json_string(value.detail) << '}';
+    }
+    output << "}}\n";
+    return output.str();
+}
+
 } // namespace
 
 std::string webrtc_diagnostics_json(const WebRtcDiagnostics& diagnostics) {
@@ -348,7 +365,8 @@ bool alert_route(const std::string& path) {
 Response route_request(const Request& request, const StatusSnapshot& status,
                        ApiState& api, AlertRepository* alerts,
                        RecordingController* recording, WebRtcManager* webrtc,
-                       const MetricsSnapshot* metrics) {
+                       const MetricsSnapshot* metrics,
+                       const HealthSnapshot* health) {
     const std::string target(request.target());
     const auto query = target.find('?');
     const std::string path = target.substr(0, query);
@@ -382,8 +400,14 @@ Response route_request(const Request& request, const StatusSnapshot& status,
         return response;
     }
     if (path == "/health") {
-        return json_response(http::status::ok, request.version(),
-                             "{\"status\":\"ok\"}\n");
+        if (!health) {
+            return json_response(http::status::service_unavailable, request.version(),
+                "{\"state\":\"FAILED\",\"components\":{},"
+                "\"detail\":\"health watchdog unavailable\"}\n");
+        }
+        return json_response(health->state == HealthState::Running ? http::status::ok :
+                             http::status::service_unavailable, request.version(),
+                             health_json(*health));
     }
     if (path == "/api/v1/status") {
         return json_response(http::status::ok, request.version(),

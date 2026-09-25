@@ -37,9 +37,9 @@ TEST(HttpRouter, ServesHealthAndRuntimeStatusJson) {
 
     const auto health = skai::web::route_request(
         {http::verb::get, "/health", 11}, status, api);
-    EXPECT_EQ(health.result(), http::status::ok);
+    EXPECT_EQ(health.result(), http::status::service_unavailable);
     EXPECT_EQ(health[http::field::content_type], "application/json");
-    EXPECT_EQ(health.body(), "{\"status\":\"ok\"}\n");
+    EXPECT_NE(health.body().find("health watchdog unavailable"), std::string::npos);
 
     const auto response = skai::web::route_request(
         {http::verb::get, "/api/v1/status", 11}, status, api);
@@ -53,6 +53,23 @@ TEST(HttpRouter, ServesHealthAndRuntimeStatusJson) {
               std::string::npos);
     EXPECT_NE(response.body().find("\"encoder\":{\"frames_submitted\":7"),
               std::string::npos);
+}
+
+TEST(HttpRouter, HealthUsesComponentSnapshotAndRejectsDegradedReadiness) {
+    skai::ApiState api;
+    skai::RuntimeStatusSnapshot runtime;
+    runtime.status = "running";
+    skai::HealthSnapshot health;
+    health.state = skai::HealthState::Degraded;
+    health.components[0] = {skai::HealthState::Degraded, "RTSP offline"};
+    const auto response = skai::web::route_request(
+        {http::verb::get, "/health", 11}, runtime, api, nullptr, nullptr,
+        nullptr, nullptr, &health);
+    EXPECT_EQ(response.result(), http::status::service_unavailable);
+    EXPECT_NE(response.body().find("\"state\":\"DEGRADED\""), std::string::npos);
+    EXPECT_NE(response.body().find("\"video_source\":{\"state\":\"DEGRADED\","),
+              std::string::npos);
+    EXPECT_NE(response.body().find("RTSP offline"), std::string::npos);
 }
 
 TEST(HttpRouter, ExposesLanOnlyWebrtcDiagnosticsInStatusAndMetrics) {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <mutex>
 #include <optional>
@@ -14,6 +15,7 @@ struct RuntimeStatusSnapshot {
     std::optional<double> video_fps;
     std::optional<double> detector_fps;
     std::optional<double> last_inference_ms;
+    std::optional<std::int64_t> last_inference_age_ms;
     struct Encoder {
         std::uint64_t frames_submitted = 0;
         std::uint64_t frames_rejected = 0;
@@ -48,12 +50,14 @@ public:
     void update_detector(double fps, double inference_ms) noexcept {
         detector_fps_.store(fps);
         inference_ms_.store(inference_ms);
+        inference_at_ns_.store(now_ns());
         detector_fps_available_.store(true, std::memory_order_release);
         detector_available_.store(true, std::memory_order_release);
     }
 
     void update_inference(double inference_ms) noexcept {
         inference_ms_.store(inference_ms);
+        inference_at_ns_.store(now_ns());
         detector_available_.store(true, std::memory_order_release);
     }
 
@@ -96,6 +100,7 @@ public:
                 result.detector_fps = detector_fps_.load();
             }
             result.last_inference_ms = inference_ms_.load();
+            result.last_inference_age_ms = (now_ns() - inference_at_ns_.load()) / 1000000;
         }
         if (encoder_available_.load(std::memory_order_acquire)) {
             RuntimeStatusSnapshot::Encoder encoder;
@@ -117,6 +122,10 @@ public:
     }
 
 private:
+    static std::int64_t now_ns() noexcept {
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+    }
     std::atomic<bool> running_{false};
     std::atomic<bool> detector_expected_{false};
     std::atomic<bool> video_available_{false};
@@ -125,6 +134,7 @@ private:
     std::atomic<double> video_fps_{0.0};
     std::atomic<double> detector_fps_{0.0};
     std::atomic<double> inference_ms_{0.0};
+    std::atomic<std::int64_t> inference_at_ns_{0};
     std::atomic<bool> encoder_available_{false};
     std::atomic<std::uint64_t> encoder_frames_submitted_{0};
     std::atomic<std::uint64_t> encoder_frames_rejected_{0};

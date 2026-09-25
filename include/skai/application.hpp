@@ -52,6 +52,7 @@ public:
     void wait() noexcept;
     std::string last_error() const;
     std::string last_error_module() const;
+    Config config() const;
 
 private:
     struct ModuleRef {

@@ -612,8 +612,9 @@ TEST(WhepHttpApi, KeepsControlPlaneResponsiveAndRollsBackAbandonedResponse) {
     post.prepare_payload();
     http::write(abandoned, post);
     while (!manager->entered) std::this_thread::yield();
-    EXPECT_EQ(request(server.port(), {http::verb::get, "/health", 11}).result(),
-              http::status::ok);
+    const auto health = request(server.port(), {http::verb::get, "/health", 11});
+    EXPECT_EQ(health.result(), http::status::service_unavailable);
+    EXPECT_NE(health.body().find("health watchdog unavailable"), std::string::npos);
     abandoned.set_option(asio::socket_base::linger(true, 0));
     abandoned.close();
     while (!manager->completed) std::this_thread::yield();
