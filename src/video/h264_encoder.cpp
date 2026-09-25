@@ -3,6 +3,7 @@
 #include <gst/app/gstappsink.h>
 #include <gst/app/gstappsrc.h>
 
+#include <algorithm>
 #include <cstring>
 #include <limits>
 #include <sstream>
@@ -137,6 +138,13 @@ bool H264Encoder::start(const H264EncoderConfig& config, std::string& error) {
     timestamp_epoch_ = {};
     last_input_pts_ns_ = 0;
     has_input_pts_ = false;
+    next_access_unit_discontinuity_ = true;
+    {
+        std::lock_guard<std::mutex> lock(timeline_mutex_);
+        has_output_pts_ = false;
+        has_pipeline_output_origin_ = false;
+        last_output_pts_ns_ = 0;
+    }
     {
         std::lock_guard<std::mutex> lock(metrics_mutex_);
         metrics_ = {};
@@ -232,11 +240,15 @@ bool H264Encoder::open_pipeline(const Frame& first_frame, std::string& error) {
     appsink_ = sink;
     width_ = first_frame.width;
     height_ = first_frame.height;
-    timestamp_epoch_ = first_frame.timestamp == std::chrono::steady_clock::time_point{}
-                           ? std::chrono::steady_clock::now()
-                           : first_frame.timestamp;
-    last_input_pts_ns_ = 0;
-    has_input_pts_ = false;
+    if (timestamp_epoch_ == std::chrono::steady_clock::time_point{}) {
+        timestamp_epoch_ = first_frame.timestamp == std::chrono::steady_clock::time_point{}
+                               ? std::chrono::steady_clock::now()
+                               : first_frame.timestamp;
+    }
+    {
+        std::lock_guard<std::mutex> lock(timeline_mutex_);
+        has_pipeline_output_origin_ = false;
+    }
     // An appsrc pipeline cannot preroll until an input buffer arrives.  Request
     // PLAYING here and let submit_frame provide that first buffer immediately,
     // rather than waiting for Pipeline::start's state-change timeout.
@@ -262,8 +274,7 @@ void H264Encoder::close_pipeline() noexcept {
     }
     appsrc_ = nullptr;
     appsink_ = nullptr;
-    timestamp_epoch_ = {};
-    has_input_pts_ = false;
+    next_access_unit_discontinuity_ = true;
     if (pipeline_) pipeline_->stop();
     pipeline_.reset();
 }
@@ -342,6 +353,34 @@ bool H264Encoder::capture_sample(GstSample* sample) {
     unit.bytes.assign(mapped.data, mapped.data + mapped.size);
     gst_buffer_unmap(buffer, &mapped);
     if (unit.bytes.empty()) return false;
+    if (unit.has_pts) {
+        std::lock_guard<std::mutex> lock(timeline_mutex_);
+        if (!has_pipeline_output_origin_) {
+            // x264 can reuse its initial PTS offset after a pipeline rebuild.
+            // Preserve deltas within this pipeline on the outgoing timeline.
+            pipeline_raw_pts_origin_ns_ = unit.pts_ns;
+            const auto frame_duration_ns = gst_util_uint64_scale_int(
+                GST_SECOND, config_.fps_den, config_.fps_num);
+            pipeline_output_pts_origin_ns_ = has_output_pts_
+                ? std::max(unit.pts_ns, last_output_pts_ns_ + frame_duration_ns)
+                : unit.pts_ns;
+            has_pipeline_output_origin_ = true;
+        }
+        const auto rebase = [&](std::uint64_t raw) {
+            if (raw >= pipeline_raw_pts_origin_ns_) {
+                return pipeline_output_pts_origin_ns_ +
+                       (raw - pipeline_raw_pts_origin_ns_);
+            }
+            const auto delta = pipeline_raw_pts_origin_ns_ - raw;
+            return pipeline_output_pts_origin_ns_ > delta
+                ? pipeline_output_pts_origin_ns_ - delta : std::uint64_t{0};
+        };
+        unit.pts_ns = rebase(unit.pts_ns);
+        if (unit.has_dts) unit.dts_ns = rebase(unit.dts_ns);
+        last_output_pts_ns_ = unit.pts_ns;
+        has_output_pts_ = true;
+    }
+    unit.discontinuity = next_access_unit_discontinuity_.exchange(false);
     if (access_unit_sink_) {
         try {
             access_unit_sink_(unit);

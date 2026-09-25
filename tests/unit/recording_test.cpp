@@ -55,8 +55,13 @@ TEST(RecordingController, KeepsDiskFailureVisibleUntilExplicitRetryOrStop) {
 
     control.set_error("insufficient free disk space for recording");
     control.set_stopped(); // The idle worker still runs after a failed recording.
+    control.set_media_available(false, "RTSP source is reconnecting");
+    EXPECT_EQ(control.status().state, "error");
+    EXPECT_FALSE(control.status().available);
+    EXPECT_EQ(control.status().unavailable_reason, "RTSP source is reconnecting");
     control.set_media_available(true);
     EXPECT_EQ(control.status().state, "error");
+    EXPECT_TRUE(control.status().available);
     EXPECT_FALSE(control.status().active);
     EXPECT_FALSE(control.requested());
     EXPECT_EQ(control.status().last_error,

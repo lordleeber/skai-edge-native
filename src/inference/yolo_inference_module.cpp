@@ -143,6 +143,20 @@ void YoloInferenceModule::run() noexcept {
             if (output_) output_->push(std::move(*frame));
             continue;
         }
+        const auto invalidate = [&] {
+            if (api_) {
+                api_->invalidate_detections(permit, [&](bool was_available) {
+                    if (status_) status_->clear_detector();
+                    if (was_available && events_) {
+                        events_->publish(EventType::Detection,
+                                         "{\"available\":false}");
+                    }
+                });
+            } else if (status_) {
+                status_->clear_detector();
+            }
+            previous = {};
+        };
         DetectionResult detections;
         InferenceTiming timing;
         std::string error;
@@ -158,9 +172,8 @@ void YoloInferenceModule::run() noexcept {
             error = "unknown TensorRT inference error";
         }
         if (!detected) {
-            if (status_) status_->clear_detector();
+            invalidate();
             logger_.log(LogLevel::Error, "detector", error);
-            previous = {};
             if (output_) output_->push(std::move(*frame));
             continue;
         }
@@ -177,6 +190,7 @@ void YoloInferenceModule::run() noexcept {
         if (output_) {
             if (!annotate_frame(*frame, detections, coco_class_names(), annotation_,
                                 annotated, error)) {
+                invalidate();
                 logger_.log(LogLevel::Error, "annotation", error);
                 if (output_) output_->push(std::move(*frame));
                 continue;

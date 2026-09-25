@@ -114,7 +114,7 @@ void RecordingController::set_media_available(bool available, std::string reason
     status_.unavailable_reason = media_unavailable_reason_;
     if (!available) {
         status_.active = false;
-        status_.state = "unavailable";
+        if (status_.state != "error") status_.state = "unavailable";
     } else if (requested_ && !status_.active) {
         status_.state = "starting";
     } else if (!requested_ && status_.state != "error") {

@@ -276,6 +276,26 @@ test("detection overlay is selected by source PTS when its video frame is presen
   assert.equal(overlay.drawCalls.some(([name]) => name === "strokeRect"), true);
 });
 
+test("unavailable detection event clears the table and pending overlay", async () => {
+  const harness = createHarness({withRtc: true});
+  await flush();
+  harness.peers[0].emit("track", {streams: [{}], track: {}});
+  const socket = harness.sockets[0];
+  socket.open();
+  socket.message({type: "detection", data: {available: true, frame_sequence: 6,
+    pts_ns: 2_000_000_000, frame_width: 1280, frame_height: 720,
+    detections: [{class_name: "car", confidence: 0.8, box: [128, 72, 640, 360]}]}});
+  socket.message({type: "detection", data: {available: false}});
+
+  assert.equal(harness.elements.get("detections").children[0].children[0].textContent,
+    "No detections yet");
+  const overlay = harness.elements.get("video-overlay");
+  const strokesBefore = overlay.drawCalls.filter(([name]) => name === "strokeRect").length;
+  harness.elements.get("live-video").presentVideoFrame(180000);
+  assert.equal(overlay.drawCalls.filter(([name]) => name === "strokeRect").length,
+    strokesBefore);
+});
+
 test("disabling the detector clears the last browser overlay", async () => {
   const harness = createHarness();
   await flush();

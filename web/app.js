@@ -153,6 +153,7 @@
     const available = data.available ?? Number.isFinite(data.frame_sequence);
     const sequence = Number(data.frame_sequence);
     if (available && Number.isFinite(sequence) && sequence < latestDetectionSequence) return;
+    if (!available) detectionFrames.length = 0;
     latestDetectionSequence = available && Number.isFinite(sequence) ? sequence : -1;
     const rtpTimestamp = available ? ptsToRtpTimestamp(data.pts_ns) : null;
     if (available && rtpTimestamp != null && byId("live-video").requestVideoFrameCallback) {
