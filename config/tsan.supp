@@ -1,0 +1,6 @@
+# Clang 14/aarch64 report: __interceptor_memcpy ->
+# rtc::synchronized_stored_callback<>::operator= (utils.hpp:105) ->
+# rtc::impl::Channel::resetCallbacks (channel.cpp:91) during Track shutdown.
+# race_top cannot match the vendor function: the top frame is the interceptor.
+# Match only this vendor teardown method; review after a libdatachannel upgrade.
+race:rtc::impl::Channel::resetCallbacks

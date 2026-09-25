@@ -18,7 +18,7 @@ target_link_libraries(skai-unit-tests PRIVATE skai-cli skai-config skai-logging
 target_compile_definitions(skai-unit-tests PRIVATE
     SKAI_INVALID_CONFIG="${PROJECT_SOURCE_DIR}/tests/fixtures/config.invalid.yaml"
     SKAI_EXAMPLE_CONFIG="${PROJECT_SOURCE_DIR}/config/config.example.yaml")
-gtest_discover_tests(skai-unit-tests PROPERTIES TIMEOUT 15)
+gtest_discover_tests(skai-unit-tests DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 15)
 
 add_executable(skai-integration-tests integration/process_test.cpp)
 target_link_libraries(skai-integration-tests PRIVATE skai-rtsp-test-fixture GTest::gtest_main)
@@ -26,11 +26,11 @@ target_compile_definitions(skai-integration-tests PRIVATE
     SKAI_EDGE_EXECUTABLE="$<TARGET_FILE:skai-edge>"
     SKAI_INVALID_CONFIG="${PROJECT_SOURCE_DIR}/tests/fixtures/config.invalid.yaml")
 add_dependencies(skai-integration-tests skai-edge)
-gtest_discover_tests(skai-integration-tests)
+gtest_discover_tests(skai-integration-tests DISCOVERY_TIMEOUT 60)
 
 add_executable(skai-http-server-tests integration/http_server_test.cpp)
 target_link_libraries(skai-http-server-tests PRIVATE skai-web GTest::gtest_main)
-gtest_discover_tests(skai-http-server-tests PROPERTIES TIMEOUT 15)
+gtest_discover_tests(skai-http-server-tests DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 15)
 
 add_test(NAME Frontend.LiveStatusStateMachine
     COMMAND ${SKAI_NODE_EXECUTABLE} --test
@@ -42,46 +42,46 @@ set_tests_properties(Frontend.DiagnosticsPage PROPERTIES TIMEOUT 15)
 
 add_executable(skai-gstreamer-tests unit/gstreamer_runtime_test.cpp)
 target_link_libraries(skai-gstreamer-tests PRIVATE skai-gstreamer GTest::gtest_main)
-gtest_discover_tests(skai-gstreamer-tests PROPERTIES TIMEOUT 15)
+gtest_discover_tests(skai-gstreamer-tests DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 15)
 
 add_executable(skai-h264-encoder-tests unit/h264_encoder_test.cpp)
 target_link_libraries(skai-h264-encoder-tests PRIVATE skai-h264-encoder GTest::gtest_main)
-gtest_discover_tests(skai-h264-encoder-tests PROPERTIES TIMEOUT 15)
+gtest_discover_tests(skai-h264-encoder-tests DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 15)
 
 add_executable(skai-recording-tests unit/recording_test.cpp)
 target_link_libraries(skai-recording-tests PRIVATE skai-recording skai-h264-encoder
     GTest::gtest_main)
-gtest_discover_tests(skai-recording-tests PROPERTIES TIMEOUT 20)
+gtest_discover_tests(skai-recording-tests DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 20)
 
 add_executable(skai-detection-sei-tests unit/detection_sei_test.cpp)
 target_link_libraries(skai-detection-sei-tests PRIVATE skai-detection-sei skai-gstreamer
     PkgConfig::GST_VIDEO_APP GTest::gtest_main)
 target_include_directories(skai-detection-sei-tests PRIVATE support)
-gtest_discover_tests(skai-detection-sei-tests PROPERTIES TIMEOUT 30)
+gtest_discover_tests(skai-detection-sei-tests DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 30)
 
 add_executable(skai-webrtc-tests integration/webrtc_dependency_test.cpp
     unit/whip_publisher_test.cpp)
 target_include_directories(skai-webrtc-tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(skai-webrtc-tests PRIVATE skai-webrtc-runtime
     LibDataChannel::LibDataChannel GTest::gtest_main)
-gtest_discover_tests(skai-webrtc-tests PROPERTIES LABELS webrtc TIMEOUT 15)
+gtest_discover_tests(skai-webrtc-tests DISCOVERY_TIMEOUT 60 PROPERTIES LABELS webrtc TIMEOUT 15)
 
 add_executable(skai-whip-sei-tests integration/whip_sei_test.cpp)
 target_include_directories(skai-whip-sei-tests PRIVATE support)
 target_link_libraries(skai-whip-sei-tests PRIVATE skai-webrtc-runtime skai-gstreamer
     skai-health PkgConfig::GST_VIDEO_APP LibDataChannel::LibDataChannel Boost::system GTest::gtest_main)
-gtest_discover_tests(skai-whip-sei-tests PROPERTIES LABELS webrtc TIMEOUT 60)
+gtest_discover_tests(skai-whip-sei-tests DISCOVERY_TIMEOUT 60 PROPERTIES LABELS webrtc TIMEOUT 60)
 
 add_executable(skai-whep-tests integration/whep_session_test.cpp)
 target_link_libraries(skai-whep-tests PRIVATE skai-web
     LibDataChannel::LibDataChannel GTest::gtest_main)
-gtest_discover_tests(skai-whep-tests PROPERTIES LABELS webrtc TIMEOUT 20)
+gtest_discover_tests(skai-whep-tests DISCOVERY_TIMEOUT 60 PROPERTIES LABELS webrtc TIMEOUT 20)
 
 if(TARGET skai-tensorrt)
     add_executable(skai-tensorrt-tests integration/tensorrt_engine_test.cpp)
     target_include_directories(skai-tensorrt-tests PRIVATE ${PROJECT_SOURCE_DIR}/src)
     target_link_libraries(skai-tensorrt-tests PRIVATE skai-tensorrt GTest::gtest_main)
-    gtest_discover_tests(skai-tensorrt-tests PROPERTIES LABELS jetson TIMEOUT 120)
+    gtest_discover_tests(skai-tensorrt-tests DISCOVERY_TIMEOUT 60 PROPERTIES LABELS jetson TIMEOUT 120)
 endif()
 
 if(TARGET skai-preprocess-cuda)
@@ -91,7 +91,7 @@ if(TARGET skai-preprocess-cuda)
     target_compile_definitions(skai-preprocess-cuda-tests PRIVATE
         SKAI_YOLO_ENGINE="/var/lib/skai-edge/models/yolo11s_fp16.engine"
         SKAI_YOLO_ONNX="/var/lib/skai-edge/models/yolo11s.onnx")
-    gtest_discover_tests(skai-preprocess-cuda-tests PROPERTIES LABELS jetson TIMEOUT 120)
+    gtest_discover_tests(skai-preprocess-cuda-tests DISCOVERY_TIMEOUT 60 PROPERTIES LABELS jetson TIMEOUT 120)
 endif()
 
 if(TARGET skai-yolo-detector)
@@ -103,7 +103,7 @@ if(TARGET skai-yolo-detector)
         GTest::gtest_main)
     target_compile_definitions(skai-yolo-detector-tests PRIVATE
         SKAI_YOLO_ENGINE="/var/lib/skai-edge/models/yolo11s_fp16.engine")
-    gtest_discover_tests(skai-yolo-detector-tests PROPERTIES LABELS jetson TIMEOUT 120)
+    gtest_discover_tests(skai-yolo-detector-tests DISCOVERY_TIMEOUT 60 PROPERTIES LABELS jetson TIMEOUT 120)
 endif()
 
 add_library(skai-rtsp-test-fixture STATIC
@@ -115,14 +115,16 @@ target_link_libraries(skai-rtsp-test-fixture PUBLIC skai-gstreamer
 add_executable(skai-rtsp-fixture-tests integration/rtsp_fixture_test.cpp)
 target_link_libraries(skai-rtsp-fixture-tests PRIVATE skai-rtsp-test-fixture
     GTest::gtest_main)
-gtest_discover_tests(skai-rtsp-fixture-tests PROPERTIES LABELS rtsp TIMEOUT 30)
+gtest_discover_tests(skai-rtsp-fixture-tests DISCOVERY_TIMEOUT 60 PROPERTIES LABELS rtsp TIMEOUT 30)
 
 add_executable(skai-rtsp-source-tests integration/rtsp_source_test.cpp)
 target_link_libraries(skai-rtsp-source-tests PRIVATE skai-rtsp-source
     skai-rtsp-test-fixture GTest::gtest_main)
-gtest_discover_tests(skai-rtsp-source-tests PROPERTIES LABELS rtsp TIMEOUT 30)
+gtest_discover_tests(skai-rtsp-source-tests DISCOVERY_TIMEOUT 60 PROPERTIES LABELS rtsp TIMEOUT 30)
 
 add_executable(skai-rtsp-jetson-tests integration/rtsp_jetson_test.cpp)
 target_link_libraries(skai-rtsp-jetson-tests PRIVATE skai-rtsp-source
     skai-rtsp-test-fixture GTest::gtest_main)
-gtest_discover_tests(skai-rtsp-jetson-tests PROPERTIES LABELS "rtsp;jetson" TIMEOUT 30)
+# A single compound label survives GoogleTest's discovery script and matches both
+# `ctest -L rtsp` and `ctest -LE jetson` on CMake 3.22.
+gtest_discover_tests(skai-rtsp-jetson-tests DISCOVERY_TIMEOUT 60 PROPERTIES LABELS rtsp-jetson TIMEOUT 30)

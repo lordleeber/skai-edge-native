@@ -82,6 +82,26 @@ TEST(Database, CreatesParentDirectoryAndAppliesMigrationIdempotently) {
     EXPECT_TRUE(error.empty());
 }
 
+TEST(Database, RejectsSchemaFromNewerApplicationVersion) {
+    TemporaryDatabase temporary;
+    std::filesystem::create_directories(
+        std::filesystem::path(temporary.path()).parent_path());
+    sqlite3* connection = nullptr;
+    ASSERT_EQ(sqlite3_open(temporary.path().c_str(), &connection), SQLITE_OK);
+    ASSERT_EQ(sqlite3_exec(connection,
+        "CREATE TABLE schema_migrations(version INTEGER PRIMARY KEY, name TEXT NOT NULL, "
+        "applied_at_ms INTEGER NOT NULL);"
+        "INSERT INTO schema_migrations VALUES(2, 'future', 1);",
+        nullptr, nullptr, nullptr), SQLITE_OK);
+    ASSERT_EQ(sqlite3_close(connection), SQLITE_OK);
+
+    skai::Database database(temporary.path());
+    std::string error;
+    EXPECT_FALSE(database.open(error));
+    EXPECT_NE(error.find("newer"), std::string::npos);
+    EXPECT_FALSE(database.is_open());
+}
+
 TEST(Database, LifecycleClosesAndCanReopenTheDatabase) {
     TemporaryDatabase temporary;
     skai::Config config;
