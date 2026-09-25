@@ -40,7 +40,10 @@ struct ReceivedFrame {
 // depacketizes H.264, and acknowledges DELETE.
 class LoopbackWhipServer {
 public:
-    LoopbackWhipServer() : acceptor_(context_, {asio::ip::make_address("127.0.0.1"), 0}) {
+    explicit LoopbackWhipServer(std::string location = "/whip/session-1",
+                                http::status post_status = http::status::created)
+        : acceptor_(context_, {asio::ip::make_address("127.0.0.1"), 0}),
+          location_(std::move(location)), post_status_(post_status) {
         worker_ = std::thread([this] { serve(); });
     }
     ~LoopbackWhipServer() {
@@ -84,10 +87,12 @@ private:
             response.version(request.version());
             if (request.method() == http::verb::post) {
                 ++posts_;
-                response.result(http::status::created);
-                response.set(http::field::location, "/whip/session-1");
-                response.set(http::field::content_type, "application/sdp");
-                response.body() = answer(request.body());
+                response.result(post_status_);
+                if (!location_.empty() && post_status_ == http::status::created) {
+                    response.set(http::field::location, location_);
+                    response.set(http::field::content_type, "application/sdp");
+                    response.body() = answer(request.body());
+                }
             } else if (request.method() == http::verb::delete_) {
                 ++deletes_;
                 response.result(http::status::ok);
@@ -152,6 +157,8 @@ private:
     std::shared_ptr<rtc::Track> track_;
     bool track_open_ = false;
     std::vector<ReceivedFrame> frames_;
+    std::string location_;
+    http::status post_status_;
 };
 
 struct SourceUnit {
@@ -185,6 +192,64 @@ bool same_nals(const std::vector<Nal>& a, const std::vector<Nal>& b) {
 }
 
 } // namespace
+
+TEST(WhipMetrics, FatalLocationErrorRemainsVisibleAfterWorkerExits) {
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    skai::Config config;
+    config.webrtc.host_interfaces = {"lo"};
+    skai::IceRuntimeModule runtime(logger);
+    ASSERT_TRUE(runtime.initialize(config)) << runtime.last_error();
+    ASSERT_EQ(setenv("WHIP_TOKEN", "loopback-test", 1), 0);
+    LoopbackWhipServer server("");
+    config.whip.enabled = true;
+    config.whip.url = server.url();
+    skai::WhipPublisher publisher(logger);
+    ASSERT_TRUE(publisher.initialize(config)) << publisher.last_error();
+    ASSERT_TRUE(publisher.start()) << publisher.last_error();
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (std::chrono::steady_clock::now() < deadline &&
+           publisher.metrics().peer_state != "failed") {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    const auto metrics = publisher.metrics();
+    EXPECT_EQ(metrics.peer_state, "failed") << logs.str();
+    EXPECT_EQ(metrics.ice_state, "closed");
+    EXPECT_NE(metrics.last_error.find("Location"), std::string::npos);
+    EXPECT_EQ(server.posts(), 1);
+    publisher.stop();
+    publisher.wait();
+    ASSERT_EQ(unsetenv("WHIP_TOKEN"), 0);
+}
+
+TEST(WhipMetrics, RetryDiscardedAccessUnitsAreReportedSeparatelyFromOverflow) {
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    skai::Config config;
+    config.webrtc.host_interfaces = {"lo"};
+    skai::IceRuntimeModule runtime(logger);
+    ASSERT_TRUE(runtime.initialize(config)) << runtime.last_error();
+    ASSERT_EQ(setenv("WHIP_TOKEN", "loopback-test", 1), 0);
+    LoopbackWhipServer server("", http::status::service_unavailable);
+    config.whip.enabled = true;
+    config.whip.url = server.url();
+    skai::WhipPublisher publisher(logger);
+    ASSERT_TRUE(publisher.initialize(config)) << publisher.last_error();
+    skai::EncodedAccessUnit unit;
+    for (int index = 0; index < 4; ++index) publisher.publish_access_unit(unit);
+    ASSERT_TRUE(publisher.start()) << publisher.last_error();
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (std::chrono::steady_clock::now() < deadline &&
+           publisher.metrics().media_queue_discarded < 4) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    const auto metrics = publisher.metrics();
+    EXPECT_EQ(metrics.media_queue_drops, 0U);
+    EXPECT_EQ(metrics.media_queue_discarded, 4U) << logs.str();
+    publisher.stop();
+    publisher.wait();
+    ASSERT_EQ(unsetenv("WHIP_TOKEN"), 0);
+}
 
 TEST(WhipSei, ViewerRecoversEveryResultAcrossAnRtspRestartAndMediaIsUnchanged) {
     std::ostringstream logs;

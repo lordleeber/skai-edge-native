@@ -139,6 +139,20 @@ TEST(AlertRepository, InsertsAndReadsOneAlertWithDetections) {
     EXPECT_EQ(actual->detections[1].class_name, "car");
 }
 
+TEST(AlertRepository, CountsStoredAlertsAndReportsUnavailableDatabase) {
+    TemporaryDatabase temporary;
+    skai::Database database(temporary.path());
+    skai::AlertRepository repository(database);
+    std::string error;
+    EXPECT_FALSE(repository.count(error).has_value());
+    EXPECT_FALSE(error.empty());
+    ASSERT_TRUE(database.open(error)) << error;
+    EXPECT_EQ(repository.count(error), 0U);
+    ASSERT_TRUE(repository.insert(make_alert("one", 1), error)) << error;
+    ASSERT_TRUE(repository.insert(make_alert("two", 2), error)) << error;
+    EXPECT_EQ(repository.count(error), 2U);
+}
+
 TEST(AlertRepository, RollsBackAlertWhenDetectionInsertionFails) {
     TemporaryDatabase temporary;
     skai::Database database(temporary.path());

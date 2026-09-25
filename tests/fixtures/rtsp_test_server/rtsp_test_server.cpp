@@ -21,25 +21,22 @@ GstRTSPFilterResult close_client(GstRTSPServer*, GstRTSPClient* client, gpointer
     return GST_RTSP_FILTER_REMOVE;
 }
 
-const char* launch_for(RtspTestServer::Codec codec) {
+std::string launch_for(RtspTestServer::Codec codec, int fps) {
+    const std::string source = "( videotestsrc is-live=true pattern=smpte ! "
+        "video/x-raw,width=160,height=120,framerate=" + std::to_string(fps) +
+        "/1 ! videoconvert ! ";
     if (codec == RtspTestServer::Codec::H265) {
-        return "( videotestsrc is-live=true pattern=smpte ! "
-               "video/x-raw,width=160,height=120,framerate=10/1 ! videoconvert ! "
-               "identity name=stall_gate ! x265enc speed-preset=ultrafast "
+        return source + "identity name=stall_gate ! x265enc speed-preset=ultrafast "
                "tune=zerolatency bitrate=100 ! rtph265pay name=pay0 pt=96 "
                "config-interval=1 )";
     }
     if (codec == RtspTestServer::Codec::H264High) {
-        return "( videotestsrc is-live=true pattern=smpte ! "
-               "video/x-raw,width=160,height=120,framerate=10/1 ! videoconvert ! "
-               "identity name=stall_gate ! x264enc speed-preset=ultrafast "
+        return source + "identity name=stall_gate ! x264enc speed-preset=ultrafast "
                "bitrate=100 key-int-max=10 bframes=2 ! "
                "video/x-h264,profile=high,level=(string)3.1 ! "
                "rtph264pay name=pay0 pt=96 config-interval=1 )";
     }
-    return "( videotestsrc is-live=true pattern=smpte ! "
-           "video/x-raw,width=160,height=120,framerate=10/1 ! videoconvert ! "
-           "identity name=stall_gate ! x264enc speed-preset=ultrafast "
+    return source + "identity name=stall_gate ! x264enc speed-preset=ultrafast "
            "tune=zerolatency bitrate=100 key-int-max=10 ! "
            "video/x-h264,profile=constrained-baseline,level=(string)3.1 ! "
            "rtph264pay name=pay0 pt=96 config-interval=1 )";
@@ -83,7 +80,8 @@ bool RtspTestServer::start(std::string& error) {
         stop();
         return false;
     }
-    gst_rtsp_media_factory_set_launch(factory, launch_for(codec_));
+    const auto launch = launch_for(codec_, framerate_);
+    gst_rtsp_media_factory_set_launch(factory, launch.c_str());
     gst_rtsp_media_factory_set_shared(factory, TRUE);
     if (!username_.empty()) {
         GstRTSPAuth* auth = gst_rtsp_auth_new();

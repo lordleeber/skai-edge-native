@@ -32,6 +32,11 @@ public:
         codec_ = codec;
         return true;
     }
+    bool set_framerate(int fps) {
+        if (server_ || fps <= 0) return false;
+        framerate_ = fps;
+        return true;
+    }
     // The first bound endpoint remains available across stop/start cycles.
     int port() const { return port_; }
     std::string url() const;
@@ -40,6 +45,7 @@ private:
     static void on_media_configure(GstRTSPMediaFactory*, GstRTSPMedia*, gpointer data);
 
     Codec codec_;
+    int framerate_ = 10;
     std::string username_;
     std::string password_;
     GstRTSPServer* server_ = nullptr;

@@ -429,12 +429,61 @@ TEST(RtspSource, ReportsUnhealthySourceAfterDisconnect) {
     config.rtsp_url = server.url();
     ASSERT_TRUE(source.start(config, error)) << error << output.str();
     ASSERT_TRUE(frames.pop_for(std::chrono::seconds(3)).has_value()) << output.str();
+    ASSERT_TRUE(frames.pop_for(std::chrono::seconds(3)).has_value()) << output.str();
     EXPECT_TRUE(status->snapshot().video_fps.has_value());
     server.stop();
     EXPECT_TRUE(wait_for_health(source, skai::SourceHealth::Reconnecting,
                                 std::chrono::seconds(3))) << output.str();
     EXPECT_FALSE(source.diagnostics().last_error.empty());
     EXPECT_FALSE(status->snapshot().video_fps.has_value());
+}
+
+TEST(RtspSource, ReconnectClearsPreviousFpsBeforeMeasuringChangedStream) {
+    std::string error;
+    ASSERT_TRUE(skai::gst::initialize_once(error)) << error;
+    skai::test::RtspTestServer server;
+    ASSERT_TRUE(server.start(error)) << error;
+    skai::BoundedQueue<skai::Frame> frames(2);
+    std::ostringstream output;
+    skai::Logger logger(output);
+    auto status = std::make_shared<skai::RuntimeStatus>();
+    status->set_running(true);
+    skai::RtspSource source(frames, logger, skai::DecodeMode::Software, true, status);
+    skai::VideoConfig config;
+    config.rtsp_url = server.url();
+    ASSERT_TRUE(source.start(config, error)) << error << output.str();
+    ASSERT_TRUE(frames.pop_for(std::chrono::seconds(3)).has_value());
+    ASSERT_TRUE(frames.pop_for(std::chrono::seconds(3)).has_value());
+    ASSERT_TRUE(status->snapshot().video_fps.has_value());
+    server.stop();
+    ASSERT_TRUE(wait_for_health(source, skai::SourceHealth::Reconnecting,
+                                std::chrono::seconds(3))) << output.str();
+    EXPECT_FALSE(status->snapshot().video_fps.has_value());
+    const auto reset_deadline = std::chrono::steady_clock::now() +
+                                std::chrono::seconds(3);
+    while (std::chrono::steady_clock::now() < reset_deadline &&
+           source.diagnostics().fps_in != 0.0) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    ASSERT_EQ(source.diagnostics().fps_in, 0.0) << output.str();
+    frames.discard_all();
+    ASSERT_TRUE(server.set_framerate(1));
+    ASSERT_TRUE(server.start(error)) << error;
+    ASSERT_TRUE(frames.pop_for(std::chrono::seconds(5)).has_value()) << output.str();
+    const auto measured_deadline = std::chrono::steady_clock::now() +
+                                   std::chrono::seconds(6);
+    bool measured_new_rate = false;
+    while (std::chrono::steady_clock::now() < measured_deadline) {
+        const auto snapshot = status->snapshot();
+        if (snapshot.video_fps && *snapshot.video_fps >= 0.5 &&
+            *snapshot.video_fps <= 1.5 && source.diagnostics().fps_num == 1) {
+            measured_new_rate = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    EXPECT_TRUE(measured_new_rate) << source.diagnostics().fps_in << output.str();
+    source.stop();
 }
 
 TEST(RtspVideoModule, PublishesToSharedInferenceQueueAfterRestart) {

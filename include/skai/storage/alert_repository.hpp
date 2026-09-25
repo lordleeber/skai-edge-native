@@ -24,6 +24,7 @@ public:
     std::vector<AlertEvent> find_oldest_excess(std::size_t keep,
                                                 std::string& error) const;
     bool remove(const std::string& id, std::string& error);
+    std::optional<std::uint64_t> count(std::string& error) const;
 private:
     Database& database_;
 };

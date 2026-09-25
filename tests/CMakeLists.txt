@@ -6,7 +6,7 @@ pkg_check_modules(GST_RTSP_TEST REQUIRED IMPORTED_TARGET
 
 add_executable(skai-unit-tests unit/command_line_test.cpp unit/config_test.cpp
     unit/logging_test.cpp unit/application_test.cpp unit/bounded_queue_test.cpp
-    unit/rtsp_recovery_test.cpp unit/tensor_layout_test.cpp
+    unit/rtsp_recovery_test.cpp unit/metrics_test.cpp unit/tensor_layout_test.cpp
     unit/preprocess_reference_test.cpp unit/yolo_postprocess_test.cpp
     unit/annotator_test.cpp unit/http_router_test.cpp unit/event_channel_test.cpp
     unit/gps_source_test.cpp unit/storage_test.cpp unit/alert_manager_test.cpp)
