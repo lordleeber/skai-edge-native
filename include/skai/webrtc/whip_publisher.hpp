@@ -36,6 +36,7 @@ private:
         std::mutex mutex;
         std::string peer_state = "disabled";
         std::string ice_state = "disabled";
+        std::string last_error;
     };
     void run() noexcept;
     void publish_once();

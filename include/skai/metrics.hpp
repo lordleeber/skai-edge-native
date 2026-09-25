@@ -49,8 +49,10 @@ struct WhipMetrics {
     bool enabled = false;
     std::string peer_state = "disabled";
     std::string ice_state = "disabled";
+    std::string last_error;
     std::uint64_t access_units_sent = 0;
     std::size_t media_queue_drops = 0;
+    std::size_t media_queue_discarded = 0;
 };
 
 struct MetricsSnapshot : SystemMetrics {

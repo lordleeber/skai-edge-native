@@ -105,7 +105,8 @@ private:
             parser_.get().method() == http::verb::post && webrtc_) {
             return dispatch_whep(parser_.release(), status);
         }
-        if (path == "/api/v1/metrics") {
+        if (path == "/api/v1/metrics" &&
+            parser_.get().method() == http::verb::get) {
             const auto metrics = metrics_provider_();
             return send(route_request(parser_.get(), status, *api_, alerts_.get(),
                                       recording_.get(), webrtc_.get(), &metrics));

@@ -6,6 +6,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdlib>
 #include <sstream>
 #include <thread>
 
@@ -24,6 +25,29 @@ TEST(WhipPublisher, ReportsDisabledUplinkMetrics) {
     EXPECT_EQ(metrics.ice_state, "disabled");
     EXPECT_EQ(metrics.access_units_sent, 0U);
     EXPECT_EQ(metrics.media_queue_drops, 0U);
+}
+
+TEST(WhipPublisher, DisabledReinitializationClearsPreviousQueueCounters) {
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    skai::WhipPublisher publisher(logger);
+    skai::Config config;
+    config.whip.enabled = true;
+    ASSERT_EQ(setenv("WHIP_TOKEN", "metrics-test", 1), 0);
+    ASSERT_TRUE(publisher.initialize(config)) << publisher.last_error();
+    skai::EncodedAccessUnit unit;
+    for (int index = 0; index < 12; ++index) publisher.publish_access_unit(unit);
+    EXPECT_GT(publisher.metrics().media_queue_drops, 0U);
+    publisher.stop();
+    publisher.wait();
+
+    config.whip.enabled = false;
+    ASSERT_TRUE(publisher.initialize(config));
+    const auto metrics = publisher.metrics();
+    EXPECT_FALSE(metrics.enabled);
+    EXPECT_EQ(metrics.media_queue_drops, 0U);
+    EXPECT_EQ(metrics.media_queue_discarded, 0U);
+    ASSERT_EQ(unsetenv("WHIP_TOKEN"), 0);
 }
 
 TEST(WhipPeerState, BriefDisconnectCanRecoverWithoutRecreatingSession) {

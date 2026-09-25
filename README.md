@@ -127,6 +127,9 @@ process RSS and CPU use, GPU load when the Jetson sysfs counter is available,
 and free space on the recording filesystem. CPU percentage is process CPU time
 per wall-clock interval, so multi-core work can exceed 100%; the first sample
 is `null`. Encoder FPS is `null` for the current H.264 passthrough path.
+WHIP `media_queue_drops` counts queue overflow, while `media_queue_discarded`
+counts pending access units removed during reconnect or disconnect. WHIP
+`last_error` records the latest uplink error, including a fatal session error.
 
 For an executable-only build without GoogleTest or the RTSP-server fixture:
 

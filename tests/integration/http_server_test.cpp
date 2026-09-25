@@ -11,6 +11,7 @@
 #include <boost/beast/websocket.hpp>
 
 #include <chrono>
+#include <atomic>
 #include <filesystem>
 #include <fstream>
 #include <future>
@@ -386,6 +387,33 @@ TEST(HttpServer, ReportsLiveWebSocketAndQueueMetrics) {
     EXPECT_NE(response.body().find("\"disk_free_bytes\":"), std::string::npos);
 
     client.close(websocket::close_code::normal);
+    server.stop();
+    server.wait();
+}
+
+TEST(HttpServer, DoesNotSampleMetricsForUnsupportedMethods) {
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    std::atomic<int> samples{0};
+    skai::web::HttpServer server(logger, {}, {}, {}, {}, {}, {}, [&] {
+        ++samples;
+        return skai::MetricsSnapshot{};
+    });
+    skai::Config config;
+    config.web.bind = "127.0.0.1";
+    config.web.port = 0;
+    ASSERT_TRUE(server.initialize(config)) << logs.str();
+    ASSERT_TRUE(server.start());
+
+    for (const auto method : {http::verb::post, http::verb::head}) {
+        const auto response = request(server.port(),
+                                      {method, "/api/v1/metrics", 11});
+        EXPECT_EQ(response.result(), http::status::method_not_allowed);
+    }
+    EXPECT_EQ(samples.load(), 0);
+    EXPECT_EQ(request(server.port(), {http::verb::get, "/api/v1/metrics", 11}).result(),
+              http::status::ok);
+    EXPECT_EQ(samples.load(), 1);
     server.stop();
     server.wait();
 }

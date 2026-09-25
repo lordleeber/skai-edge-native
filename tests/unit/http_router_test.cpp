@@ -96,7 +96,9 @@ TEST(HttpRouter, ExposesRuntimeMetricsAndUnavailableValues) {
     metrics.whip.enabled = true;
     metrics.whip.peer_state = "connected";
     metrics.whip.ice_state = "completed";
+    metrics.whip.last_error = "";
     metrics.whip.access_units_sent = 91;
+    metrics.whip.media_queue_discarded = 4;
     metrics.alert_count = 7;
     metrics.memory_rss_bytes = 4096;
     metrics.disk_free_bytes = 8192;
@@ -111,7 +113,7 @@ TEST(HttpRouter, ExposesRuntimeMetricsAndUnavailableValues) {
     EXPECT_NE(response.body().find("\"inference_fps\":18"), std::string::npos);
     EXPECT_NE(response.body().find("\"inference_latency_ms\":38.5"), std::string::npos);
     EXPECT_NE(response.body().find("\"depth\":1,\"dropped\":3"), std::string::npos);
-    EXPECT_NE(response.body().find("\"whip\":{\"enabled\":true,\"peer_state\":\"connected\",\"ice_state\":\"completed\",\"access_units_sent\":91,\"media_queue_drops\":5"), std::string::npos);
+    EXPECT_NE(response.body().find("\"whip\":{\"enabled\":true,\"peer_state\":\"connected\",\"ice_state\":\"completed\",\"last_error\":\"\",\"access_units_sent\":91,\"media_queue_drops\":5,\"media_queue_discarded\":4"), std::string::npos);
     EXPECT_NE(response.body().find("\"websocket_clients\":4"), std::string::npos);
     EXPECT_NE(response.body().find("\"alert_count\":7"), std::string::npos);
     EXPECT_NE(response.body().find("\"memory_rss_bytes\":4096"), std::string::npos);

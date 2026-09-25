@@ -154,8 +154,10 @@ std::string metrics_json(const StatusSnapshot& status, const MetricsSnapshot& me
            << "},\"whip\":{\"enabled\":" << json_bool(metrics.whip.enabled)
            << ",\"peer_state\":" << json_string(metrics.whip.peer_state)
            << ",\"ice_state\":" << json_string(metrics.whip.ice_state)
+           << ",\"last_error\":" << json_string(metrics.whip.last_error)
            << ",\"access_units_sent\":" << metrics.whip.access_units_sent
            << ",\"media_queue_drops\":" << metrics.whip.media_queue_drops
+           << ",\"media_queue_discarded\":" << metrics.whip.media_queue_discarded
            << "},\"websocket_clients\":" << metrics.websocket_clients
            << ",\"webrtc\":";
     if (webrtc) output << webrtc_diagnostics_json(webrtc->diagnostics());

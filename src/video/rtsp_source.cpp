@@ -155,6 +155,10 @@ bool RtspSource::open_pipeline(std::string& error) {
     first_access_unit_ = true;
     ++pipeline_generation_;
     ingest_rate_.reset();
+    {
+        std::lock_guard<std::mutex> lock(diagnostics_mutex_);
+        diagnostics_.fps_in = 0.0;
+    }
     publish_media_status(false, "RTSP source is reconnecting");
     pipeline_ = gst::Pipeline::create_empty(logger_, error);
     if (!pipeline_) return false;

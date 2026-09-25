@@ -161,9 +161,13 @@ bool WhipPublisher::initialize(const Config& config) {
         std::lock_guard<std::mutex> lock(connection_metrics_->mutex);
         connection_metrics_->peer_state = config_.enabled ? "new" : "disabled";
         connection_metrics_->ice_state = config_.enabled ? "new" : "disabled";
+        connection_metrics_->last_error.clear();
     }
     token_.clear();
     last_error_.clear();
+    media_queue_.reset();
+    detection_queue_.reset();
+    stopping_ = false;
     if (!config_.enabled) return true;
     token_ = load_token();
     if (token_.empty()) {
@@ -174,9 +178,6 @@ bool WhipPublisher::initialize(const Config& config) {
         last_error_ = "could not initialize WHIP HTTP client";
         return false;
     }
-    media_queue_.reset();
-    detection_queue_.reset();
-    stopping_ = false;
     return true;
 }
 
@@ -202,10 +203,13 @@ WhipMetrics WhipPublisher::metrics() const {
     WhipMetrics result;
     result.enabled = config_.enabled;
     result.access_units_sent = access_units_sent_.load();
-    result.media_queue_drops = media_queue_.stats().dropped;
+    const auto queue = media_queue_.stats();
+    result.media_queue_drops = queue.dropped;
+    result.media_queue_discarded = queue.discarded;
     std::lock_guard<std::mutex> lock(connection_metrics_->mutex);
     result.peer_state = connection_metrics_->peer_state;
     result.ice_state = connection_metrics_->ice_state;
+    result.last_error = connection_metrics_->last_error;
     return result;
 }
 
@@ -230,11 +234,23 @@ void WhipPublisher::run() noexcept {
             publish_once();
         } catch (const UnrecoverableWhipError& error) {
             if (!stopping_) logger_.log(LogLevel::Error, "whip", error.what());
+            std::lock_guard<std::mutex> lock(connection_metrics_->mutex);
+            connection_metrics_->peer_state = stopping_ ? "stopped" : "failed";
+            connection_metrics_->ice_state = "closed";
+            if (!stopping_) connection_metrics_->last_error = error.what();
             return;
         } catch (const std::exception& error) {
-            if (!stopping_) logger_.log(LogLevel::Error, "whip", error.what());
+            if (!stopping_) {
+                logger_.log(LogLevel::Error, "whip", error.what());
+                std::lock_guard<std::mutex> lock(connection_metrics_->mutex);
+                connection_metrics_->last_error = error.what();
+            }
         } catch (...) {
-            if (!stopping_) logger_.log(LogLevel::Error, "whip", "unknown publisher error");
+            if (!stopping_) {
+                logger_.log(LogLevel::Error, "whip", "unknown publisher error");
+                std::lock_guard<std::mutex> lock(connection_metrics_->mutex);
+                connection_metrics_->last_error = "unknown publisher error";
+            }
         }
         {
             std::lock_guard<std::mutex> lock(connection_metrics_->mutex);
@@ -255,6 +271,7 @@ void WhipPublisher::publish_once() {
         std::lock_guard<std::mutex> lock(connection_metrics_->mutex);
         connection_metrics_->peer_state = "new";
         connection_metrics_->ice_state = "new";
+        connection_metrics_->last_error.clear();
     }
     auto peer = std::make_shared<rtc::PeerConnection>();
     auto state = std::make_shared<WhipPeerState>();
