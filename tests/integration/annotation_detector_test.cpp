@@ -87,6 +87,52 @@ TEST(AnnotationDetector, ProducesAnnotatedFrameWithoutChangingInferenceResult) {
     }
 }
 
+TEST(AnnotationDetector, FailedInferencePassesFrameThroughAndProcessesNextFrame) {
+    int devices = 0;
+    if (cudaGetDeviceCount(&devices) != cudaSuccess || devices == 0) {
+        GTEST_SKIP() << "CUDA device unavailable";
+    }
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    skai::BoundedQueue<skai::Frame> input(2);
+    skai::BoundedQueue<skai::Frame> output(2);
+    auto status = std::make_shared<skai::RuntimeStatus>();
+    auto api = std::make_shared<skai::ApiState>(status);
+    skai::YoloInferenceModule module(input, output, logger, status, api);
+    skai::Config config;
+    config.detector.engine = SKAI_YOLO_ENGINE;
+    config.detector.annotate = true;
+    ASSERT_TRUE(module.initialize(config)) << logs.str();
+    ASSERT_TRUE(module.start());
+
+    auto malformed = reference_frame();
+    malformed.sequence = 1;
+    malformed.bgr.resize(3); // Invalid image buffer reaches detector.run().
+    ASSERT_TRUE(input.push(malformed));
+    const auto fallback = output.pop_for(std::chrono::seconds(2));
+    if (!fallback) {
+        module.stop();
+        module.wait();
+        FAIL() << logs.str();
+    }
+    EXPECT_EQ(fallback->sequence, malformed.sequence);
+    EXPECT_EQ(fallback->bgr, malformed.bgr);
+
+    auto valid = reference_frame();
+    valid.sequence = 2;
+    ASSERT_TRUE(input.push(valid));
+    const auto recovered = output.pop_for(std::chrono::seconds(2));
+    if (!recovered) {
+        module.stop();
+        module.wait();
+        FAIL() << logs.str();
+    }
+    EXPECT_EQ(recovered->sequence, valid.sequence);
+    EXPECT_EQ(recovered->bgr.size(), valid.bgr.size());
+    module.stop();
+    module.wait();
+}
+
 TEST(AnnotationDetector, RtspPipelinePublishesAnnotationsAndHonorsDisableFlag) {
     int devices = 0;
     if (cudaGetDeviceCount(&devices) != cudaSuccess || devices == 0) {

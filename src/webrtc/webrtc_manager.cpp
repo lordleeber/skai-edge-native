@@ -344,19 +344,24 @@ CreateSessionResult WebRtcSession::accept_offer(
     last_activity_ = std::chrono::steady_clock::now();
     lock.unlock();
 
-    const auto local = peer->localDescription();
-    if (!local || local->type() != rtc::Description::Type::Answer) {
-        return {CreateSessionError::Internal, {}, {},
-                "PeerConnection did not produce an SDP answer"};
+    try {
+        const auto local = peer->localDescription();
+        if (!local || local->type() != rtc::Description::Type::Answer) {
+            return {CreateSessionError::Internal, {}, {},
+                    "PeerConnection did not produce an SDP answer"};
+        }
+        const auto answer = std::string(*local);
+        lock.lock();
+        if (closed_ || failed_) {
+            return {CreateSessionError::Internal, {}, {},
+                    "PeerConnection closed while creating the answer"};
+        }
+        answer_ready_ = true;
+        connection_wait_started_ = std::chrono::steady_clock::now();
+        return {CreateSessionError::None, id_, answer, {}};
+    } catch (const std::exception& error) {
+        return {CreateSessionError::Internal, {}, {}, error.what()};
     }
-    lock.lock();
-    if (closed_ || failed_) {
-        return {CreateSessionError::Internal, {}, {},
-                "PeerConnection closed while creating the answer"};
-    }
-    answer_ready_ = true;
-    connection_wait_started_ = std::chrono::steady_clock::now();
-    return {CreateSessionError::None, id_, std::string(*local), {}};
 }
 
 void WebRtcSession::close() noexcept { close_with_reason("session_closed"); }
@@ -570,6 +575,12 @@ WebRtcManager::WebRtcManager(Logger& logger,
 
 WebRtcManager::~WebRtcManager() { shutdown(); }
 
+std::shared_ptr<WebRtcSession> WebRtcManager::create_peer_session(
+        std::string id, std::size_t queue_capacity,
+        std::atomic<std::uint64_t>* media_errors) {
+    return WebRtcSession::create(std::move(id), queue_capacity, media_errors);
+}
+
 void WebRtcManager::configure(const WebrtcConfig& config) {
     shutdown();
     {
@@ -608,7 +619,26 @@ CreateSessionResult WebRtcManager::create_session(std::string_view offer_sdp) {
         }
         std::string id;
         do id = make_session_id(); while (sessions_.count(id) != 0);
-        session = WebRtcSession::create(id, media_queue_capacity_, &media_errors_);
+        try {
+            session = create_peer_session(id, media_queue_capacity_, &media_errors_);
+        } catch (const std::exception& error) {
+            ++signaling_errors_;
+            logger_.log(LogLevel::Error, "webrtc",
+                        std::string("PeerConnection creation failed: ") + error.what());
+            return {CreateSessionError::Internal, {}, {},
+                    "PeerConnection creation failed"};
+        } catch (...) {
+            ++signaling_errors_;
+            logger_.log(LogLevel::Error, "webrtc",
+                        "PeerConnection creation failed: unknown error");
+            return {CreateSessionError::Internal, {}, {},
+                    "PeerConnection creation failed"};
+        }
+        if (!session) {
+            ++signaling_errors_;
+            return {CreateSessionError::Internal, {}, {},
+                    "PeerConnection creation failed"};
+        }
         sessions_.emplace(id, session);
         ++sessions_created_;
     }

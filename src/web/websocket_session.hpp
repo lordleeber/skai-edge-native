@@ -37,6 +37,7 @@ public:
 private:
     void on_accept(boost::beast::error_code error);
     void enqueue(std::string event);
+    void drain_incoming();
     void write_next();
     void on_write(boost::beast::error_code error);
     void read_next();
@@ -58,6 +59,7 @@ private:
     std::function<void(std::shared_ptr<WebSocketSession>)> register_session_;
     std::function<void(WebSocketSession*)> unregister_session_;
     EventQueue outgoing_{32};
+    EventInbox incoming_{32};
     std::string writing_;
     std::uint64_t subscription_id_ = 0;
     bool closed_ = false;

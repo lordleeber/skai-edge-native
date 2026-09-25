@@ -49,4 +49,19 @@ private:
     std::deque<std::string> events_;
 };
 
+// Producers may publish from threads other than the WebSocket event loop.
+// One scheduled drain handles a bounded batch, even when a client is slow.
+class EventInbox {
+public:
+    explicit EventInbox(std::size_t capacity);
+    bool push(std::string event);
+    std::vector<std::string> drain();
+    std::size_t dropped() const;
+
+private:
+    mutable std::mutex mutex_;
+    EventQueue events_;
+    bool drain_scheduled_ = false;
+};
+
 } // namespace skai

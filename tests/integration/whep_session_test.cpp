@@ -14,6 +14,7 @@
 #include <condition_variable>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -66,6 +67,16 @@ public:
         return result;
     }
     std::atomic_bool entered{false}, completed{false};
+};
+class FailingPeerWebRtcManager final : public skai::WebRtcManager {
+public:
+    using WebRtcManager::WebRtcManager;
+
+protected:
+    std::shared_ptr<skai::WebRtcSession> create_peer_session(
+        std::string, std::size_t, std::atomic<std::uint64_t>*) override {
+        throw std::runtime_error("PeerConnection construction failed");
+    }
 };
 BrowserOffer make_browser_offer(
         rtc::Description::Direction direction = rtc::Description::Direction::RecvOnly,
@@ -245,6 +256,21 @@ TEST(WebRtcManager, CreatesUniqueAnswersEnforcesCapacityAndClosesSessions) {
     EXPECT_EQ(manager.session_count(), 0U);
     EXPECT_EQ(manager.create_session(blocked_offer.sdp).error,
               skai::CreateSessionError::Disabled);
+}
+
+TEST(WebRtcManager, PeerConstructionFailureDoesNotEscapeOrLeakSession) {
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    auto config = loopback_config(logger);
+    FailingPeerWebRtcManager manager(logger);
+    manager.configure(config.webrtc);
+
+    const auto result = manager.create_session(make_browser_offer().sdp);
+    EXPECT_EQ(result.error, skai::CreateSessionError::Internal);
+    EXPECT_EQ(manager.session_count(), 0U);
+    const auto diagnostics = manager.diagnostics();
+    EXPECT_EQ(diagnostics.signaling_errors, 1U);
+    EXPECT_EQ(diagnostics.sessions_created, 0U);
 }
 
 TEST(WebRtcManager, DeliversAnnexBAccessUnitsOverTheNegotiatedH264Track) {

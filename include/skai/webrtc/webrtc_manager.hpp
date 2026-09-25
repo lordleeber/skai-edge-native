@@ -160,6 +160,11 @@ public:
     void publish_access_unit(const EncodedAccessUnit& unit) noexcept;
     void shutdown() noexcept;
 
+protected:
+    virtual std::shared_ptr<WebRtcSession> create_peer_session(
+        std::string id, std::size_t queue_capacity,
+        std::atomic<std::uint64_t>* media_errors);
+
 private:
     std::string make_session_id();
     void remember_closed(const std::shared_ptr<WebRtcSession>& session,

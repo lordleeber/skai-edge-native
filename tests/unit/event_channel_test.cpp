@@ -49,6 +49,19 @@ TEST(EventQueue, DropsOldestPendingEventWhenClientIsSlow) {
     EXPECT_FALSE(queue.pop().has_value());
 }
 
+TEST(EventInbox, BoundsPendingEventsAndSchedulesOnlyOneDrain) {
+    skai::EventInbox inbox(2);
+    EXPECT_TRUE(inbox.push("one"));
+    EXPECT_FALSE(inbox.push("two"));
+    EXPECT_FALSE(inbox.push("three"));
+    const auto pending = inbox.drain();
+    ASSERT_EQ(pending.size(), 2U);
+    EXPECT_EQ(pending[0], "two");
+    EXPECT_EQ(pending[1], "three");
+    EXPECT_EQ(inbox.dropped(), 1U);
+    EXPECT_TRUE(inbox.push("four"));
+}
+
 TEST(EventChannel, RetainsOnlyTheTenMostRecentSystemErrors) {
     skai::EventChannel channel;
     channel.publish(skai::EventType::Status, "{}");

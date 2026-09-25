@@ -88,6 +88,31 @@ TEST(H264Encoder, RejectsFramesOutsideConstrainedBaselineLevel31) {
     EXPECT_EQ(output.stats().pushed, 0U);
 }
 
+TEST(H264Encoder, MalformedFrameDoesNotStopFollowingValidFrame) {
+    std::string error;
+    ASSERT_TRUE(skai::gst::initialize_once(error)) << error;
+    skai::BoundedQueue<skai::Frame> input(2);
+    skai::BoundedQueue<skai::EncodedAccessUnit> output(2);
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    skai::H264Encoder encoder(input, output, logger);
+    ASSERT_TRUE(encoder.start({}, error)) << error;
+    auto malformed = frame(1);
+    malformed.bgr.resize(3);
+    ASSERT_TRUE(input.push(std::move(malformed)));
+    for (int attempt = 0; attempt < 100 &&
+         encoder.metrics().frames_rejected == 0; ++attempt) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    ASSERT_EQ(encoder.metrics().frames_rejected, 1U);
+    ASSERT_TRUE(input.push(frame(2)));
+    const auto recovered = output.pop_for(std::chrono::seconds(3));
+    ASSERT_TRUE(recovered.has_value()) << logs.str() << encoder.metrics().last_error;
+    EXPECT_TRUE(starts_with_annex_b_start_code(recovered->bytes));
+    EXPECT_EQ(encoder.metrics().frames_submitted, 1U);
+    encoder.stop();
+}
+
 TEST(H264Encoder, EncodesBoundedAnnexBAccessUnitsAndReportsMetrics) {
     std::string error;
     ASSERT_TRUE(skai::gst::initialize_once(error)) << error;

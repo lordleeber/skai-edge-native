@@ -76,15 +76,21 @@ void WebSocketSession::on_accept(beast::error_code error) {
     const std::weak_ptr<WebSocketSession> weak = shared_from_this();
     subscription_id_ = events_->subscribe([weak](const std::string& event) {
         if (const auto self = weak.lock()) {
-            asio::post(self->stream_.get_executor(), [self, event] {
-                self->enqueue(event);
-            });
+            if (self->incoming_.push(event)) {
+                asio::post(self->stream_.get_executor(), [self] {
+                    self->drain_incoming();
+                });
+            }
         }
     });
     enqueue(make_event_json(EventType::Status, status_data()));
     enqueue(make_event_json(EventType::Gps, gps_data()));
     schedule_status();
     read_next();
+}
+
+void WebSocketSession::drain_incoming() {
+    for (auto& event : incoming_.drain()) enqueue(std::move(event));
 }
 
 void WebSocketSession::enqueue(std::string event) {

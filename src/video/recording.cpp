@@ -84,7 +84,7 @@ void RecordingController::set_active(std::string path) {
 void RecordingController::set_stopped() {
     std::lock_guard<std::mutex> lock(mutex_);
     status_.active = false;
-    if (!requested_) status_.state = "stopped";
+    if (!requested_ && status_.state != "error") status_.state = "stopped";
 }
 
 void RecordingController::set_error(std::string error) {
@@ -117,7 +117,7 @@ void RecordingController::set_media_available(bool available, std::string reason
         status_.state = "unavailable";
     } else if (requested_ && !status_.active) {
         status_.state = "starting";
-    } else if (!requested_) {
+    } else if (!requested_ && status_.state != "error") {
         status_.state = "stopped";
     }
 }

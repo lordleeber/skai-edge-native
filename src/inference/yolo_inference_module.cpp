@@ -1,6 +1,7 @@
 #include "skai/inference/yolo_inference_module.hpp"
 
 #include <chrono>
+#include <exception>
 #include <filesystem>
 #include <optional>
 #include <iomanip>
@@ -147,9 +148,20 @@ void YoloInferenceModule::run() noexcept {
         std::string error;
         const BgrImageView image{frame->bgr.data(), frame->bgr.size(), frame->width,
                                  frame->height, frame->stride};
-        if (!detector_->run(image, frame->sequence, detections, timing, error)) {
+        bool detected = false;
+        try {
+            detected = detector_->run(image, frame->sequence, detections,
+                                      timing, error);
+        } catch (const std::exception& failure) {
+            error = failure.what();
+        } catch (...) {
+            error = "unknown TensorRT inference error";
+        }
+        if (!detected) {
             if (status_) status_->clear_detector();
             logger_.log(LogLevel::Error, "detector", error);
+            previous = {};
+            if (output_) output_->push(std::move(*frame));
             continue;
         }
         const auto now = std::chrono::steady_clock::now();
@@ -166,6 +178,7 @@ void YoloInferenceModule::run() noexcept {
             if (!annotate_frame(*frame, detections, coco_class_names(), annotation_,
                                 annotated, error)) {
                 logger_.log(LogLevel::Error, "annotation", error);
+                if (output_) output_->push(std::move(*frame));
                 continue;
             }
         }

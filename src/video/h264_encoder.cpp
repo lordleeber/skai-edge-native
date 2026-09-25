@@ -458,6 +458,7 @@ void H264Encoder::run() noexcept {
                 ++metrics_.frames_rejected;
             }
             set_error(error);
+            close_pipeline();
             continue;
         }
         {
