@@ -14,6 +14,7 @@ public:
     bool open(std::string& error);
     void close() noexcept;
     bool is_open() const noexcept;
+    std::string health_error() const;
     int schema_version(std::string& error) const;
 
     bool initialize(const Config& config) override;
@@ -23,12 +24,15 @@ public:
     std::string last_error() const override;
 private:
     friend class AlertRepository;
+    friend class DatabaseTestAccess;
     bool open_locked(std::string& error);
     bool migrate_locked(std::string& error);
+    void record_operational_error_locked(int code, const std::string& error);
     std::string path_;
     bool path_from_config_ = false;
     mutable std::mutex mutex_;
     sqlite3* connection_ = nullptr;
     std::string last_error_;
+    std::string operational_error_;
 };
 } // namespace skai

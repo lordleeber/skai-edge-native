@@ -126,6 +126,7 @@ bool Database::open_locked(std::string& error) {
         connection_ = nullptr;
         return false;
     }
+    operational_error_.clear();
     return true;
 }
 
@@ -187,6 +188,26 @@ void Database::close() noexcept {
 bool Database::is_open() const noexcept {
     std::lock_guard<std::mutex> lock(mutex_);
     return connection_ != nullptr;
+}
+
+std::string Database::health_error() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return connection_ ? operational_error_ : "database closed";
+}
+
+void Database::record_operational_error_locked(int code, const std::string& error) {
+    switch (code & 0xff) {
+    case SQLITE_FULL:
+    case SQLITE_IOERR:
+    case SQLITE_READONLY:
+    case SQLITE_CORRUPT:
+    case SQLITE_NOTADB:
+    case SQLITE_CANTOPEN:
+    case SQLITE_PERM:
+        operational_error_ = error;
+        break;
+    default: break;
+    }
 }
 
 int Database::schema_version(std::string& error) const {

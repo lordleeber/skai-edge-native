@@ -137,7 +137,10 @@ bool AlertRepository::insert(const AlertEvent& alert, std::string& error) {
         error = "alert id, snapshot path, and signed frame sequence are required";
         return false;
     }
-    if (!execute(connection, "BEGIN IMMEDIATE;", error)) return false;
+    if (!execute(connection, "BEGIN IMMEDIATE;", error)) {
+        database_.record_operational_error_locked(sqlite3_extended_errcode(connection), error);
+        return false;
+    }
     bool committed = false;
     const auto rollback = [&] {
         if (!committed) {
@@ -145,14 +148,18 @@ bool AlertRepository::insert(const AlertEvent& alert, std::string& error) {
             execute(connection, "ROLLBACK;", ignored);
         }
     };
+    const auto fail = [&] {
+        database_.record_operational_error_locked(sqlite3_extended_errcode(connection), error);
+        rollback();
+        return false;
+    };
 
     Statement insert_alert(connection,
         "INSERT INTO alerts(id, timestamp_ms, latitude, longitude, altitude_m, "
         "gps_valid, gps_source, snapshot_path, frame_sequence, model_version) "
         "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?);", error);
     if (!insert_alert.get()) {
-        rollback();
-        return false;
+        return fail();
     }
     sqlite3_bind_text(insert_alert.get(), 1, alert.id.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_int64(insert_alert.get(), 2, alert.timestamp_ms);
@@ -178,16 +185,14 @@ bool AlertRepository::insert(const AlertEvent& alert, std::string& error) {
     }
     if (sqlite3_step(insert_alert.get()) != SQLITE_DONE) {
         error = sqlite3_errmsg(connection);
-        rollback();
-        return false;
+        return fail();
     }
 
     Statement insert_detection(connection,
         "INSERT INTO detections(alert_id, class_id, class_name, confidence, x1, y1, x2, y2) "
         "VALUES(?, ?, ?, ?, ?, ?, ?, ?);", error);
     if (!insert_detection.get()) {
-        rollback();
-        return false;
+        return fail();
     }
     for (const auto& detection : alert.detections) {
         sqlite3_reset(insert_detection.get());
@@ -203,13 +208,11 @@ bool AlertRepository::insert(const AlertEvent& alert, std::string& error) {
         sqlite3_bind_double(insert_detection.get(), 8, detection.y2);
         if (sqlite3_step(insert_detection.get()) != SQLITE_DONE) {
             error = sqlite3_errmsg(connection);
-            rollback();
-            return false;
+            return fail();
         }
     }
     if (!execute(connection, "COMMIT;", error)) {
-        rollback();
-        return false;
+        return fail();
     }
     committed = true;
     return true;
@@ -317,10 +320,14 @@ bool AlertRepository::remove(const std::string& id, std::string& error) {
     auto* connection = database_.connection_;
     if (!connection) { error = "database is not open"; return false; }
     Statement statement(connection, "DELETE FROM alerts WHERE id = ?;", error);
-    if (!statement.get()) return false;
+    if (!statement.get()) {
+        database_.record_operational_error_locked(sqlite3_extended_errcode(connection), error);
+        return false;
+    }
     sqlite3_bind_text(statement.get(), 1, id.c_str(), -1, SQLITE_TRANSIENT);
     if (sqlite3_step(statement.get()) != SQLITE_DONE) {
         error = sqlite3_errmsg(connection);
+        database_.record_operational_error_locked(sqlite3_extended_errcode(connection), error);
         return false;
     }
     return sqlite3_changes(connection) == 1;

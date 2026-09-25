@@ -329,6 +329,30 @@ TEST(HttpServer, HealthReflectsLiveComponentFailuresAndRecovery) {
     server.wait();
 }
 
+TEST(HttpServer, ServingStateIsReadyBeforeWatchdogFirstSample) {
+    std::ostringstream logs;
+    skai::Logger logger(logs);
+    auto watchdog = std::make_shared<skai::HealthWatchdog>();
+    skai::web::HttpServer server(logger, {}, {}, {}, {}, {}, {}, {},
+        [watchdog] { return watchdog->snapshot(); });
+    for (const auto component : skai::all_health_components) {
+        watchdog->set_probe(component, [] { return skai::ComponentHealth{skai::HealthState::Running, {}}; });
+    }
+    watchdog->set_probe(skai::HealthComponent::Web,
+                        [&server] { return skai::web_health(server.serving()); }, true);
+    skai::Config config;
+    config.web.bind = "127.0.0.1";
+    config.web.port = 0;
+    ASSERT_TRUE(server.initialize(config)) << logs.str();
+    ASSERT_TRUE(server.start());
+    EXPECT_TRUE(server.serving());
+    watchdog->start();
+    EXPECT_EQ(request(server.port(), {http::verb::get, "/health", 11}).result(), http::status::ok);
+    watchdog->stop();
+    server.stop();
+    server.wait();
+}
+
 TEST(HttpServer, GracefulStopCancelsIncompleteHttpAndWebSocketHandshakes) {
     std::ostringstream logs;
     skai::Logger logger(logs);

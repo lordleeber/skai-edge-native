@@ -1,4 +1,5 @@
 #include "h264_sei_test_support.hpp"
+#include "skai/health.hpp"
 #include "skai/webrtc/detection_sei.hpp"
 #include "skai/webrtc/ice_runtime_module.hpp"
 #include "skai/webrtc/whip_publisher.hpp"
@@ -216,6 +217,9 @@ TEST(WhipMetrics, FatalLocationErrorRemainsVisibleAfterWorkerExits) {
     EXPECT_EQ(metrics.peer_state, "failed") << logs.str();
     EXPECT_EQ(metrics.ice_state, "closed");
     EXPECT_NE(metrics.last_error.find("Location"), std::string::npos);
+    skai::WebRtcDiagnostics lan;
+    lan.enabled = true;
+    EXPECT_EQ(skai::webrtc_health(lan, metrics).state, skai::HealthState::Failed);
     EXPECT_EQ(server.posts(), 1);
     publisher.stop();
     publisher.wait();

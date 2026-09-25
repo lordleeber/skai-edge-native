@@ -1,6 +1,7 @@
 #pragma once
 
 #include "skai/gps/gps_source.hpp"
+#include "skai/metrics.hpp"
 #include "skai/status.hpp"
 #include "skai/video/recording_control.hpp"
 #include "skai/video/rtsp_metrics.hpp"
@@ -42,13 +43,15 @@ ComponentHealth video_health(const std::optional<RtspDiagnostics>& diagnostics,
                              int stall_timeout_ms = 3000);
 ComponentHealth detector_health(bool supported, bool enabled,
                                 const RuntimeStatusSnapshot& status);
-ComponentHealth encoder_health(const RuntimeStatusSnapshot& status, bool media_available);
+ComponentHealth encoder_health(const RuntimeStatusSnapshot& status, bool media_available,
+                               bool h264_required = true);
 ComponentHealth recorder_health(const RecordingStatus& status, bool requested,
                                 bool enabled_by_config);
 ComponentHealth gps_health(bool enabled, const std::optional<GpsFix>& fix);
-ComponentHealth webrtc_health(const WebRtcDiagnostics& diagnostics);
+ComponentHealth webrtc_health(const WebRtcDiagnostics& diagnostics,
+                              const WhipMetrics& whip = {});
 ComponentHealth web_health(bool serving);
-ComponentHealth database_health(bool open);
+ComponentHealth database_health(const std::string& error);
 
 // Polls component probes independently. A stale poll is a failed watchdog.
 class HealthWatchdog {

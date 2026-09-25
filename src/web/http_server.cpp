@@ -375,8 +375,8 @@ bool HttpServer::start() {
     if (!state_ || state_->worker.joinable()) return false;
     state_->started = std::chrono::steady_clock::now();
     state_->accept();
+    serving_.store(true);
     state_->worker = std::thread([this] {
-        serving_.store(true);
         state_->context.run();
         serving_.store(false);
     });

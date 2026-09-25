@@ -109,3 +109,38 @@ TEST(HealthModel, DetectorWatchdogRejectsStaleInference) {
     EXPECT_EQ(skai::detector_health(true, true, status).state, skai::HealthState::Running);
     EXPECT_EQ(skai::detector_health(true, false, status).state, skai::HealthState::Running);
 }
+
+TEST(HealthModel, FailedWhipUplinkDegradesHealthyLanWebrtc) {
+    skai::WebRtcDiagnostics lan;
+    lan.enabled = true;
+    lan.media_available = true;
+    skai::WhipMetrics whip;
+    whip.enabled = true;
+    whip.peer_state = "failed";
+    whip.ice_state = "closed";
+    whip.last_error = "invalid WHIP Location";
+    EXPECT_EQ(skai::webrtc_health(lan, whip).state, skai::HealthState::Failed);
+    skai::HealthWatchdog watchdog;
+    for (const auto component : skai::all_health_components) {
+        watchdog.set_probe(component, [] { return skai::ComponentHealth{skai::HealthState::Running, {}}; });
+    }
+    watchdog.set_probe(skai::HealthComponent::WebRtc, [&] { return skai::webrtc_health(lan, whip); });
+    watchdog.set_lifecycle(skai::HealthState::Running);
+    watchdog.tick();
+    EXPECT_EQ(watchdog.snapshot().state, skai::HealthState::Degraded);
+    whip.peer_state = "connected";
+    whip.ice_state = "connected";
+    watchdog.tick();
+    EXPECT_EQ(watchdog.snapshot().state, skai::HealthState::Running);
+    whip.peer_state = "retrying";
+    watchdog.tick();
+    EXPECT_EQ(watchdog.snapshot().state, skai::HealthState::Degraded);
+    whip.enabled = false;
+    EXPECT_EQ(skai::webrtc_health(lan, whip).state, skai::HealthState::Running);
+}
+
+TEST(HealthModel, InferenceOnlyVideoDoesNotRequireH264Passthrough) {
+    skai::RuntimeStatusSnapshot status;
+    EXPECT_EQ(skai::encoder_health(status, false, false).state, skai::HealthState::Running);
+    EXPECT_EQ(skai::encoder_health(status, false, true).state, skai::HealthState::Degraded);
+}

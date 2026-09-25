@@ -69,7 +69,7 @@ gtest_discover_tests(skai-webrtc-tests PROPERTIES LABELS webrtc TIMEOUT 15)
 add_executable(skai-whip-sei-tests integration/whip_sei_test.cpp)
 target_include_directories(skai-whip-sei-tests PRIVATE support)
 target_link_libraries(skai-whip-sei-tests PRIVATE skai-webrtc-runtime skai-gstreamer
-    PkgConfig::GST_VIDEO_APP LibDataChannel::LibDataChannel Boost::system GTest::gtest_main)
+    skai-health PkgConfig::GST_VIDEO_APP LibDataChannel::LibDataChannel Boost::system GTest::gtest_main)
 gtest_discover_tests(skai-whip-sei-tests PROPERTIES LABELS webrtc TIMEOUT 60)
 
 add_executable(skai-whep-tests integration/whep_session_test.cpp)

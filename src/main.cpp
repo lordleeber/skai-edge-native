@@ -185,9 +185,11 @@ int main(int argc, char* argv[]) {
         return skai::detector_health(api_state->detector_supported(),
                                      api_state->detector_enabled(), runtime_status->snapshot());
     });
-    watchdog->set_probe(HealthComponent::Encoder, [runtime_status, webrtc_manager] {
+    watchdog->set_probe(HealthComponent::Encoder, [runtime_status, webrtc_manager, health_config] {
         return skai::encoder_health(runtime_status->snapshot(),
-                                    webrtc_manager->diagnostics().media_available);
+                                    webrtc_manager->diagnostics().media_available,
+                                    health_config.recording.enabled || health_config.webrtc.enabled ||
+                                    health_config.whip.enabled);
     });
     watchdog->set_probe(HealthComponent::Recorder, [recording_control, health_config] {
         return skai::recorder_health(recording_control->status(), recording_control->requested(),
@@ -199,11 +201,11 @@ int main(int argc, char* argv[]) {
     watchdog->set_probe(HealthComponent::Web, [web_state] {
         return skai::web_health(web_state->serving());
     }, true);
-    watchdog->set_probe(HealthComponent::WebRtc, [webrtc_manager] {
-        return skai::webrtc_health(webrtc_manager->diagnostics());
+    watchdog->set_probe(HealthComponent::WebRtc, [webrtc_manager, whip_sink] {
+        return skai::webrtc_health(webrtc_manager->diagnostics(), whip_sink->metrics());
     });
     watchdog->set_probe(HealthComponent::Database, [database_state] {
-        return skai::database_health(database_state->is_open());
+        return skai::database_health(database_state->health_error());
     }, true);
     if (!app.start()) {
         skai::Logger error_logger(std::cerr);

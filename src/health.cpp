@@ -72,7 +72,9 @@ ComponentHealth detector_health(bool supported, bool enabled,
     return {HealthState::Running, {}};
 }
 
-ComponentHealth encoder_health(const RuntimeStatusSnapshot& status, bool media_available) {
+ComponentHealth encoder_health(const RuntimeStatusSnapshot& status, bool media_available,
+                               bool h264_required) {
+    if (!h264_required && !status.encoder) return {HealthState::Running, "not required"};
     if (!media_available) return {HealthState::Degraded, "H.264 media unavailable"};
     if (!status.encoder) return {HealthState::Running, "H.264 passthrough"};
     if (!status.encoder->last_error.empty()) return {HealthState::Degraded, status.encoder->last_error};
@@ -103,11 +105,24 @@ ComponentHealth gps_health(bool enabled, const std::optional<GpsFix>& fix) {
     return {HealthState::Running, {}};
 }
 
-ComponentHealth webrtc_health(const WebRtcDiagnostics& diagnostics) {
-    if (!diagnostics.enabled) return {HealthState::Running, "disabled"};
-    if (!diagnostics.media_available) {
+ComponentHealth webrtc_health(const WebRtcDiagnostics& diagnostics, const WhipMetrics& whip) {
+    if (whip.enabled) {
+        if (whip.peer_state == "failed" || whip.peer_state == "stopped") {
+            return {HealthState::Failed, whip.last_error.empty() ? "WHIP uplink stopped" : whip.last_error};
+        }
+        if (whip.peer_state == "retrying" || whip.peer_state == "disconnected" ||
+            whip.ice_state == "failed" || whip.ice_state == "disconnected") {
+            return {HealthState::Degraded, whip.last_error.empty() ? "WHIP uplink reconnecting" : whip.last_error};
+        }
+        if (whip.peer_state != "connected" ||
+            (whip.ice_state != "connected" && whip.ice_state != "completed")) {
+            return {HealthState::Starting, "WHIP uplink connecting"};
+        }
+    }
+    if (diagnostics.enabled && !diagnostics.media_available) {
         return {HealthState::Degraded, diagnostics.media_unavailable_reason};
     }
+    if (!diagnostics.enabled && !whip.enabled) return {HealthState::Running, "disabled"};
     return {HealthState::Running, {}};
 }
 
@@ -116,9 +131,9 @@ ComponentHealth web_health(bool serving) {
                    : ComponentHealth{HealthState::Failed, "HTTP server not serving"};
 }
 
-ComponentHealth database_health(bool open) {
-    return open ? ComponentHealth{HealthState::Running, {}}
-                : ComponentHealth{HealthState::Failed, "database closed"};
+ComponentHealth database_health(const std::string& error) {
+    return error.empty() ? ComponentHealth{HealthState::Running, {}}
+                         : ComponentHealth{HealthState::Failed, error};
 }
 
 HealthWatchdog::~HealthWatchdog() { stop(); }
