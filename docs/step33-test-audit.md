@@ -45,14 +45,24 @@ selects queue, lifecycle, event/WebSocket, and WebRTC session tests. Both
 exclude `jetson`. The repository tests the WebRTC integration boundary and
 does not repeat `skai-ice`'s STUN/ICE protocol tests.
 
-The TSan preset requires Clang and compiler-rt. It uses the narrow
-`config/tsan.supp` entry for a callback race in vendored `libdatachannel` during
-Track shutdown; project code remains instrumented. The ASan/UBSan preset
-disables LeakSanitizer because its per-process exit scan exceeds existing test
-timeouts on Jetson, while address and undefined-behavior checks remain active.
+The TSan preset requires Clang and compiler-rt. It covers LAN WHEP and cloud
+WHIP publisher, peer-state, and metrics tests. The full `WhipSei` case remains
+in the normal and ASan suites because its GStreamer/GLib source fixture reports
+races from libraries that are not TSan-instrumented.
+
+The suppression in `config/tsan.supp` matches only vendored
+`Channel::resetCallbacks` during Track shutdown. The observed report's top
+frame is `__interceptor_memcpy`, so `race_top` cannot target that vendor method.
+Any race involving this exact teardown method can still be hidden; review the
+rule after upgrading `libdatachannel`. Project code remains instrumented.
+
+The ASan/UBSan preset disables LeakSanitizer because its per-process exit scan
+exceeds existing test timeouts on Jetson, while address and undefined-behavior
+checks remain active.
 
 Run `scripts/coverage.sh` with `gcovr` 8.6 or newer on `PATH` for text, HTML,
 and Cobertura reports under `build/x86-coverage/report/`. The gate requires at
 least 90% line coverage in each of `cli.cpp`, `preprocess.cpp`,
 `tensor_layout.cpp`, and `yolo_postprocess.cpp`; it fails if any file has no
-coverage data.
+coverage data. The script removes previous `.gcda` counts before CTest, so
+repeated runs measure only the current suite.

@@ -202,27 +202,30 @@ TEST(WhipMetrics, FatalLocationErrorRemainsVisibleAfterWorkerExits) {
     skai::IceRuntimeModule runtime(logger);
     ASSERT_TRUE(runtime.initialize(config)) << runtime.last_error();
     ASSERT_EQ(setenv("WHIP_TOKEN", "loopback-test", 1), 0);
-    LoopbackWhipServer server("");
-    config.whip.enabled = true;
-    config.whip.url = server.url();
-    skai::WhipPublisher publisher(logger);
-    ASSERT_TRUE(publisher.initialize(config)) << publisher.last_error();
-    ASSERT_TRUE(publisher.start()) << publisher.last_error();
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
-    while (std::chrono::steady_clock::now() < deadline &&
-           publisher.metrics().peer_state != "failed") {
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    {
+        LoopbackWhipServer server("");
+        config.whip.enabled = true;
+        config.whip.url = server.url();
+        skai::WhipPublisher publisher(logger);
+        ASSERT_TRUE(publisher.initialize(config)) << publisher.last_error();
+        ASSERT_TRUE(publisher.start()) << publisher.last_error();
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (std::chrono::steady_clock::now() < deadline &&
+               publisher.metrics().peer_state != "failed") {
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+        const auto metrics = publisher.metrics();
+        EXPECT_EQ(metrics.peer_state, "failed") << logs.str();
+        EXPECT_EQ(metrics.ice_state, "closed");
+        EXPECT_NE(metrics.last_error.find("Location"), std::string::npos);
+        skai::WebRtcDiagnostics lan;
+        lan.enabled = true;
+        EXPECT_EQ(skai::webrtc_health(lan, metrics).state, skai::HealthState::Failed);
+        EXPECT_EQ(server.posts(), 1);
+        publisher.stop();
+        publisher.wait();
     }
-    const auto metrics = publisher.metrics();
-    EXPECT_EQ(metrics.peer_state, "failed") << logs.str();
-    EXPECT_EQ(metrics.ice_state, "closed");
-    EXPECT_NE(metrics.last_error.find("Location"), std::string::npos);
-    skai::WebRtcDiagnostics lan;
-    lan.enabled = true;
-    EXPECT_EQ(skai::webrtc_health(lan, metrics).state, skai::HealthState::Failed);
-    EXPECT_EQ(server.posts(), 1);
-    publisher.stop();
-    publisher.wait();
+    rtc::Cleanup().wait();
     ASSERT_EQ(unsetenv("WHIP_TOKEN"), 0);
 }
 
@@ -234,24 +237,27 @@ TEST(WhipMetrics, RetryDiscardedAccessUnitsAreReportedSeparatelyFromOverflow) {
     skai::IceRuntimeModule runtime(logger);
     ASSERT_TRUE(runtime.initialize(config)) << runtime.last_error();
     ASSERT_EQ(setenv("WHIP_TOKEN", "loopback-test", 1), 0);
-    LoopbackWhipServer server("", http::status::service_unavailable);
-    config.whip.enabled = true;
-    config.whip.url = server.url();
-    skai::WhipPublisher publisher(logger);
-    ASSERT_TRUE(publisher.initialize(config)) << publisher.last_error();
-    skai::EncodedAccessUnit unit;
-    for (int index = 0; index < 4; ++index) publisher.publish_access_unit(unit);
-    ASSERT_TRUE(publisher.start()) << publisher.last_error();
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
-    while (std::chrono::steady_clock::now() < deadline &&
-           publisher.metrics().media_queue_discarded < 4) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    {
+        LoopbackWhipServer server("", http::status::service_unavailable);
+        config.whip.enabled = true;
+        config.whip.url = server.url();
+        skai::WhipPublisher publisher(logger);
+        ASSERT_TRUE(publisher.initialize(config)) << publisher.last_error();
+        skai::EncodedAccessUnit unit;
+        for (int index = 0; index < 4; ++index) publisher.publish_access_unit(unit);
+        ASSERT_TRUE(publisher.start()) << publisher.last_error();
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+        while (std::chrono::steady_clock::now() < deadline &&
+               publisher.metrics().media_queue_discarded < 4) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+        const auto metrics = publisher.metrics();
+        EXPECT_EQ(metrics.media_queue_drops, 0U);
+        EXPECT_EQ(metrics.media_queue_discarded, 4U) << logs.str();
+        publisher.stop();
+        publisher.wait();
     }
-    const auto metrics = publisher.metrics();
-    EXPECT_EQ(metrics.media_queue_drops, 0U);
-    EXPECT_EQ(metrics.media_queue_discarded, 4U) << logs.str();
-    publisher.stop();
-    publisher.wait();
+    rtc::Cleanup().wait();
     ASSERT_EQ(unsetenv("WHIP_TOKEN"), 0);
 }
 

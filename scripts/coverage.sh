@@ -11,6 +11,9 @@ fi
 
 cmake --preset x86-coverage
 cmake --build --preset x86-coverage
+# GCC adds new execution counts to existing .gcda files. Start each gate run
+# with only counts from the tests below, including when reusing the build tree.
+find "$repo_root/build/x86-coverage" -type f -name '*.gcda' -delete
 ctest --preset x86-coverage
 
 report_dir="$repo_root/build/x86-coverage/report"

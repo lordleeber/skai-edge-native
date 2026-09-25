@@ -78,7 +78,7 @@
       "output": { "outputOnFailure": true },
       "filter": {
         "include": {
-          "name": "^(BoundedQueue|Application|EventChannel|EventQueue|EventInbox|WebRtcManager|WhepHttpApi)\\.|^HttpServer\\.(WebSocket|GracefulStop|ShutdownClosesConnectedWebSocket|ReportsLiveWebSocket)"
+          "name": "^(BoundedQueue|Application|EventChannel|EventQueue|EventInbox|WebRtcManager|WhepHttpApi|WhipPublisher|WhipPeerState|WhipMetrics)\\.|^HttpServer\\.(WebSocket|GracefulStop|ShutdownClosesConnectedWebSocket|ReportsLiveWebSocket)"
         },
         "exclude": { "label": "jetson" }
       },
