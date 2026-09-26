@@ -7,9 +7,7 @@
 #include "skai/video/rtsp_video_module.hpp"
 #include "skai/web/http_server.hpp"
 #include "skai/webrtc/ice_runtime_module.hpp"
-#ifdef SKAI_PIPELINE_TENSORRT
 #include "skai/inference/yolo_inference_module.hpp"
-#endif
 
 #include <gtest/gtest.h>
 #include <boost/asio.hpp>
@@ -35,68 +33,35 @@ namespace http = boost::beast::http;
 using tcp = asio::ip::tcp;
 using namespace std::chrono_literals;
 
-// This detector exists only in the test executable. It requires a decoded RTSP
-// image and finds the white patch in the generated fixture, then calls the real
-// API state and AlertManager. GPU inference is covered by the Jetson variant.
-class FixtureDetector final : public skai::LifecycleModule {
+// Only inference is substituted; frame consumption, commits, events and async
+// alert persistence all run through the production YoloInferenceModule.
+class FixtureBackend final : public skai::InferenceBackend {
 public:
-    FixtureDetector(skai::BoundedQueue<skai::Frame>& frames,
-                    std::shared_ptr<skai::ApiState> api,
-                    std::shared_ptr<skai::RuntimeStatus> status,
-                    std::shared_ptr<skai::AlertManager> alerts)
-        : frames_(frames), api_(api), status_(status), alerts_(alerts) {}
-    ~FixtureDetector() override { stop(); wait(); }
-    bool initialize(const skai::Config& config) override {
-        alerts_->configure(config.alerts, config.storage.alert_directory, "fixture");
-        return true;
-    }
-    bool start() override {
-        worker_ = std::thread([this] {
-            while (!stopping_) {
-                auto frame = frames_.pop_for(100ms);
-                if (!frame) continue;
-                const auto permit = api_->detector_permit();
-                if (!permit.enabled) continue;
-                int min_x = frame->width, min_y = frame->height, max_x = -1, max_y = -1;
-                for (int y = 0; y < frame->height; ++y) {
-                    for (int x = 0; x < frame->width; ++x) {
-                        const auto offset = y * frame->stride + x * 3;
-                        if (frame->bgr[offset] > 200 && frame->bgr[offset + 1] > 200 &&
-                            frame->bgr[offset + 2] > 200) {
-                            min_x = std::min(min_x, x); min_y = std::min(min_y, y);
-                            max_x = std::max(max_x, x); max_y = std::max(max_y, y);
-                        }
-                    }
-                }
-                std::vector<skai::DetectionDto> published;
-                skai::DetectionResult result;
-                result.frame_sequence = frame->sequence;
-                if (max_x >= 0) {
-                    published.push_back({0, "fixture_patch", 1.0f,
-                        float(min_x), float(min_y), float(max_x + 1), float(max_y + 1)});
-                    result.detections.push_back({0, 1.0f, float(min_x), float(min_y),
-                                                float(max_x + 1), float(max_y + 1)});
-                }
-                if (api_->commit_detections(permit, frame->sequence, frame->width,
-                        frame->height, frame->pts_ns, published, [this] {
-                            status_->update_detector(10.0, 0.1);
-                        })) {
-                    alerts_->process(result, frame->width, frame->height,
-                                     {"fixture_patch"}, permit.generation, &*frame);
+    explicit FixtureBackend(std::shared_ptr<std::atomic<bool>> fail) : fail_(fail) {}
+    bool load(const std::string&, std::string&) override { return true; }
+    bool run(const skai::BgrImageView& image, std::uint64_t sequence,
+             skai::DetectionResult& result, skai::InferenceTiming& timing,
+             std::string& error) override {
+        if (*fail_) { error = "injected inference failure"; return false; }
+        int min_x = image.width, min_y = image.height, max_x = -1, max_y = -1;
+        for (int y = 0; y < image.height; ++y) {
+            for (int x = 0; x < image.width; ++x) {
+                const auto offset = y * image.stride + x * 3;
+                if (image.data[offset] > 200 && image.data[offset + 1] > 200 &&
+                    image.data[offset + 2] > 200) {
+                    min_x = std::min(min_x, x); min_y = std::min(min_y, y);
+                    max_x = std::max(max_x, x); max_y = std::max(max_y, y);
                 }
             }
-        });
+        }
+        result.frame_sequence = sequence;
+        if (max_x >= 0) result.detections.push_back({0, 1.0f, float(min_x),
+            float(min_y), float(max_x + 1), float(max_y + 1)});
+        timing.inference_wall_ms = 0.1;
         return true;
     }
-    void stop() noexcept override { stopping_ = true; }
-    void wait() noexcept override { if (worker_.joinable()) worker_.join(); }
 private:
-    skai::BoundedQueue<skai::Frame>& frames_;
-    std::shared_ptr<skai::ApiState> api_;
-    std::shared_ptr<skai::RuntimeStatus> status_;
-    std::shared_ptr<skai::AlertManager> alerts_;
-    std::atomic<bool> stopping_{false};
-    std::thread worker_;
+    std::shared_ptr<std::atomic<bool>> fail_;
 };
 
 #ifdef SKAI_PIPELINE_TENSORRT
@@ -128,15 +93,11 @@ protected:
         ASSERT_TRUE(cv::imwrite((root_ / "frame.png").string(), image));
         ASSERT_TRUE(rtsp_.set_image((root_ / "frame.png").string()));
         ASSERT_TRUE(rtsp_.start(error)) << error;
-        // Reserve an ephemeral port while writing config; release before bind.
-        asio::io_context context;
-        tcp::acceptor reservation(context, {asio::ip::make_address("127.0.0.1"), 0});
-        const auto port = reservation.local_endpoint().port();
         const auto path = root_ / "config.yaml";
         std::ofstream config(path);
         config << "video: {rtsp_url: '" << rtsp_.url()
                << "', transport: tcp, latency_ms: 50}\n"
-               << "web: {bind: '127.0.0.1', port: " << port << "}\n"
+               << "web: {bind: '127.0.0.1', port: 0}\n"
                << "detector: {engine: '/var/lib/skai-edge/models/yolo11s_fp16.engine', confidence: 0.1}\n"
                << "storage: {database_path: '" << (root_ / "alerts.db").string()
                << "', alert_directory: '" << (root_ / "alerts").string() << "'}\n"
@@ -148,7 +109,7 @@ protected:
 #ifdef SKAI_PIPELINE_TENSORRT
                << "alerts: [{class: umbrella, confidence: 0.1, consecutive_frames: 2, cooldown_seconds: 60}]\n";
 #else
-               << "alerts: [{class: fixture_patch, confidence: 0.9, consecutive_frames: 2, cooldown_seconds: 60}]\n";
+               << "alerts: [{class: person, confidence: 0.9, consecutive_frames: 2, cooldown_seconds: 60}]\n";
 #endif
         config.close();
         ASSERT_TRUE(config);
@@ -163,7 +124,11 @@ protected:
         modules.detector = std::make_unique<skai::YoloInferenceModule>(
             frames_, logger_, status_, api_, events_, alerts);
 #else
-        modules.detector = std::make_unique<FixtureDetector>(frames_, api_, status_, alerts);
+        modules.detector = std::make_unique<skai::YoloInferenceModule>(
+            frames_, logger_, status_, api_, events_, alerts,
+            [fail = fail_](skai::Logger&, const skai::DetectorConfig&) {
+                return std::make_unique<FixtureBackend>(fail);
+            });
 #endif
         modules.recording = std::make_unique<skai::RecordingModule>(units_, logger_, recording_, events_);
         modules.video = std::make_unique<skai::RtspVideoModule>(frames_, units_, logger_, status_,
@@ -177,10 +142,13 @@ protected:
         web_ = web.get();
         modules.web = std::move(web);
         app_ = std::make_unique<skai::Application>(path.string(), logger_, std::move(modules));
-        reservation.close();
         ASSERT_TRUE(app_->initialize()) << app_->last_error() << logs_.str();
         ASSERT_TRUE(app_->start()) << app_->last_error() << logs_.str();
         status_->set_running(true);
+        events_->subscribe([this](const std::string& event) {
+            std::lock_guard<std::mutex> lock(event_mutex_);
+            published_.push_back(event);
+        });
     }
     void TearDown() override {
         if (app_) { app_->stop(); app_->wait(); }
@@ -223,6 +191,9 @@ protected:
         EXPECT_TRUE(error.empty()) << error;
         return result;
     }
+    std::shared_ptr<std::atomic<bool>> fail_ = std::make_shared<std::atomic<bool>>(false);
+    std::mutex event_mutex_;
+    std::vector<std::string> published_;
     std::filesystem::path root_;
     skai::test::RtspTestServer rtsp_;
     std::ostringstream logs_;
@@ -256,7 +227,7 @@ TEST_F(PipelineSuite, PersistsRtspDetectionsAlertsSnapshotsAndPlayableRecording)
 #ifdef SKAI_PIPELINE_TENSORRT
     EXPECT_EQ(alert.detections.front().class_name, "umbrella");
 #else
-    EXPECT_EQ(alert.detections.front().class_name, "fixture_patch");
+    EXPECT_EQ(alert.detections.front().class_name, "person");
     EXPECT_NEAR(alert.detections.front().x1, 160, 2);
     EXPECT_NEAR(alert.detections.front().x2, 320, 2);
 #endif
@@ -332,6 +303,30 @@ TEST_F(PipelineSuite, PersistsRtspDetectionsAlertsSnapshotsAndPlayableRecording)
     }
     EXPECT_GE(playable, 1);
 }
+
+#ifndef SKAI_PIPELINE_TENSORRT
+TEST_F(PipelineSuite, ProductionInferenceInvalidatesFailuresAndPublishesRecovery) {
+    ASSERT_TRUE(wait_until([&] { return api_->latest_detections().available; }));
+    *fail_ = true;
+    ASSERT_TRUE(wait_until([&] { return !api_->latest_detections().available; }));
+    EXPECT_FALSE(status_->snapshot().last_inference_ms.has_value());
+    ASSERT_TRUE(wait_until([&] {
+        std::lock_guard<std::mutex> lock(event_mutex_);
+        return std::any_of(published_.begin(), published_.end(), [](const auto& event) {
+            return event.find("\"type\":\"detection\"") != std::string::npos &&
+                   event.find("\"available\":false") != std::string::npos;
+        });
+    }));
+    *fail_ = false;
+    ASSERT_TRUE(wait_until([&] { return api_->latest_detections().available; }));
+    ASSERT_TRUE(wait_until([&] { return !alerts().empty(); }));
+    std::lock_guard<std::mutex> lock(event_mutex_);
+    EXPECT_TRUE(std::any_of(published_.begin(), published_.end(), [](const auto& event) {
+        return event.find("\"type\":\"detection\"") != std::string::npos &&
+               event.find("\"class_name\":\"person\"") != std::string::npos;
+    }));
+}
+#endif
 
 #ifndef SKAI_PIPELINE_TENSORRT
 TEST_F(PipelineSuite, WhepRouteDeliversRtspH264AndDeletesConnectedPeer) {

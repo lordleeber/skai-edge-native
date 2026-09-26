@@ -70,17 +70,21 @@ YoloInferenceModule::YoloInferenceModule(BoundedQueue<Frame>& input,
                                          std::shared_ptr<RuntimeStatus> status,
                                          std::shared_ptr<ApiState> api,
                                          std::shared_ptr<EventChannel> events,
-                                         std::shared_ptr<AlertManager> alerts)
+                                         std::shared_ptr<AlertManager> alerts,
+                                         InferenceBackendFactory backend_factory)
     : input_(input), output_(&annotated_output), logger_(logger),
       status_(std::move(status)), api_(std::move(api)),
-      events_(std::move(events)), alerts_(std::move(alerts)) {}
+      events_(std::move(events)), alerts_(std::move(alerts)),
+      backend_factory_(std::move(backend_factory)) {}
 
 YoloInferenceModule::YoloInferenceModule(
         BoundedQueue<Frame>& input, Logger& logger,
         std::shared_ptr<RuntimeStatus> status, std::shared_ptr<ApiState> api,
-        std::shared_ptr<EventChannel> events, std::shared_ptr<AlertManager> alerts)
+        std::shared_ptr<EventChannel> events, std::shared_ptr<AlertManager> alerts,
+                                         InferenceBackendFactory backend_factory)
     : input_(input), logger_(logger), status_(std::move(status)),
-      api_(std::move(api)), events_(std::move(events)), alerts_(std::move(alerts)) {}
+      api_(std::move(api)), events_(std::move(events)), alerts_(std::move(alerts)),
+      backend_factory_(std::move(backend_factory)) {}
 
 bool YoloInferenceModule::initialize(const Config& config) {
     if (detector_ || worker_.joinable()) return false;
@@ -95,16 +99,15 @@ bool YoloInferenceModule::initialize(const Config& config) {
                            std::filesystem::path(config.detector.engine)
                                .filename().string());
     }
-    YoloPostprocessConfig postprocess;
-    postprocess.confidence_threshold = static_cast<float>(config.detector.confidence);
-    postprocess.nms_iou_threshold = static_cast<float>(config.detector.nms);
-    bootstrap_ = std::make_unique<TensorRtBootstrap>(logger_);
-    detector_ = std::make_unique<YoloDetector>(logger_, *bootstrap_, postprocess);
+    detector_ = backend_factory_ ? backend_factory_(logger_, config.detector) : nullptr;
+    if (!detector_) {
+        logger_.log(LogLevel::Error, "detector", "inference backend unavailable");
+        return false;
+    }
     std::string error;
     if (detector_->load(config.detector.engine, error)) return true;
     logger_.log(LogLevel::Error, "detector", error);
     detector_.reset();
-    bootstrap_.reset();
     return false;
 }
 
@@ -128,7 +131,6 @@ void YoloInferenceModule::wait() noexcept {
     if (output_) output_->shutdown();
     if (status_) status_->clear_detector();
     detector_.reset();
-    bootstrap_.reset();
 }
 
 void YoloInferenceModule::run() noexcept {

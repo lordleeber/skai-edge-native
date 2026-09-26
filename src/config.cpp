@@ -146,8 +146,8 @@ void validate(const Config& config) {
                     config.detector.nms <= 1,
                 "detector.nms", "must be between 0 and 1");
     check_range(!config.web.bind.empty(), "web.bind", "must not be empty");
-    check_range(config.web.port >= 1 && config.web.port <= 65535,
-                "web.port", "must be between 1 and 65535");
+    check_range(config.web.port >= 0 && config.web.port <= 65535,
+                "web.port", "must be between 0 and 65535 (0 selects an ephemeral port)");
     check_range(!config.web.root.empty(), "web.root", "must not be empty");
     check_range(!config.recording.directory.empty(), "recording.directory", "must not be empty");
     check_range(config.recording.segment_seconds >= 1,
