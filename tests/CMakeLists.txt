@@ -210,3 +210,14 @@ else()
 endif()
 gtest_discover_tests(skai-installed-runtime-tests DISCOVERY_TIMEOUT 60
     PROPERTIES LABELS ${SKAI_INSTALL_RUNTIME_LABEL} RUN_SERIAL TRUE TIMEOUT 60)
+
+add_executable(skai-profile-script-tests integration/profile_script_test.cpp)
+target_link_libraries(skai-profile-script-tests PRIVATE GTest::gtest_main)
+target_compile_definitions(skai-profile-script-tests PRIVATE
+    SKAI_PYTHON="${Python3_EXECUTABLE}"
+    SKAI_PROFILE_CHECK="${PROJECT_SOURCE_DIR}/tests/fixtures/profile_checks.py")
+gtest_discover_tests(skai-profile-script-tests DISCOVERY_TIMEOUT 60
+    PROPERTIES LABELS profiling TIMEOUT 15)
+add_test(NAME Profiling.SourceWatermark
+    COMMAND ${SKAI_NODE_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/frontend/profile_marker_test.js)
+set_tests_properties(Profiling.SourceWatermark PROPERTIES LABELS profiling TIMEOUT 15)

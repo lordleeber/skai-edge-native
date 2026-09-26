@@ -4,3 +4,4 @@
 /config/config.local.yaml
 /recordings/
 /output/
+__pycache__/

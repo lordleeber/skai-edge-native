@@ -57,6 +57,8 @@ std::string health_json(const HealthSnapshot& health) {
 
 std::string webrtc_diagnostics_json(const WebRtcDiagnostics& diagnostics) {
     std::ostringstream output;
+    output.imbue(std::locale::classic());
+    output << std::setprecision(std::numeric_limits<double>::max_digits10);
     const auto write_peer = [&output](const WebRtcPeerDiagnostics& peer) {
         output << "{\"session_id\":" << json_string(peer.session_id)
                << ",\"peer_state\":" << json_string(peer.peer_state)
@@ -149,7 +151,7 @@ std::string metrics_json(const StatusSnapshot& status, const MetricsSnapshot& me
                          ApiState& api, WebRtcManager* webrtc) {
     std::ostringstream output;
     output.imbue(std::locale::classic());
-    output << std::setprecision(6) << "{\"ingest_fps\":";
+    output << std::setprecision(std::numeric_limits<double>::max_digits10) << "{\"ingest_fps\":";
     if (status.video_fps) output << *status.video_fps;
     else output << "null";
     output << ",\"rtsp\":";

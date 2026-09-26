@@ -1,0 +1,297 @@
+{
+  "run_id": "844f01417965b8566ce53e91220825a8",
+  "started_utc": "2026-09-26T13:44:20Z",
+  "environment": {
+    "device": "NVIDIA Jetson Orin Nano Engineering Reference Developer Kit Super",
+    "engine_sha256": "ee4af5986debd7da7ed35c39ae4e54157ff7c4e3c69b6549cdb4602c0eeaf1c7",
+    "kernel": "5.15.148-tegra",
+    "binary_sha256": "cbb9c96afc5a804db4692e94444b338316a46bca31285d62adabf32c7bd2160b",
+    "l4t": "# R36 (release), REVISION: 4.7, GCID: 42132812, BOARD: generic, EABI: aarch64, DATE: Thu Sep 18 22:54:44 UTC 2025",
+    "cpu_governor": "schedutil",
+    "build": {
+      "CMAKE_BUILD_TYPE": "Release",
+      "CMAKE_CUDA_FLAGS": "",
+      "CMAKE_CUDA_FLAGS_RELEASE": "-O3 -DNDEBUG",
+      "CMAKE_CXX_COMPILER": "/usr/bin/c++",
+      "CMAKE_CXX_FLAGS": "",
+      "CMAKE_CXX_FLAGS_RELEASE": "-O3 -DNDEBUG"
+    },
+    "compiler_version": "c++ (Ubuntu 11.4.0-1ubuntu1~22.04.3) 11.4.0",
+    "power_mode": "NV Power Mode: 25W\n1",
+    "collector_sha256": "b4ab06c3c86e5b9768e285ebfd6f80a98fdef384f061e290ae11e0486e537337",
+    "fixture_sha256": "ad447f099dc991c9ba1f23ae25b758a394d557af172cd6afc85b5804f19de36c",
+    "ui_assets_sha256": {
+      "app.js": "13fa355d14ad2b2b72c7f7d4a25be28a6305108ed26bd196e8bd6597375fe3f9",
+      "style.css": "ddd22576f562f1681926f2af43d18bb8fbb48db08224dfce688ae0f49b8ad601",
+      "diagnostics.css": "cbb83f933975c4df2c2166227145291d0eff1e655b00bafe2b7b00f24afc488f",
+      "index.html": "85a1fd48acaa26dd606f4a9a82b968ed41e80e4a1c8e528b7a45811eb5c0dbfe",
+      "diagnostics.js": "54772c78e83f51730b111bb02b70de55710776234fcd88f3a0e4408263b7db08",
+      "diagnostics.html": "0201e60da64e7ab3a59d33380fafc20141d7ba04b55ac35a7b40c2df92d01a07"
+    },
+    "values_module_sha256": "572aafa7dfbcdf122fae99db31470b1f3fe221a3398232db8c92b24525b95272",
+    "browser_script_sha256": "cbbfdebe8b18e0975908fc46b530d09bf35fad998504f9bc48dd0539f29596eb",
+    "worktree_dirty": true,
+    "git_sha": "3ba06b03b69eed09bb1e79ebf287c5824267894d"
+  },
+  "workload": "1280x720 RGB moving box + timestamp stripe, 30 FPS; synthetic scene",
+  "receiver": "production Console UI in Firefox on the same Jetson; HTTP loopback and configured host ICE candidates",
+  "browser": {
+    "browserName": "firefox",
+    "browserVersion": "147.0"
+  },
+  "effective_config": {
+    "video": {
+      "transport": "tcp",
+      "latency_ms": 100,
+      "stall_timeout_ms": 3000
+    },
+    "detector": {
+      "enabled": true,
+      "confidence": 0.35,
+      "nms": 0.45,
+      "annotate": true
+    },
+    "web": {
+      "bind": "127.0.0.1",
+      "port": 0
+    },
+    "recording": {
+      "configured": true,
+      "segment_seconds": 60
+    },
+    "gps": {
+      "enabled": true,
+      "source": "fixed"
+    },
+    "webrtc": {
+      "enabled": true,
+      "max_peers": 1,
+      "connection_timeout_ms": 15000,
+      "media_queue_capacity": 8
+    }
+  },
+  "warmup_seconds": 10.0,
+  "requested_seconds": 60.0,
+  "observed_seconds": 60.79620335600339,
+  "summary": {
+    "gpu_percent": {
+      "count": 59,
+      "mean": 70.57796610169493,
+      "min": 9.3,
+      "max": 99.3,
+      "p50": 71,
+      "p95": 99.3
+    },
+    "memory_rss_bytes": {
+      "count": 59,
+      "mean": 484878717.8305085,
+      "min": 483938304,
+      "max": 487317504,
+      "p50": 484335616,
+      "p95": 487165952
+    },
+    "ingest_fps": {
+      "count": 59,
+      "mean": 30.003368547886172,
+      "min": 27.804473855232057,
+      "max": 32.17523250991719,
+      "p50": 30.082397998424568,
+      "p95": 31.222343923615604
+    },
+    "end_to_end_browser_ms": {
+      "count": 323,
+      "mean": 60.56452115179953,
+      "min": 33.739990234375,
+      "max": 100.39990234375,
+      "p50": 66.47998046875,
+      "p95": 67.699951171875
+    },
+    "process_percent": {
+      "count": 59,
+      "mean": 119.54782314257073,
+      "min": 114.50295095039843,
+      "max": 125.22338481977715,
+      "p50": 119.41361600673238,
+      "p95": 123.82589481089342
+    },
+    "rtsp_workers_percent": {
+      "count": 59,
+      "mean": 89.9250807324222,
+      "min": 84.89555001652522,
+      "max": 96.11135673864106,
+      "p50": 89.65121229015425,
+      "p95": 94.89584630873738
+    },
+    "receiver_media_ms": {
+      "count": 59,
+      "mean": 13.590564967195183,
+      "min": 6.621709677419389,
+      "max": 21.6220322580645,
+      "p50": 14.323741935483874,
+      "p95": 18.993612903225795
+    },
+    "whep_queue_interval_mean_ms": {
+      "count": 59,
+      "mean": 0.08971672306584398,
+      "min": 0.03029135483871143,
+      "max": 0.2143399032258014,
+      "p50": 0.07328712903226219,
+      "p95": 0.19236236666666665
+    }
+  },
+  "stage_totals": {
+    "preprocess_wall": {
+      "count": 1824,
+      "mean_ms": 1.8213584791666644
+    },
+    "preprocess_gpu": {
+      "count": 1824,
+      "mean_ms": 1.5728527195751667
+    },
+    "inference_wall": {
+      "count": 1824,
+      "mean_ms": 21.24165500164475
+    },
+    "inference_gpu": {
+      "count": 1824,
+      "mean_ms": 19.955114221886586
+    },
+    "postprocess_wall": {
+      "count": 1824,
+      "mean_ms": 1.9323206145833345
+    },
+    "annotation_wall": {
+      "count": 0,
+      "mean_ms": null
+    },
+    "recording_queue_wait": {
+      "count": 1824,
+      "mean_ms": 0.135373378837719
+    }
+  },
+  "stage_interval_means": {
+    "preprocess_wall": {
+      "count": 59,
+      "mean": 1.820965300338494,
+      "min": 1.5432933225806664,
+      "max": 2.5909227812500077,
+      "p50": 1.760150612903192,
+      "p95": 2.374215033333326
+    },
+    "preprocess_gpu": {
+      "count": 59,
+      "mean": 1.5726279357995026,
+      "min": 1.423247475777903,
+      "max": 1.8640859834849834,
+      "p50": 1.5445171517710532,
+      "p95": 1.8465341867939118
+    },
+    "inference_wall": {
+      "count": 59,
+      "mean": 21.24218227798434,
+      "min": 20.02181456250014,
+      "max": 21.794629833333115,
+      "p50": 21.200388677419287,
+      "p95": 21.6848658064515
+    },
+    "inference_gpu": {
+      "count": 59,
+      "mean": 19.95563515370889,
+      "min": 18.79009100794792,
+      "max": 20.37690531822943,
+      "p50": 19.951670738958544,
+      "p95": 20.15165823698044
+    },
+    "postprocess_wall": {
+      "count": 59,
+      "mean": 1.9333290578702105,
+      "min": 1.6195212903225762,
+      "max": 2.5400089655172766,
+      "p50": 1.9008827419354695,
+      "p95": 2.2512786666666518
+    },
+    "annotation_wall": null,
+    "recording_queue_wait": {
+      "count": 59,
+      "mean": 0.13537791920334402,
+      "min": 0.04088599999999853,
+      "max": 0.30660038709677356,
+      "p50": 0.12158549999999953,
+      "p95": 0.2905950333333332
+    }
+  },
+  "receiver_interval_means": {
+    "jitter_buffer_ms": {
+      "count": 59,
+      "mean": 11.128891921815198,
+      "min": 4.170096774193582,
+      "max": 18.91235483870966,
+      "p50": 12.09793548387097,
+      "p95": 16.220161290322604
+    },
+    "decode_ms": {
+      "count": 59,
+      "mean": 2.4616730453799884,
+      "min": 2.129032258064516,
+      "max": 3.0,
+      "p50": 2.4,
+      "p95": 2.903225806451613
+    }
+  },
+  "browser_annotation": {
+    "count": 1618,
+    "mean_ms": 1.8757725587144622
+  },
+  "browser_probe": {
+    "count": 323,
+    "mean_ms": 6.758513931888545
+  },
+  "inference_fps": 30.002075863854245,
+  "latency_sampling": "one watermark sample per five presented frames, every decoded marker validated",
+  "encode_cpu": {
+    "status": "not_applicable",
+    "reason": "source H.264 passthrough; no local encoder"
+  },
+  "recordings": [
+    {
+      "name": "recording_20260926_214523_359203906326914_001.mp4",
+      "bytes": 243830,
+      "decoded_frames": 569
+    },
+    {
+      "name": "recording_20260926_214422_359171092957939.mp4",
+      "bytes": 739425,
+      "decoded_frames": 1715
+    }
+  ],
+  "status": "baseline_passed",
+  "raw_report_sha256": "231838ea63dc22ae6f198a91ad05bf1938de950e18cb748b2a85b7c16315ddf1",
+  "source": {
+    "width": 1280,
+    "height": 720,
+    "fps": 30,
+    "codec": "H264",
+    "decoder": "nvv4l2decoder"
+  },
+  "browser_frame_callback_fps": 26.613683523967197,
+  "window_counts": {
+    "source_frames": 1824,
+    "inference_commits": 1824,
+    "browser_callbacks": 1618,
+    "latency_samples": 323,
+    "inference_queue_drops": 0,
+    "encoded_queue_drops": 0,
+    "whep_queue_drops": 0,
+    "peer_reported_send_mbps": 0.11485057816787474
+  },
+  "clocks": {
+    "cpu0_khz": [
+      "1190400",
+      "1344000"
+    ],
+    "gpu_hz": [
+      "306000000"
+    ]
+  },
+  "max_observed_browser_clock_skew_ms": 1
+}

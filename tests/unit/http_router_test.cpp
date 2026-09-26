@@ -430,3 +430,19 @@ TEST(HttpRouter, ExposesSeparateCumulativeProfileStagesWithoutInventingMeasureme
     EXPECT_NE(response.body().find("\"inference_gpu\":{\"count\":1,\"total_ms\":7"), std::string::npos);
     EXPECT_NE(response.body().find("\"annotation_wall\":{\"count\":0,\"total_ms\":0,\"mean_ms\":null"), std::string::npos);
 }
+
+TEST(HttpRouter, PreservesSubMillisecondDeltasInLongRunningProfileCounters) {
+    skai::RuntimeStatusSnapshot status;
+    auto& timing = status.profiling[static_cast<std::size_t>(skai::ProfileStage::InferenceGpu)];
+    timing.count = 100000000;
+    timing.total_ms = 2000000000.125;
+    skai::ApiState api;
+    const auto response = skai::web::route_request(
+        {http::verb::get, "/api/v1/metrics", 11}, status, api);
+    const auto stage = response.body().find("\"inference_gpu\":");
+    ASSERT_NE(stage, std::string::npos);
+    EXPECT_DOUBLE_EQ(json_number(response.body().substr(stage), "total_ms"), timing.total_ms);
+    skai::WebRtcDiagnostics peers;
+    peers.peers.emplace_back(); peers.peers.back().media_queue_wait = timing;
+    EXPECT_DOUBLE_EQ(json_number(skai::web::webrtc_diagnostics_json(peers), "total_ms"), timing.total_ms);
+}

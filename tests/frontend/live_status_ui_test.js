@@ -154,6 +154,7 @@ function createHarness({withRtc = false, webrtcEnabled = true,
     addTransceiver() { return {receiver: {playoutDelayHint: 0}}; }
     addEventListener(type, callback) { this.listeners.set(type, callback); }
     removeEventListener() {}
+    async getStats() { return new Map([['inbound', {type: 'inbound-rtp', kind: 'video', id: 'inbound'}]]); }
     async createOffer() { return {type: "offer", sdp: "offer-sdp"}; }
     async setLocalDescription(description) { this.localDescription = description; }
     async setRemoteDescription(description) { this.remoteDescription = description; }
@@ -169,13 +170,15 @@ function createHarness({withRtc = false, webrtcEnabled = true,
     location: {protocol: "http:", host: "edge.test"},
     structuredClone,
     WebSocket: MockWebSocket,
-    window: {...timerApi, addEventListener() {}, devicePixelRatio: 1}
+    window: {...timerApi, addEventListener() {}, devicePixelRatio: 1,
+      performance: {now: (() => { let tick = 0; return () => tick += .25; })()}}
   };
   if (withRtc) context.RTCPeerConnection = MockPeerConnection;
   vm.runInNewContext(appSource, context, {filename: "app.js"});
 
   return {
     elements,
+    profile: context.window.skaiProfileSnapshot,
     fetchCalls,
     fetchRequests,
     peers: MockPeerConnection.instances,
@@ -363,4 +366,19 @@ test("disabled WebRTC does not create or retry WHEP sessions", async () => {
   assert.equal(harness.fetchCalls.includes("/api/v1/webrtc/whep"), false);
   assert.equal(harness.elements.get("live-stream-state").textContent, "Disabled");
   assert.equal(harness.hasTimer(2000), false);
+});
+
+
+test("profiling samples the actual UI peer and copied canvas timing totals", async () => {
+  const harness = createHarness({withRtc: true});
+  await flush();
+  harness.peers[0].connectionState = "connected";
+  const first = await harness.profile();
+  assert.equal(first.state, "connected");
+  assert.equal(first.peer, "test");
+  assert.equal(first.stats[0].id, "inbound");
+  assert.ok(first.annotation.count > 0);
+  assert.ok(first.annotation.total_ms > 0);
+  first.annotation.total_ms = -1;
+  assert.ok((await harness.profile()).annotation.total_ms > 0);
 });

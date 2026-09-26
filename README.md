@@ -333,3 +333,4 @@ production-schema database and persistent state directories. See
 dependency checkout, staging, account setup and upgrades.
 
 Profiling stage definitions: [Step 38-a metrics](docs/step38-profiling-metrics.md).
+Baseline collection: [Step 38-b profiling guide](docs/step38-profiling-baseline.md).
