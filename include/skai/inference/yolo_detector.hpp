@@ -9,13 +9,6 @@
 
 namespace skai {
 
-struct InferenceTiming {
-    PreprocessTiming preprocess;
-    double inference_gpu_ms = 0.0;  // TensorRT execution only
-    double inference_wall_ms = 0.0; // Execution and device-to-host output copy
-    double postprocess_wall_ms = 0.0;
-};
-
 // One worker owns one detector; the process-level bootstrap must outlive it.
 class YoloDetector {
 public:

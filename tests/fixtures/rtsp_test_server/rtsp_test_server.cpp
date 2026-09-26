@@ -21,10 +21,18 @@ GstRTSPFilterResult close_client(GstRTSPServer*, GstRTSPClient* client, gpointer
     return GST_RTSP_FILTER_REMOVE;
 }
 
-std::string launch_for(RtspTestServer::Codec codec, int fps) {
-    const std::string source = "( videotestsrc is-live=true pattern=smpte ! "
-        "video/x-raw,width=160,height=120,framerate=" + std::to_string(fps) +
-        "/1 ! videoconvert ! ";
+std::string launch_for(RtspTestServer::Codec codec, int fps,
+                       const std::string& image_path) {
+    std::string source = "( videotestsrc is-live=true pattern=smpte ! "
+        "video/x-raw,width=160,height=120,framerate=" + std::to_string(fps) + "/1 ! ";
+    if (!image_path.empty()) {
+        gchar* escaped = g_strescape(image_path.c_str(), nullptr);
+        source = "( filesrc location=\"" + std::string(escaped) +
+                 "\" ! pngdec ! imagefreeze is-live=true ! "
+                 "video/x-raw,framerate=" + std::to_string(fps) + "/1 ! ";
+        g_free(escaped);
+    }
+    source += "videoconvert ! ";
     if (codec == RtspTestServer::Codec::H265) {
         return source + "identity name=stall_gate ! x265enc speed-preset=ultrafast "
                "tune=zerolatency bitrate=100 ! rtph265pay name=pay0 pt=96 "
@@ -62,6 +70,12 @@ bool RtspTestServer::start(std::string& error) {
         error = "RTSP test encoder or payloader plugin is unavailable";
         return false;
     }
+    if (!image_path_.empty() &&
+        (!plugin_available("pngdec") || !plugin_available("imagefreeze") ||
+         !g_file_test(image_path_.c_str(), G_FILE_TEST_IS_REGULAR))) {
+        error = "RTSP image fixture requires a PNG file, pngdec and imagefreeze";
+        return false;
+    }
 
     server_ = gst_rtsp_server_new();
     if (!server_) {
@@ -80,7 +94,7 @@ bool RtspTestServer::start(std::string& error) {
         stop();
         return false;
     }
-    const auto launch = launch_for(codec_, framerate_);
+    const auto launch = launch_for(codec_, framerate_, image_path_);
     gst_rtsp_media_factory_set_launch(factory, launch.c_str());
     gst_rtsp_media_factory_set_shared(factory, TRUE);
     if (!username_.empty()) {

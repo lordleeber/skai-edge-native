@@ -125,10 +125,6 @@ if(TARGET skai-tensorrt)
         target_include_directories(skai-yolo-detector PUBLIC include)
         target_link_libraries(skai-yolo-detector PUBLIC skai-preprocess-cuda
             skai-yolo-postprocess)
-        add_library(skai-inference-module src/inference/yolo_inference_module.cpp)
-        target_include_directories(skai-inference-module PUBLIC include)
-        target_link_libraries(skai-inference-module PUBLIC skai-yolo-detector
-            skai-annotator skai-application skai-core skai-events skai-alerts)
     else()
         message(STATUS "CUDA compiler unavailable; skipping skai-preprocess-cuda")
     endif()
@@ -208,11 +204,21 @@ target_include_directories(skai-rtsp-source PUBLIC include)
 target_link_libraries(skai-rtsp-source PUBLIC skai-gstreamer skai-config skai-core
     skai-application PkgConfig::GST_VIDEO_APP)
 
+add_library(skai-inference-module src/inference/yolo_inference_module.cpp
+    src/inference/inference_backend.cpp)
+target_include_directories(skai-inference-module PUBLIC include)
+target_link_libraries(skai-inference-module PUBLIC skai-annotator skai-application
+    skai-core skai-events skai-alerts)
+if(TARGET skai-yolo-detector)
+    target_link_libraries(skai-inference-module PRIVATE skai-yolo-detector)
+    target_compile_definitions(skai-inference-module PRIVATE SKAI_HAS_YOLO_PIPELINE=1)
+endif()
+
 add_executable(skai-edge src/main.cpp)
 target_link_libraries(skai-edge PRIVATE skai-cli skai-application skai-gstreamer
     skai-rtsp-source skai-recording skai-web skai-storage
     skai-webrtc-runtime)
-if(TARGET skai-inference-module)
+if(TARGET skai-yolo-detector)
     target_link_libraries(skai-edge PRIVATE skai-inference-module)
     target_compile_definitions(skai-edge PRIVATE SKAI_HAS_YOLO_PIPELINE=1)
 endif()

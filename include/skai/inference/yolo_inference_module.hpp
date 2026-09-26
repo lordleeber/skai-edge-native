@@ -5,7 +5,7 @@
 #include "skai/api_state.hpp"
 #include "skai/core/bounded_queue.hpp"
 #include "skai/events.hpp"
-#include "skai/inference/yolo_detector.hpp"
+#include "skai/inference/inference_backend.hpp"
 #include "skai/status.hpp"
 #include "skai/video/annotator.hpp"
 
@@ -27,12 +27,14 @@ public:
                         std::shared_ptr<RuntimeStatus> status = {},
                         std::shared_ptr<ApiState> api = {},
                         std::shared_ptr<EventChannel> events = {},
-                        std::shared_ptr<AlertManager> alerts = {});
+                        std::shared_ptr<AlertManager> alerts = {},
+                        InferenceBackendFactory backend_factory = make_inference_backend);
     YoloInferenceModule(BoundedQueue<Frame>& input, Logger& logger,
                         std::shared_ptr<RuntimeStatus> status = {},
                         std::shared_ptr<ApiState> api = {},
                         std::shared_ptr<EventChannel> events = {},
-                        std::shared_ptr<AlertManager> alerts = {});
+                        std::shared_ptr<AlertManager> alerts = {},
+                        InferenceBackendFactory backend_factory = make_inference_backend);
 
     // Receives each committed result on the inference thread; must not block.
     using DetectionSink =
@@ -63,8 +65,8 @@ private:
     DetectionSink detection_sink_;
     BoundedQueue<AlertWork> alert_queue_{2};
     AnnotationOptions annotation_;
-    std::unique_ptr<TensorRtBootstrap> bootstrap_;
-    std::unique_ptr<YoloDetector> detector_;
+    InferenceBackendFactory backend_factory_;
+    std::unique_ptr<InferenceBackend> detector_;
     std::atomic<bool> stopping_{false};
     std::thread worker_;
     std::thread alert_worker_;

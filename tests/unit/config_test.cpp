@@ -312,3 +312,14 @@ TEST(Config, ReportsMissingFile) {
     EXPECT_FALSE(result.ok);
     EXPECT_NE(result.error.find("/no/such/skai-config.yaml"), std::string::npos);
 }
+
+TEST(Config, AcceptsEphemeralHttpPortAndRejectsNegativePort) {
+    const auto ephemeral = skai::parse_config(
+        "video: {rtsp_url: 'rtsp://camera/stream'}\nweb: {port: 0}\n");
+    ASSERT_TRUE(ephemeral.ok) << ephemeral.error;
+    EXPECT_EQ(ephemeral.config.web.port, 0);
+    const auto negative = skai::parse_config(
+        "video: {rtsp_url: 'rtsp://camera/stream'}\nweb: {port: -1}\n");
+    EXPECT_FALSE(negative.ok);
+    EXPECT_NE(negative.error.find("web.port"), std::string::npos);
+}

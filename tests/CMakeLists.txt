@@ -128,3 +128,23 @@ target_link_libraries(skai-rtsp-jetson-tests PRIVATE skai-rtsp-source
 # A single compound label survives GoogleTest's discovery script and matches both
 # `ctest -L rtsp` and `ctest -LE jetson` on CMake 3.22.
 gtest_discover_tests(skai-rtsp-jetson-tests DISCOVERY_TIMEOUT 60 PROPERTIES LABELS rtsp-jetson TIMEOUT 30)
+
+# Step 34 composes production modules around a deterministic RTSP fixture.
+add_executable(skai-pipeline-tests integration/pipeline_test.cpp)
+target_include_directories(skai-pipeline-tests PRIVATE ${OpenCV_INCLUDE_DIRS})
+target_link_libraries(skai-pipeline-tests PRIVATE skai-inference-module skai-web skai-alerts skai-recording
+    skai-rtsp-source skai-rtsp-test-fixture ${OpenCV_LIBS}
+    LibDataChannel::LibDataChannel GTest::gtest_main)
+gtest_discover_tests(skai-pipeline-tests DISCOVERY_TIMEOUT 60
+    PROPERTIES LABELS "rtsp-webrtc" TIMEOUT 60)
+
+if(TARGET skai-yolo-detector)
+    add_executable(skai-pipeline-jetson-tests integration/pipeline_test.cpp)
+    target_compile_definitions(skai-pipeline-jetson-tests PRIVATE SKAI_PIPELINE_TENSORRT=1)
+    target_include_directories(skai-pipeline-jetson-tests PRIVATE ${OpenCV_INCLUDE_DIRS})
+    target_link_libraries(skai-pipeline-jetson-tests PRIVATE skai-web skai-alerts
+        skai-recording skai-rtsp-source skai-rtsp-test-fixture skai-inference-module
+        ${OpenCV_LIBS} LibDataChannel::LibDataChannel GTest::gtest_main)
+    gtest_discover_tests(skai-pipeline-jetson-tests DISCOVERY_TIMEOUT 60
+        PROPERTIES LABELS "rtsp-jetson" TIMEOUT 120)
+endif()
