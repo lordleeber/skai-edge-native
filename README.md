@@ -85,7 +85,8 @@ CI secret manager and expose it only for this command. An already authenticated
 Git environment may omit `SKAI_GITHUB_TOKEN`. Anonymous recursive submodule
 checkout is not a supported build path while `skai-ice` remains private.
 
-Step 23 pins `skai-ice` at `1d61d0e` and libdatachannel v0.22.6 at `0d6adc0`.
+Current gitlinks pin `skai-ice` at `ad6574d97fa62f0aa71cb1138e3e2974abf19dcb`
+and libdatachannel v0.22.6 at `0d6adc021953d7263fd4503482ea7bde33553724`.
 The latter is the exact revision against which `skai-ice`'s vendored
 `juice/juice.h` ABI was validated. Update these two gitlinks together and run
 the `webrtc` CTest label whenever the libjuice ABI changes. The parent build
@@ -325,3 +326,8 @@ confirmation. Dependencies, commands and exit codes are in
 Step 36 adds `systemd/skai-edge.service` with failure restart, graceful SIGTERM
 shutdown and journald output. See [systemd deployment and operation](docs/step36-systemd-service.md)
 for staging paths, configuration, credentials and start/stop/restart commands.
+
+Step 37 adds `cmake --install`, including deployment configuration, an empty
+production-schema database and persistent state directories. See
+[native installation](docs/step37-install.md) for production builds, recursive
+dependency checkout, staging, account setup and upgrades.

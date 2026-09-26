@@ -181,3 +181,32 @@ target_compile_definitions(skai-systemd-service-tests PRIVATE
 add_dependencies(skai-systemd-service-tests skai-edge)
 gtest_discover_tests(skai-systemd-service-tests DISCOVERY_TIMEOUT 60
     PROPERTIES LABELS systemd TIMEOUT 15)
+
+add_executable(skai-install-tests integration/install_test.cpp)
+target_include_directories(skai-install-tests PRIVATE support)
+target_link_libraries(skai-install-tests PRIVATE skai-config SQLite::SQLite3 GTest::gtest_main)
+target_compile_definitions(skai-install-tests PRIVATE
+    SKAI_CMAKE="${CMAKE_COMMAND}" SKAI_BUILD_DIR="${PROJECT_BINARY_DIR}"
+    SKAI_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+add_dependencies(skai-install-tests skai-edge)
+gtest_discover_tests(skai-install-tests DISCOVERY_TIMEOUT 60
+    PROPERTIES LABELS install RUN_SERIAL TRUE TIMEOUT 60)
+
+add_executable(skai-installed-runtime-tests integration/installed_runtime_test.cpp)
+target_include_directories(skai-installed-runtime-tests PRIVATE support)
+target_link_libraries(skai-installed-runtime-tests PRIVATE skai-rtsp-test-fixture GTest::gtest_main)
+target_compile_definitions(skai-installed-runtime-tests PRIVATE
+    SKAI_CMAKE="${CMAKE_COMMAND}" SKAI_BUILD_DIR="${PROJECT_BINARY_DIR}"
+    SKAI_PYTHON="${Python3_EXECUTABLE}"
+    SKAI_INSTALL_RUNTIME_PROBE="${PROJECT_SOURCE_DIR}/tests/fixtures/installed_runtime.py"
+    SKAI_INSTALL_ENGINE="/var/lib/skai-edge/models/yolo11s_fp16.engine")
+add_dependencies(skai-installed-runtime-tests skai-edge)
+if(TARGET skai-yolo-detector)
+    target_compile_definitions(skai-installed-runtime-tests PRIVATE SKAI_INSTALL_GPU=1)
+    set(SKAI_INSTALL_RUNTIME_LABEL install-jetson)
+else()
+    target_compile_definitions(skai-installed-runtime-tests PRIVATE SKAI_INSTALL_GPU=0)
+    set(SKAI_INSTALL_RUNTIME_LABEL install)
+endif()
+gtest_discover_tests(skai-installed-runtime-tests DISCOVERY_TIMEOUT 60
+    PROPERTIES LABELS ${SKAI_INSTALL_RUNTIME_LABEL} RUN_SERIAL TRUE TIMEOUT 60)

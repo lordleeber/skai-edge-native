@@ -1,0 +1,21 @@
+# DESTDIR stages target paths without changing configuration or the live host.
+foreach(directory /etc/skai-edge /var/lib/skai-edge /var/lib/skai-edge/recordings
+        /var/lib/skai-edge/alerts /var/lib/skai-edge/models)
+    if(NOT EXISTS "$ENV{DESTDIR}${directory}")
+        file(MAKE_DIRECTORY "$ENV{DESTDIR}${directory}")
+        file(CHMOD "$ENV{DESTDIR}${directory}" PERMISSIONS
+            OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE)
+    endif()
+endforeach()
+if(NOT EXISTS "$ENV{DESTDIR}/etc/skai-edge/config.yaml" AND
+        NOT IS_SYMLINK "$ENV{DESTDIR}/etc/skai-edge/config.yaml")
+    file(INSTALL DESTINATION /etc/skai-edge TYPE FILE
+        FILES "@PROJECT_BINARY_DIR@/install/config.yaml"
+        PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ)
+endif()
+if(NOT EXISTS "$ENV{DESTDIR}/var/lib/skai-edge/skai-edge.db" AND
+        NOT IS_SYMLINK "$ENV{DESTDIR}/var/lib/skai-edge/skai-edge.db")
+    file(INSTALL DESTINATION /var/lib/skai-edge TYPE FILE
+        FILES "@PROJECT_BINARY_DIR@/install/skai-edge.db"
+        PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ)
+endif()
