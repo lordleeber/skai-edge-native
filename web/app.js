@@ -21,8 +21,25 @@
   let detectionFrames = [];
   let overlayEnabled = true;
   const alertIds = new Set();
+  const annotationTiming = {count: 0, total_ms: 0};
+  // Read-only diagnostics for the developer profiling tool, outside the UI flow.
+  window.skaiProfileSnapshot = async () => ({
+    state: activePeer?.connectionState || "disabled",
+    peer: activeWhepLocation.split("/").pop(),
+    stats: activePeer ? [...(await activePeer.getStats()).values()] : [],
+    annotation: {...annotationTiming}
+  });
 
   function drawDetectionOverlay() {
+    const started = window.performance.now();
+    try { paintDetectionOverlay(); }
+    finally {
+      annotationTiming.count++;
+      annotationTiming.total_ms += window.performance.now() - started;
+    }
+  }
+
+  function paintDetectionOverlay() {
     const canvas = byId("video-overlay");
     const video = byId("live-video");
     const width = canvas.clientWidth || video.clientWidth || 0;

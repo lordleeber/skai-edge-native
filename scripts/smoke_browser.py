@@ -46,6 +46,7 @@ class BrowserProbe:
         self.command('POST', self.session + '/timeouts', {
             'script': int(self.timeout * 1000), 'pageLoad': int(self.timeout * 1000)})
         self.command('POST', self.session + '/url', {'url': base_url})
+        return value
 
     def media(self):
         return self.command('POST', self.session + '/execute/sync', {'args': [], 'script': """
