@@ -60,6 +60,14 @@ bool valid_port(const std::string& text) {
            port >= 1 && port <= 65535;
 }
 
+bool loopback_http_endpoint(const std::string& url) {
+    const std::string prefix = "http://127.0.0.1:";
+    if (url.rfind(prefix, 0) != 0) return false;
+    const auto path = url.find('/', prefix.size());
+    return path != std::string::npos &&
+           valid_port(url.substr(prefix.size(), path - prefix.size()));
+}
+
 bool valid_hostname(const std::string& host) {
     if (host.empty() || host.size() > 253) return false;
     if (host.find('.') != std::string::npos &&
@@ -204,12 +212,13 @@ void validate(const Config& config) {
         check_range(!interface.empty() && interface.find_first_of(" /\t\r\n") == std::string::npos,
                     "webrtc.host_interfaces", "must contain interface names without spaces or slashes");
     }
-    check_range(!config.whip.enabled || config.whip.url.rfind("https://", 0) == 0,
-                "whip.url", "must use https when whip.enabled is true");
+    check_range(!config.whip.enabled || config.whip.url.rfind("https://", 0) == 0 ||
+                    loopback_http_endpoint(config.whip.url),
+                "whip.url", "must use https or http://127.0.0.1:<port>/<path> when enabled");
     check_range(!config.whip.enabled ||
                     (config.whip.url.size() > 8 &&
                      config.whip.url.find_first_of(" \t\r\n#") == std::string::npos),
-                "whip.url", "must be a valid HTTPS endpoint");
+                "whip.url", "must be a valid endpoint without whitespace or fragments");
 }
 
 Config parse(const YAML::Node& root) {

@@ -80,6 +80,27 @@ TEST(Config, RejectsInsecureWhipUrl) {
     EXPECT_NE(result.error.find("whip.url"), std::string::npos);
 }
 
+TEST(Config, AllowsOnlyLiteralLoopbackHttpWhipEndpoints) {
+    const auto parse_endpoint = [](const std::string& url) {
+        return skai::parse_config(
+            "video: {rtsp_url: 'rtsp://camera/stream'}\n"
+            "whip: {enabled: true, url: '" + url + "'}\n");
+    };
+    const auto result = parse_endpoint("http://127.0.0.1:8990/whip");
+    EXPECT_TRUE(result.ok) << result.error;
+    for (const auto* url : {"http://example.com:8990/whip",
+                           "http://127.0.0.1.example.com:8990/whip",
+                           "http://127.0.0.1:8990@example.com/whip",
+                           "http://127.0.0.2:8990/whip",
+                           "http://127.0.0.1:0/whip",
+                           "http://127.0.0.1:65536/whip",
+                           "http://127.0.0.1:abc/whip"}) {
+        const auto invalid = parse_endpoint(url);
+        EXPECT_FALSE(invalid.ok) << url;
+        EXPECT_NE(invalid.error.find("whip.url"), std::string::npos);
+    }
+}
+
 TEST(Config, UsesStableProductionStorageDefaults) {
     const auto result = skai::parse_config(
         "video: {rtsp_url: 'rtsp://camera/stream'}\n");

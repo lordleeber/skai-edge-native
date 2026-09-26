@@ -1,5 +1,7 @@
 #include "rtsp_test_server.hpp"
 #include "skai/runtime.hpp"
+#include "loopback_whip_server.hpp"
+#include "skai/webrtc/detection_sei.hpp"
 #include "skai/alerts/alert_manager.hpp"
 #include "skai/gps/gps_module.hpp"
 #include "skai/storage/database.hpp"
@@ -93,6 +95,9 @@ protected:
         ASSERT_TRUE(cv::imwrite((root_ / "frame.png").string(), image));
         ASSERT_TRUE(rtsp_.set_image((root_ / "frame.png").string()));
         ASSERT_TRUE(rtsp_.start(error)) << error;
+        if (const auto* token = std::getenv("WHIP_TOKEN")) previous_token_ = token;
+        ASSERT_EQ(setenv("WHIP_TOKEN", "loopback-test", 1), 0);
+        whip_ = std::make_unique<skai_test::LoopbackWhipServer>();
         const auto path = root_ / "config.yaml";
         std::ofstream config(path);
         config << "video: {rtsp_url: '" << rtsp_.url()
@@ -105,7 +110,7 @@ protected:
                << (root_ / "recordings").string()
                << "', segment_seconds: 1, min_free_space_mb: 1}\n"
                << "webrtc: {enabled: true, host_interfaces: [lo]}\n"
-               << "whip: {enabled: false}\n"
+               << "whip: {enabled: true, url: '" << whip_->url() << "'}\n"
 #ifdef SKAI_PIPELINE_TENSORRT
                << "alerts: [{class: umbrella, confidence: 0.1, consecutive_frames: 2, cooldown_seconds: 60}]\n";
 #else
@@ -138,6 +143,9 @@ protected:
         if (app_) { app_->stop(); app_->wait(); }
         rtsp_.stop();
         app_.reset();
+        whip_.reset();
+        if (previous_token_) setenv("WHIP_TOKEN", previous_token_->c_str(), 1);
+        else unsetenv("WHIP_TOKEN");
         std::error_code ignored;
         if (!root_.empty()) std::filesystem::remove_all(root_, ignored);
     }
@@ -188,6 +196,8 @@ protected:
     std::shared_ptr<skai::RecordingController> recording_;
     std::shared_ptr<skai::WebRtcManager> manager_;
     std::shared_ptr<skai::AlertRepository> repository_;
+    std::optional<std::string> previous_token_;
+    std::unique_ptr<skai_test::LoopbackWhipServer> whip_;
     std::unique_ptr<skai::Runtime> app_;
 };
 
@@ -294,6 +304,44 @@ TEST_F(PipelineSuite, PersistsRtspDetectionsAlertsSnapshotsAndPlayableRecording)
 }
 
 #ifndef SKAI_PIPELINE_TENSORRT
+TEST_F(PipelineSuite, SharedRuntimePublishesWhipDetectionSeiMetricsAndHealth) {
+    // Neither inference results nor encoded access units are injected here.
+    // The shared runtime must wire the RTSP tee and production detection sink.
+    ASSERT_TRUE(wait_until([&] {
+        for (const auto& frame : whip_->frames()) {
+            for (const auto& nal : skai_test::split_annex_b(frame.bytes)) {
+                const auto sei = skai_test::parse_user_data_sei(nal);
+                if (!sei || sei->uuid != skai::kDetectionSeiUuid) continue;
+                for (const auto& result : skai_test::parse_results(sei->payload)) {
+                    for (const auto& box : result.boxes) {
+                        if (box.class_name == "person" && box.score == 1.0) return true;
+                    }
+                }
+            }
+        }
+        return false;
+    })) << logs_.str();
+    const auto metrics = request("/api/v1/metrics");
+    EXPECT_EQ(metrics.result(), http::status::ok);
+    EXPECT_NE(metrics.body().find("\"frames_received\":"), std::string::npos);
+    EXPECT_NE(metrics.body().find("\"peer_state\":\"connected\""), std::string::npos);
+    EXPECT_NE(metrics.body().find("\"ice_state\":\"completed\""), std::string::npos);
+    ASSERT_TRUE(wait_until([&] {
+        const auto health = request("/health");
+        return health.result() == http::status::ok &&
+               health.body().find("\"state\":\"RUNNING\"") != std::string::npos;
+    }));
+    const auto health = request("/health");
+    for (const auto component : skai::all_health_components) {
+        EXPECT_NE(health.body().find(skai::health_component_name(component)), std::string::npos);
+    }
+    app_->stop(); app_->wait();
+    EXPECT_EQ(whip_->posts(), 1);
+    EXPECT_EQ(whip_->deletes(), 1);
+}
+#endif
+
+#ifndef SKAI_PIPELINE_TENSORRT
 TEST_F(PipelineSuite, ProductionInferenceInvalidatesFailuresAndPublishesRecovery) {
     ASSERT_TRUE(wait_until([&] { return api_->latest_detections().available; }));
     *fail_ = true;
@@ -306,14 +354,18 @@ TEST_F(PipelineSuite, ProductionInferenceInvalidatesFailuresAndPublishesRecovery
                    event.find("\"available\":false") != std::string::npos;
         });
     }));
+    const auto detection_events = [&] {
+        std::lock_guard<std::mutex> lock(event_mutex_);
+        return std::count_if(published_.begin(), published_.end(), [](const auto& event) {
+            return event.find("\"type\":\"detection\"") != std::string::npos &&
+                   event.find("\"class_name\":\"person\"") != std::string::npos;
+        });
+    };
+    const auto before_recovery = detection_events();
     *fail_ = false;
     ASSERT_TRUE(wait_until([&] { return api_->latest_detections().available; }));
     ASSERT_TRUE(wait_until([&] { return !alerts().empty(); }));
-    std::lock_guard<std::mutex> lock(event_mutex_);
-    EXPECT_TRUE(std::any_of(published_.begin(), published_.end(), [](const auto& event) {
-        return event.find("\"type\":\"detection\"") != std::string::npos &&
-               event.find("\"class_name\":\"person\"") != std::string::npos;
-    }));
+    EXPECT_TRUE(wait_until([&] { return detection_events() > before_recovery; }));
 }
 #endif
 
