@@ -9,6 +9,10 @@ namespace skai {
 namespace test {
 namespace {
 
+// RTSP's task pool is process-wide; drain it only after the last fixture stops.
+std::recursive_mutex fixture_lifecycle_mutex;
+std::size_t active_servers = 0;
+
 bool plugin_available(const char* name) {
     GstElementFactory* factory = gst_element_factory_find(name);
     if (!factory) return false;
@@ -55,6 +59,7 @@ std::string launch_for(RtspTestServer::Codec codec, int fps,
 RtspTestServer::~RtspTestServer() { stop(); }
 
 bool RtspTestServer::start(std::string& error) {
+    std::lock_guard<std::recursive_mutex> lifecycle_lock(fixture_lifecycle_mutex);
     if (server_) {
         error = "RTSP test server is already running";
         return false;
@@ -82,6 +87,7 @@ bool RtspTestServer::start(std::string& error) {
         error = "could not create RTSP test server";
         return false;
     }
+    ++active_servers;
     gst_rtsp_server_set_address(server_, "127.0.0.1");
     const std::string service = port_ > 0 ? std::to_string(port_) : "0";
     gst_rtsp_server_set_service(server_, service.c_str());
@@ -164,6 +170,8 @@ bool RtspTestServer::start(std::string& error) {
 }
 
 void RtspTestServer::stop() noexcept {
+    std::lock_guard<std::recursive_mutex> lifecycle_lock(fixture_lifecycle_mutex);
+    const bool was_active = server_ != nullptr;
     running_ = false;
     if (source_) g_source_destroy(source_);
     if (context_) g_main_context_wakeup(context_);
@@ -191,6 +199,7 @@ void RtspTestServer::stop() noexcept {
     source_ = nullptr;
     context_ = nullptr;
     server_ = nullptr;
+    if (was_active && --active_servers == 0) gst_rtsp_thread_pool_cleanup();
 }
 
 bool RtspTestServer::set_stalled(bool stalled) {

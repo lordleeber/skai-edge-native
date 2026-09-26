@@ -151,3 +151,30 @@ TEST(RtspFixture, PublishesH265WhenPluginsAreAvailable) {
     skai::Logger logger(output);
     EXPECT_TRUE(receives_sample(server.url(), "rtph265depay", logger)) << output.str();
 }
+
+TEST(RtspFixture, StoppingOneServerKeepsAnotherActiveClientPlaying) {
+    std::string error;
+    ASSERT_TRUE(skai::gst::initialize_once(error)) << error;
+    skai::test::RtspTestServer first;
+    skai::test::RtspTestServer second;
+    ASSERT_TRUE(first.start(error)) << error;
+    ASSERT_TRUE(second.start(error)) << error;
+    std::ostringstream output;
+    skai::Logger logger(output);
+    auto client = skai::gst::Pipeline::from_launch(
+        "rtspsrc location=" + second.url() +
+        " protocols=tcp latency=50 ! rtph264depay ! "
+        "appsink name=sink sync=false max-buffers=1 drop=true", logger, error);
+    ASSERT_NE(client, nullptr) << error;
+    ASSERT_TRUE(client->start(std::chrono::seconds(6))) << client->last_error();
+    skai::gst::ElementPtr sink(gst_bin_get_by_name(GST_BIN(client->element()), "sink"));
+    ASSERT_NE(sink, nullptr);
+    auto* sample = gst_app_sink_try_pull_sample(GST_APP_SINK(sink.get()), 3 * GST_SECOND);
+    ASSERT_NE(sample, nullptr);
+    gst_sample_unref(sample);
+    first.stop(); // Must not drain the global pool while second's client is alive.
+    sample = gst_app_sink_try_pull_sample(GST_APP_SINK(sink.get()), 3 * GST_SECOND);
+    ASSERT_NE(sample, nullptr);
+    gst_sample_unref(sample);
+    client->stop();
+}

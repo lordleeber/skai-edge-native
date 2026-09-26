@@ -214,14 +214,13 @@ if(TARGET skai-yolo-detector)
     target_compile_definitions(skai-inference-module PRIVATE SKAI_HAS_YOLO_PIPELINE=1)
 endif()
 
+add_library(skai-runtime src/runtime.cpp)
+target_include_directories(skai-runtime PUBLIC include)
+target_link_libraries(skai-runtime PUBLIC skai-inference-module skai-web
+    skai-rtsp-source skai-recording skai-webrtc-runtime)
+
 add_executable(skai-edge src/main.cpp)
-target_link_libraries(skai-edge PRIVATE skai-cli skai-application skai-gstreamer
-    skai-rtsp-source skai-recording skai-web skai-storage
-    skai-webrtc-runtime)
-if(TARGET skai-yolo-detector)
-    target_link_libraries(skai-edge PRIVATE skai-inference-module)
-    target_compile_definitions(skai-edge PRIVATE SKAI_HAS_YOLO_PIPELINE=1)
-endif()
+target_link_libraries(skai-edge PRIVATE skai-cli skai-runtime)
 
 if(BUILD_TESTING)
     add_subdirectory(tests)

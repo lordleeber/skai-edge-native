@@ -1,5 +1,5 @@
 #include "rtsp_test_server.hpp"
-#include "skai/application.hpp"
+#include "skai/runtime.hpp"
 #include "skai/alerts/alert_manager.hpp"
 #include "skai/gps/gps_module.hpp"
 #include "skai/storage/database.hpp"
@@ -113,38 +113,22 @@ protected:
 #endif
         config.close();
         ASSERT_TRUE(config);
-        skai::Application::Modules modules;
-        auto database = std::make_unique<skai::Database>();
-        repository_ = std::make_shared<skai::AlertRepository>(*database);
-        modules.storage = std::move(database);
-        modules.webrtc = std::make_unique<skai::IceRuntimeModule>(logger_);
-        modules.gps = std::make_unique<skai::GpsModule>(gps_);
-        auto alerts = std::make_shared<skai::AlertManager>(gps_, events_, repository_, &logger_);
 #ifdef SKAI_PIPELINE_TENSORRT
-        modules.detector = std::make_unique<skai::YoloInferenceModule>(
-            frames_, logger_, status_, api_, events_, alerts);
+        app_ = skai::create_runtime(path.string(), logger_, events_);
 #else
-        modules.detector = std::make_unique<skai::YoloInferenceModule>(
-            frames_, logger_, status_, api_, events_, alerts,
+        app_ = skai::create_runtime(path.string(), logger_, events_,
             [fail = fail_](skai::Logger&, const skai::DetectorConfig&) {
                 return std::make_unique<FixtureBackend>(fail);
             });
 #endif
-        modules.recording = std::make_unique<skai::RecordingModule>(units_, logger_, recording_, events_);
-        modules.video = std::make_unique<skai::RtspVideoModule>(frames_, units_, logger_, status_,
-            [manager = manager_](const auto& unit) { manager->publish_access_unit(unit); },
-            [manager = manager_, recording = recording_](bool available, const auto& reason) {
-                manager->set_media_available(available, reason);
-                recording->set_media_available(available, reason);
-            });
-        auto web = std::make_unique<skai::web::HttpServer>(logger_, status_, api_, events_,
-                                                        repository_, recording_, manager_);
-        web_ = web.get();
-        modules.web = std::move(web);
-        app_ = std::make_unique<skai::Application>(path.string(), logger_, std::move(modules));
+        status_ = app_->status();
+        api_ = app_->api_state();
+        recording_ = app_->recording_control();
+        manager_ = app_->webrtc_manager();
+        repository_ = app_->alert_repository();
         ASSERT_TRUE(app_->initialize()) << app_->last_error() << logs_.str();
+        EXPECT_GT(app_->http_port(), 0);
         ASSERT_TRUE(app_->start()) << app_->last_error() << logs_.str();
-        status_->set_running(true);
         events_->subscribe([this](const std::string& event) {
             std::lock_guard<std::mutex> lock(event_mutex_);
             published_.push_back(event);
@@ -161,7 +145,7 @@ protected:
             http::verb method = http::verb::get, const std::string& body = {}) {
         asio::io_context context;
         tcp::socket socket(context);
-        socket.connect({asio::ip::make_address("127.0.0.1"), web_->port()});
+        socket.connect({asio::ip::make_address("127.0.0.1"), app_->http_port()});
         // Bound synchronous reads/writes even if a broken server stops responding.
         timeval timeout{5, 0};
         setsockopt(socket.native_handle(), SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
@@ -198,17 +182,13 @@ protected:
     skai::test::RtspTestServer rtsp_;
     std::ostringstream logs_;
     skai::Logger logger_{logs_};
-    skai::BoundedQueue<skai::Frame> frames_{2};
-    skai::BoundedQueue<skai::EncodedAccessUnit> units_{120};
-    std::shared_ptr<skai::RuntimeStatus> status_ = std::make_shared<skai::RuntimeStatus>();
-    std::shared_ptr<skai::GpsState> gps_ = std::make_shared<skai::GpsState>();
-    std::shared_ptr<skai::ApiState> api_ = std::make_shared<skai::ApiState>(status_, gps_);
+    std::shared_ptr<skai::RuntimeStatus> status_;
+    std::shared_ptr<skai::ApiState> api_;
     std::shared_ptr<skai::EventChannel> events_ = std::make_shared<skai::EventChannel>();
-    std::shared_ptr<skai::RecordingController> recording_ = std::make_shared<skai::RecordingController>();
-    std::shared_ptr<skai::WebRtcManager> manager_ = std::make_shared<skai::WebRtcManager>(logger_);
+    std::shared_ptr<skai::RecordingController> recording_;
+    std::shared_ptr<skai::WebRtcManager> manager_;
     std::shared_ptr<skai::AlertRepository> repository_;
-    skai::web::HttpServer* web_ = nullptr;
-    std::unique_ptr<skai::Application> app_;
+    std::unique_ptr<skai::Runtime> app_;
 };
 
 TEST_F(PipelineSuite, PersistsRtspDetectionsAlertsSnapshotsAndPlayableRecording) {
@@ -242,6 +222,15 @@ TEST_F(PipelineSuite, PersistsRtspDetectionsAlertsSnapshotsAndPlayableRecording)
     const auto status = request("/api/v1/status");
     EXPECT_EQ(status.result(), http::status::ok);
     EXPECT_NE(status.body().find("\"status\":\"running\""), std::string::npos);
+    const auto metrics = request("/api/v1/metrics");
+    EXPECT_EQ(metrics.result(), http::status::ok);
+    EXPECT_NE(metrics.body().find("\"frames_received\":"), std::string::npos);
+    EXPECT_NE(metrics.body().find("\"inference_queue\":"), std::string::npos);
+    ASSERT_TRUE(wait_until([&] { return request("/health").result() == http::status::ok; }));
+    const auto health = request("/health");
+    for (const auto component : skai::all_health_components) {
+        EXPECT_NE(health.body().find(skai::health_component_name(component)), std::string::npos);
+    }
     const auto detections = request("/api/v1/detections/latest");
     EXPECT_EQ(detections.result(), http::status::ok);
     EXPECT_NE(detections.body().find("\"available\":true"), std::string::npos);
