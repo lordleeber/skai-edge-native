@@ -1,0 +1,30 @@
+[Unit]
+Description=SKAI Edge RTSP inference and streaming service
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=60s
+StartLimitBurst=5
+
+[Service]
+Type=exec
+User=skai-edge
+Group=skai-edge
+SupplementaryGroups=video render
+WorkingDirectory=/var/lib/skai-edge
+StateDirectory=skai-edge
+StateDirectoryMode=0750
+EnvironmentFile=-/etc/skai-edge/skai-edge.env
+ExecStart=/usr/local/bin/skai-edge --config /etc/skai-edge/config.yaml
+Restart=on-failure
+RestartSec=5s
+KillSignal=SIGTERM
+KillMode=control-group
+TimeoutStopSec=30s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=skai-edge
+UMask=0027
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

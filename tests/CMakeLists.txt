@@ -167,3 +167,17 @@ target_compile_definitions(skai-smoke-script-tests PRIVATE
     SKAI_SMOKE_HOST_POLICY="${PROJECT_SOURCE_DIR}/tests/fixtures/smoke_host_policy.py")
 gtest_discover_tests(skai-smoke-script-tests DISCOVERY_TIMEOUT 60 PROPERTIES
     LABELS smoke TIMEOUT 20 ENVIRONMENT "SKAI_SMOKE_PYTHON=${Python3_EXECUTABLE}")
+
+find_program(SKAI_SYSTEMD_ANALYZE NAMES systemd-analyze)
+if(NOT SKAI_SYSTEMD_ANALYZE)
+    set(SKAI_SYSTEMD_ANALYZE "")
+endif()
+add_executable(skai-systemd-service-tests unit/systemd_service_test.cpp)
+target_link_libraries(skai-systemd-service-tests PRIVATE GTest::gtest_main)
+target_compile_definitions(skai-systemd-service-tests PRIVATE
+    SKAI_SYSTEMD_UNIT="${PROJECT_SOURCE_DIR}/systemd/skai-edge.service"
+    SKAI_SYSTEMD_ANALYZE="${SKAI_SYSTEMD_ANALYZE}"
+    SKAI_EDGE_EXECUTABLE="$<TARGET_FILE:skai-edge>")
+add_dependencies(skai-systemd-service-tests skai-edge)
+gtest_discover_tests(skai-systemd-service-tests DISCOVERY_TIMEOUT 60
+    PROPERTIES LABELS systemd TIMEOUT 15)

@@ -321,3 +321,7 @@ playable recordings and clean shutdown. It keeps artifacts in an isolated
 directory and distinguishes local automation from companion LAN browser
 confirmation. Dependencies, commands and exit codes are in
 [Jetson smoke tests](docs/step35-jetson-smoke-tests.md).
+
+Step 36 adds `systemd/skai-edge.service` with failure restart, graceful SIGTERM
+shutdown and journald output. See [systemd deployment and operation](docs/step36-systemd-service.md)
+for staging paths, configuration, credentials and start/stop/restart commands.
