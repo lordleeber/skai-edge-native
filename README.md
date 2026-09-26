@@ -307,3 +307,9 @@ an empty optional means the queue is drained after shutdown or a timed wait
 expired. After all producers and consumers have joined, `reset()` clears stale
 values and reopens the queue for another application lifecycle. `stats()`
 reports pushed, popped, dropped, and high-water counts for the current cycle.
+
+Step 34 composes the RTSP, detection, alert persistence, recording and HTTP modules
+in end-to-end tests, plus an RTSP-to-WHEP media receiver. Run
+`ctest --test-dir build -R '^Pipeline\.' --output-on-failure` for the portable
+cases. The TensorRT variant has the `jetson` label. Test boundaries and the live
+cloud uplink check are documented in [Step 34 integration tests](docs/step34-integration-tests.md).

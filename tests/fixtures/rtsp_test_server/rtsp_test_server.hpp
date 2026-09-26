@@ -37,6 +37,12 @@ public:
         framerate_ = fps;
         return true;
     }
+    // Still publishes through RTSP; file input exists only inside the fixture.
+    bool set_image(std::string path) {
+        if (server_ || path.empty()) return false;
+        image_path_ = std::move(path);
+        return true;
+    }
     // The first bound endpoint remains available across stop/start cycles.
     int port() const { return port_; }
     std::string url() const;
@@ -46,6 +52,7 @@ private:
 
     Codec codec_;
     int framerate_ = 10;
+    std::string image_path_;
     std::string username_;
     std::string password_;
     GstRTSPServer* server_ = nullptr;
