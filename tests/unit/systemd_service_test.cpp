@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <map>
+#include <sstream>
 #include <string>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -13,6 +14,63 @@ namespace {
 std::string read(const std::filesystem::path& path) {
     std::ifstream input(path);
     return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+}
+
+struct Verification {
+    int exit_code;
+    std::string output;
+    std::string unit_diagnostics;
+    bool passed() const { return exit_code == 0 && unit_diagnostics.empty(); }
+};
+
+Verification verify_unit(std::string text) {
+    char pattern[] = "/tmp/skai-systemd-XXXXXX";
+    const auto* directory = mkdtemp(pattern);
+    if (!directory) return {-1, "mkdtemp failed"};
+    const std::filesystem::path root(directory);
+    struct Cleanup {
+        std::filesystem::path path;
+        ~Cleanup() {
+            std::error_code error;
+            std::filesystem::remove_all(path, error);
+        }
+    } cleanup{root};
+    const auto unit = root / "skai-edge.service";
+    const auto log = root / "verify.log";
+    // Step 37 installs the binary; verify against the actual build artifact now.
+    const std::string installed = "/usr/local/bin/skai-edge";
+    const auto offset = text.find(installed);
+    if (offset == std::string::npos) return {-1, "missing executable path"};
+    text.replace(offset, installed.size(), std::string("\"") + SKAI_EDGE_EXECUTABLE + "\"");
+    std::ofstream(unit) << text;
+    const auto pid = fork();
+    if (pid < 0) return {-1, "fork failed"};
+    if (pid == 0) {
+        FILE* output = freopen(log.c_str(), "w", stdout);
+        if (!output || dup2(fileno(output), STDERR_FILENO) < 0) _exit(126);
+        // Inherited logging settings must not hide verifier diagnostics.
+        if (setenv("SYSTEMD_LOG_LEVEL", "warning", 1) != 0 ||
+                setenv("SYSTEMD_LOG_TARGET", "console", 1) != 0 ||
+                setenv("SYSTEMD_COLORS", "0", 1) != 0 ||
+                setenv("LC_ALL", "C", 1) != 0) _exit(126);
+        execl(SKAI_SYSTEMD_ANALYZE, SKAI_SYSTEMD_ANALYZE, "--man=no", "--generators=no",
+              "verify", unit.c_str(), nullptr);
+        _exit(127);
+    }
+    int status = 0;
+    const auto waited = waitpid(pid, &status, 0);
+    const auto output = read(log);
+    std::istringstream lines(output);
+    std::string line, diagnostics;
+    while (std::getline(lines, line)) {
+        // Ignore warnings from unrelated installed units. Include our file,
+        // its temporary drop-ins and messages attributed to the unit by name.
+        if (line.find(root.string() + '/') != std::string::npos ||
+                line.rfind(unit.filename().string() + ':', 0) == 0) {
+            diagnostics += line + '\n';
+        }
+    }
+    return {waited == pid && WIFEXITED(status) ? WEXITSTATUS(status) : -1, output, diagnostics};
 }
 
 class SystemdService : public ::testing::Test {
@@ -87,41 +145,25 @@ TEST_F(SystemdService, OrdersStartupAfterNetworkAndSupportsBootEnablement) {
     EXPECT_EQ(settings["Install.WantedBy"], "multi-user.target");
 }
 
+
 TEST_F(SystemdService, PassesSystemdSyntaxAndDependencyVerification) {
     if (std::string(SKAI_SYSTEMD_ANALYZE).empty()) GTEST_SKIP() << "systemd-analyze unavailable";
-    char pattern[] = "/tmp/skai-systemd-XXXXXX";
-    const auto* directory = mkdtemp(pattern);
-    ASSERT_NE(directory, nullptr);
-    const std::filesystem::path root(directory);
-    struct Cleanup {
-        std::filesystem::path path;
-        ~Cleanup() {
-            std::error_code error;
-            std::filesystem::remove_all(path, error);
-        }
-    } cleanup{root};
-    const auto unit = root / "skai-edge.service";
-    const auto log = root / "verify.log";
-    // Step 37 installs the binary; verify against the actual build artifact now.
-    const std::string installed = "/usr/local/bin/skai-edge";
-    const auto offset = text.find(installed);
-    ASSERT_NE(offset, std::string::npos);
-    text.replace(offset, installed.size(), std::string("\"") + SKAI_EDGE_EXECUTABLE + "\"");
-    std::ofstream(unit) << text;
-    const auto pid = fork();
-    ASSERT_GE(pid, 0);
-    if (pid == 0) {
-        FILE* output = freopen(log.c_str(), "w", stdout);
-        if (!output || dup2(fileno(output), STDERR_FILENO) < 0) _exit(126);
-        execl(SKAI_SYSTEMD_ANALYZE, SKAI_SYSTEMD_ANALYZE, "--man=no", "--generators=no",
-              "verify", unit.c_str(), nullptr);
-        _exit(127);
-    }
-    int status = 0;
-    const auto waited = waitpid(pid, &status, 0);
-    const auto output = read(log);
-    ASSERT_EQ(waited, pid);
-    ASSERT_TRUE(WIFEXITED(status)) << output;
-    EXPECT_EQ(WEXITSTATUS(status), 0) << output;
+    const auto result = verify_unit(text);
+    EXPECT_TRUE(result.passed()) << result.output;
 }
+
+TEST_F(SystemdService, RejectsUnknownDirectiveEvenWhenVerifierExitsSuccessfully) {
+    if (std::string(SKAI_SYSTEMD_ANALYZE).empty()) GTEST_SKIP() << "systemd-analyze unavailable";
+    const auto result = verify_unit(text + "\n[Unit]\nBogusDirective=yes\n");
+    EXPECT_NE(result.output.find("BogusDirective"), std::string::npos) << result.output;
+    EXPECT_FALSE(result.passed()) << "exit code: " << result.exit_code << '\n' << result.output;
+}
+
+TEST_F(SystemdService, RejectsDirectiveInTheWrongSection) {
+    if (std::string(SKAI_SYSTEMD_ANALYZE).empty()) GTEST_SKIP() << "systemd-analyze unavailable";
+    const auto result = verify_unit(text + "\n[Unit]\nRestart=on-failure\n");
+    EXPECT_NE(result.output.find("Restart"), std::string::npos) << result.output;
+    EXPECT_FALSE(result.passed()) << "exit code: " << result.exit_code << '\n' << result.output;
+}
+
 } // namespace

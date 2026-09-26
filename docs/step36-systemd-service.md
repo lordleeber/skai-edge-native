@@ -112,10 +112,18 @@ sudo systemctl start skai-edge
 
 `SystemdService.*` covers the executable/config paths, restart delay and limit,
 SIGTERM/shutdown timeout, journal routing, account/state/GPU settings and boot
-ordering. A seventh test runs `systemd-analyze verify` against a temporary copy
+ordering. Verifier tests run `systemd-analyze verify` against a temporary copy
 pointing at the real build executable; the installed binary path remains covered
-by the contract test. It does not start or install a system service. If
-`systemd-analyze` is unavailable, only that syntax test is explicitly skipped.
+by the contract test. Passing requires exit code zero and no warning/error
+diagnostics attributed to the temporary unit or its drop-ins. Warnings from
+unrelated installed units are retained in the captured output but do not fail
+this unit's syntax check. Logging is forced to warning level on the console,
+so inherited logging settings cannot hide diagnostics. The invocation remains
+compatible with systemd 249 and does not require `--recursive-errors`.
+Negative regressions inject an unknown directive and a directive in the wrong
+section; both must be rejected even when the verifier returns zero. These tests
+do not start or install a system service. If `systemd-analyze` is unavailable,
+the three verifier tests are explicitly skipped.
 
 ```sh
 ctest --test-dir build -R '^SystemdService\.' --output-on-failure
