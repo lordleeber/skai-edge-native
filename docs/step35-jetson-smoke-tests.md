@@ -113,3 +113,14 @@ The operator separately confirmed continuously playing video from another LAN
 device at `http://172.16.1.50:41173/`, served by an isolated instance of the same
 build. This is separate manual LAN evidence; it was not attached to the different
 port in the automated report. The existing cloud publisher continued running.
+
+## Review follow-ups
+
+Step 35-a pins `SKAI_SMOKE_PYTHON` to CMake's checked `Python3_EXECUTABLE`
+for every `SmokeScript.*` test. A regression shadows PATH's `python3` with a
+failing interpreter and requires the runner to use the configured interpreter.
+
+The host binding, continuous observation and unique-run manual acceptance fixes
+follow in dependent Step 35-b. Both parts are required for final Step 35
+acceptance; the split keeps each implementation/test diff below 800 lines.
+The development results remain local/operator evidence, not independent CI.

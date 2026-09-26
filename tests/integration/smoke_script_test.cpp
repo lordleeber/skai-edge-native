@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cerrno>
 #include <csignal>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -165,5 +166,13 @@ TEST_F(SmokeScript, RequiresApiAlertToSurviveDatabaseReopen) {
 TEST_F(SmokeScript, RejectsLoopbackAsLanConfirmation) {
     EXPECT_EQ(confirm("http://127.0.0.1:8080", "http://127.0.0.1:8080"), 1);
     EXPECT_EQ(report.find("manual_confirmed"), std::string::npos);
+}
+TEST_F(SmokeScript, UsesConfiguredPythonWhenPathResolvesAnotherInterpreter) {
+    executable("python3", "echo wrong Python interpreter >&2\nexit 97\n");
+    const auto original = std::string(std::getenv("PATH"));
+    const auto poisoned = root.string() + ':' + original;
+    ASSERT_EQ(setenv("PATH", poisoned.c_str(), 1), 0);
+    EXPECT_EQ(run("healthy"), 2) << output;
+    EXPECT_EQ(setenv("PATH", original.c_str(), 1), 0);
 }
 } // namespace
