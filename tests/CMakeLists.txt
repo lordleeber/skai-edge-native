@@ -1,6 +1,11 @@
 find_package(GTest REQUIRED)
 include(GoogleTest)
 find_program(SKAI_NODE_EXECUTABLE NAMES node nodejs REQUIRED)
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+execute_process(COMMAND ${Python3_EXECUTABLE} -c "import yaml" RESULT_VARIABLE SKAI_PYYAML_STATUS)
+if(NOT SKAI_PYYAML_STATUS EQUAL 0)
+    message(FATAL_ERROR "Smoke script tests require PyYAML; install python3-yaml")
+endif()
 pkg_check_modules(GST_RTSP_TEST REQUIRED IMPORTED_TARGET
     gstreamer-rtsp-server-1.0 gstreamer-app-1.0)
 
@@ -152,3 +157,11 @@ endif()
 add_executable(skai-runtime-factory-tests integration/runtime_factory_test.cpp)
 target_link_libraries(skai-runtime-factory-tests PRIVATE skai-runtime GTest::gtest_main)
 gtest_discover_tests(skai-runtime-factory-tests DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 20)
+
+add_executable(skai-smoke-script-tests integration/smoke_script_test.cpp)
+target_link_libraries(skai-smoke-script-tests PRIVATE GTest::gtest_main)
+target_compile_definitions(skai-smoke-script-tests PRIVATE
+    SKAI_PYTHON="${Python3_EXECUTABLE}"
+    SKAI_SMOKE_SCRIPT="${PROJECT_SOURCE_DIR}/scripts/smoke_test_jetson.sh"
+    SKAI_SMOKE_FIXTURE="${PROJECT_SOURCE_DIR}/tests/fixtures/smoke_service.py")
+gtest_discover_tests(skai-smoke-script-tests DISCOVERY_TIMEOUT 60 PROPERTIES LABELS smoke TIMEOUT 20)

@@ -59,7 +59,8 @@ OpenCV development files (`libopencv-dev`), then install GoogleTest
 and the test-only RTSP server
 development package (`libgstrtspserver-1.0-dev`) to run tests. Node.js 18+ is
 used only for dependency-free browser-state tests; no npm packages or frontend
-build step are required:
+build step are required. Python 3 and PyYAML (`python3-yaml`) are required for
+the smoke-script protocol tests:
 
 ```sh
 cmake -S . -B build
@@ -313,3 +314,10 @@ in end-to-end tests, plus an RTSP-to-WHEP media receiver. Run
 `ctest --test-dir build -R '^Pipeline\.' --output-on-failure` for the portable
 cases. The TensorRT variant has the `jetson` label. Test boundaries and the live
 cloud uplink check are documented in [Step 34 integration tests](docs/step34-integration-tests.md).
+
+Step 35 adds `scripts/smoke_test_jetson.sh` for real Jetson acceptance: RTSP,
+TensorRT, HTTP/UI, Firefox WHEP playback, ICE diagnostics, durable SQLite alerts,
+playable recordings and clean shutdown. It keeps artifacts in an isolated
+directory and distinguishes local automation from companion LAN browser
+confirmation. Dependencies, commands and exit codes are in
+[Jetson smoke tests](docs/step35-jetson-smoke-tests.md).
