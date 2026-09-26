@@ -15,6 +15,8 @@
 
 namespace {
 using namespace std::chrono_literals;
+const std::string run_a(32, 'a');
+const std::string run_b(32, 'b');
 
 std::string read(const std::filesystem::path& path) {
     std::ifstream input(path);
@@ -98,10 +100,19 @@ protected:
         }
         return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
     }
-    int confirm(const std::string& url, const std::string& report_url = "http://172.16.1.50:8080") {
+    int confirm(const std::string& url,
+                const std::string& report_url = "http://172.16.1.50:8080/#smoke=" + run_b,
+                const std::string& run_id = run_b) {
         const auto path = root / "acceptance.json";
-        std::ofstream(path) << "{\"checks\":{\"jetson\":\"test artifact\"},"
+        std::ofstream artifact(path);
+        artifact << "{\"checks\":{\"jetson\":\"test artifact\"},"
             "\"automated_passed\":true,\"url\":\"" << report_url << "\",\"status\":\"incomplete\"}";
+        artifact.close();
+        if (!run_id.empty()) {
+            auto value = read(path);
+            value.insert(1, "\"run_id\":\"" + run_id + "\",");
+            std::ofstream(path) << value;
+        }
         const auto pid = launch({SKAI_SMOKE_SCRIPT, "--confirm-lan-report", path.string(),
             "--observed-url", url}, root / "confirmation.log");
         int status = 0;
@@ -147,7 +158,7 @@ TEST_F(SmokeScript, WaitsForFirstRuntimeHealthSample) {
     EXPECT_NE(report.find("\"runtime_health\": true"), std::string::npos) << report;
 }
 TEST_F(SmokeScript, RecordsExplicitConfirmationForTheMatchingSmokeUrl) {
-    EXPECT_EQ(confirm("http://172.16.1.50:8080/"), 0);
+    EXPECT_EQ(confirm("http://172.16.1.50:8080/#smoke=" + run_b), 0);
     EXPECT_NE(report.find("manual_confirmed"), std::string::npos) << report;
     EXPECT_NE(report.find("\"status\": \"passed\""), std::string::npos);
 }
@@ -164,7 +175,8 @@ TEST_F(SmokeScript, RequiresApiAlertToSurviveDatabaseReopen) {
     EXPECT_NE(report.find("not durable in SQLite"), std::string::npos) << report;
 }
 TEST_F(SmokeScript, RejectsLoopbackAsLanConfirmation) {
-    EXPECT_EQ(confirm("http://127.0.0.1:8080", "http://127.0.0.1:8080"), 1);
+    const auto url = "http://127.0.0.1:8080/#smoke=" + run_b;
+    EXPECT_EQ(confirm(url, url), 1);
     EXPECT_EQ(report.find("manual_confirmed"), std::string::npos);
 }
 TEST_F(SmokeScript, UsesConfiguredPythonWhenPathResolvesAnotherInterpreter) {
@@ -174,5 +186,47 @@ TEST_F(SmokeScript, UsesConfiguredPythonWhenPathResolvesAnotherInterpreter) {
     ASSERT_EQ(setenv("PATH", poisoned.c_str(), 1), 0);
     EXPECT_EQ(run("healthy"), 2) << output;
     EXPECT_EQ(setenv("PATH", original.c_str(), 1), 0);
+}
+TEST_F(SmokeScript, ValidatesOwnedLanHostBeforeLaunchingAProcess) {
+    const auto pid = launch({SKAI_PYTHON, "-B", SKAI_SMOKE_HOST_POLICY}, root / "host-policy.log");
+    int status = 0;
+    waitpid(pid, &status, 0);
+    ASSERT_TRUE(WIFEXITED(status)) << read(root / "host-policy.log");
+    EXPECT_EQ(WEXITSTATUS(status), 0) << read(root / "host-policy.log");
+}
+TEST_F(SmokeScript, RejectsVideoFreezeAfterInitialBrowserVerification) {
+    EXPECT_EQ(run("freeze-browser"), 1) << output;
+    EXPECT_NE(report.find("video stopped advancing during observation"), std::string::npos) << report;
+}
+TEST_F(SmokeScript, RejectsPeerDisconnectDuringObservation) {
+    EXPECT_EQ(run("disconnect-peer"), 1) << output;
+    EXPECT_NE(report.find("peer stopped sending during observation"), std::string::npos) << report;
+}
+TEST_F(SmokeScript, RejectsFrozenPeerBytesDuringObservation) {
+    EXPECT_EQ(run("freeze-bytes"), 1) << output;
+    EXPECT_NE(report.find("peer stopped sending during observation"), std::string::npos) << report;
+}
+TEST_F(SmokeScript, RejectsFrozenRtspFramesDuringObservation) {
+    EXPECT_EQ(run("freeze-rtsp"), 1) << output;
+    EXPECT_NE(report.find("RTSP stopped advancing during observation"), std::string::npos) << report;
+}
+TEST_F(SmokeScript, RejectsObservationFromAnEarlierRunAtTheSamePort) {
+    EXPECT_EQ(confirm("http://172.16.1.50:8080/#smoke=" + run_a), 1);
+    EXPECT_EQ(report.find("manual_confirmed"), std::string::npos);
+}
+TEST_F(SmokeScript, RejectsLegacyConfirmationWithoutARunId) {
+    EXPECT_EQ(confirm("http://172.16.1.50:8080", "http://172.16.1.50:8080", ""), 1);
+    EXPECT_EQ(report.find("manual_confirmed"), std::string::npos);
+}
+TEST_F(SmokeScript, GeneratesDistinctRunIdsAndIdentifiedBrowserUrls) {
+    EXPECT_EQ(run("healthy"), 2) << output;
+    const auto marker = report.find("\"run_id\": \"");
+    ASSERT_NE(marker, std::string::npos) << report;
+    const auto first_id = report.substr(marker + 11, 32);
+    EXPECT_NE(report.find("/#smoke=" + first_id), std::string::npos) << report;
+    EXPECT_NE(report.find("live_observation"), std::string::npos) << report;
+    std::filesystem::remove_all(root / "result");
+    EXPECT_EQ(run("healthy"), 2) << output;
+    EXPECT_EQ(report.find(first_id), std::string::npos) << report;
 }
 } // namespace

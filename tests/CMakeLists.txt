@@ -163,6 +163,7 @@ target_link_libraries(skai-smoke-script-tests PRIVATE GTest::gtest_main)
 target_compile_definitions(skai-smoke-script-tests PRIVATE
     SKAI_PYTHON="${Python3_EXECUTABLE}"
     SKAI_SMOKE_SCRIPT="${PROJECT_SOURCE_DIR}/scripts/smoke_test_jetson.sh"
-    SKAI_SMOKE_FIXTURE="${PROJECT_SOURCE_DIR}/tests/fixtures/smoke_service.py")
+    SKAI_SMOKE_FIXTURE="${PROJECT_SOURCE_DIR}/tests/fixtures/smoke_service.py"
+    SKAI_SMOKE_HOST_POLICY="${PROJECT_SOURCE_DIR}/tests/fixtures/smoke_host_policy.py")
 gtest_discover_tests(skai-smoke-script-tests DISCOVERY_TIMEOUT 60 PROPERTIES
     LABELS smoke TIMEOUT 20 ENVIRONMENT "SKAI_SMOKE_PYTHON=${Python3_EXECUTABLE}")
