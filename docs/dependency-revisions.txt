@@ -1,0 +1,2 @@
+skai-ice https://github.com/lordleeber/skai-ice.git ad6574d97fa62f0aa71cb1138e3e2974abf19dcb
+libdatachannel https://github.com/paullouisageneau/libdatachannel.git 0d6adc021953d7263fd4503482ea7bde33553724 (v0.22.6)

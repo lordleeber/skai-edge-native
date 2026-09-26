@@ -1,0 +1,66 @@
+# Copy this file and adjust the RTSP URL for your deployment.
+video:
+  rtsp_url: "rtsp://100.69.117.102:8554/test"
+  # For cameras that require credentials, set username and password here,
+  # or embed them in rtsp_url. Keep your deployment config out of Git.
+  transport: tcp
+  latency_ms: 100
+  reconnect_delay_ms: 1000
+  max_reconnect_delay_ms: 10000
+  stall_timeout_ms: 3000
+  first_frame_timeout_ms: 15000
+
+detector:
+  engine: /var/lib/skai-edge/models/yolo11s.engine
+  confidence: 0.35
+  nms: 0.45
+  annotate: true
+
+web:
+  bind: 0.0.0.0
+  port: 8080
+  root: "@SKAI_INSTALL_WEB_DIR@"
+
+recording:
+  enabled: true
+  directory: /var/lib/skai-edge/recordings
+  segment_seconds: 60
+  max_storage_mb: 1024
+  min_free_space_mb: 100
+
+storage:
+  database_path: /var/lib/skai-edge/skai-edge.db
+  alert_directory: /var/lib/skai-edge/alerts
+
+alerts:
+  - class: person
+    confidence: 0.70
+    consecutive_frames: 3
+    cooldown_seconds: 10
+    # Normalized detection-center region; omit roi to use the full frame.
+    roi: {x1: 0.0, y1: 0.0, x2: 1.0, y2: 1.0}
+
+gps:
+  enabled: true
+  source: fixed
+  latitude: 25.033964
+  longitude: 121.564468
+  altitude_m: 10.0
+
+webrtc:
+  enabled: true
+  max_peers: 2
+  connection_timeout_ms: 15000
+  media_queue_capacity: 8
+  # Replace these with interface names reported by `ip link` on the device.
+  # Startup fails if none of the configured names exists.
+  host_interfaces: [eth0, wlan0]
+  ice_log_verbosity: 1
+
+whip:
+  enabled: false
+  url: https://skai-cam.duckdns.org/sfu/cam1/whip
+  # Publisher token is loaded from WHIP_TOKEN in the environment or .env.
+
+logging:
+  level: info

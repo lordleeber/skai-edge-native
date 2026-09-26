@@ -222,6 +222,8 @@ target_link_libraries(skai-runtime PUBLIC skai-inference-module skai-web
 add_executable(skai-edge src/main.cpp)
 target_link_libraries(skai-edge PRIVATE skai-cli skai-runtime)
 
+include(cmake/Install.cmake)
+
 if(BUILD_TESTING)
     add_subdirectory(tests)
 endif()

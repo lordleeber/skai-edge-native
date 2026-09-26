@@ -8,9 +8,9 @@ cd "$repository_root"
 if [[ -n "${SKAI_GITHUB_TOKEN:-}" ]]; then
     auth_value=$(printf 'x-access-token:%s' "$SKAI_GITHUB_TOKEN" | base64 | tr -d '\n')
     git -c "http.extraHeader=Authorization: Basic $auth_value" \
-        submodule update --init third_party/skai-ice
+        submodule update --init --recursive third_party/skai-ice
 else
-    if ! git submodule update --init third_party/skai-ice; then
+    if ! git submodule update --init --recursive third_party/skai-ice; then
         printf '%s\n' \
             'Unable to fetch the private skai-ice dependency.' \
             'Set SKAI_GITHUB_TOKEN to a GitHub token with read access and retry.' >&2

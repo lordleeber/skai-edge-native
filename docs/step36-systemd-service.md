@@ -17,45 +17,11 @@ and [execution settings](https://github.com/systemd/systemd/blob/v249/man/system
 
 ## Stage a deployment
 
-Step 37 adds `cmake --install` and packaging. For this step, manually stage an
-already built executable and its runtime dependencies on the target Jetson.
-Run these commands from the repository root. Create the account once:
-
-```sh
-sudo useradd --system --user-group --home-dir /var/lib/skai-edge \
-  --no-create-home --shell /usr/sbin/nologin skai-edge
-getent group video render
-sudo install -d -o root -g skai-edge -m 0750 /etc/skai-edge
-sudo install -d -o skai-edge -g skai-edge -m 0750 \
-  /var/lib/skai-edge /var/lib/skai-edge/models
-sudo install -m 0755 build/skai-edge /usr/local/bin/skai-edge
-sudo install -o root -g skai-edge -m 0640 \
-  config/config.example.yaml /etc/skai-edge/config.yaml
-sudo install -d -m 0755 /usr/local/share/skai-edge
-sudo cp -R web /usr/local/share/skai-edge/
-sudo install -o root -g skai-edge -m 0640 /path/to/yolo.engine \
-  /var/lib/skai-edge/models/yolo.engine
-sudoedit /etc/skai-edge/config.yaml
-```
-
-Set the actual RTSP URL, LAN interface names and these deployment paths in YAML:
-
-```yaml
-detector:
-  engine: /var/lib/skai-edge/models/yolo.engine
-web:
-  root: /usr/local/share/skai-edge/web
-storage:
-  database_path: /var/lib/skai-edge/skai-edge.db
-  alert_directory: /var/lib/skai-edge/alerts
-recording:
-  directory: /var/lib/skai-edge/recordings
-```
-
-These snippets identify fields to edit in the full configuration. Keep the
-remaining detector, web and recording settings. Select an available HTTP port.
-The service's working directory is `/var/lib/skai-edge`; explicit paths avoid
-depending on the source checkout or a login shell's current directory.
+Use the [Step 37 native installation guide](step37-install.md) to build and
+install the executable, UI, deployment config, SQLite and vendor unit. It covers
+recursive dependency checkout, the dedicated account, file ownership and the
+operator-supplied TensorRT engine. Edit the installed config for the actual RTSP
+source, LAN interfaces and HTTP port before starting the service.
 
 When WHIP is enabled, put `WHIP_TOKEN=YOUR_TOKEN` in the optional environment file
 using an editor, then restrict its permissions:
@@ -70,11 +36,12 @@ The system service manager reads it before changing to the service account.
 Do not use shell `export` syntax. Leaving the file absent is supported when WHIP
 is disabled. Environment and configuration files stay outside Git.
 
-Install the unit and reload systemd:
+The installer places the vendor unit under `/usr/local/lib/systemd/system/`.
+Verify the effective deployment and reload systemd:
 
 ```sh
-sudo install -m 0644 systemd/skai-edge.service /etc/systemd/system/skai-edge.service
-sudo systemd-analyze verify /etc/systemd/system/skai-edge.service
+sudo systemd-analyze verify /usr/local/lib/systemd/system/skai-edge.service
+systemctl cat skai-edge
 sudo systemctl daemon-reload
 ```
 
