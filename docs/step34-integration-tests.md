@@ -1,10 +1,10 @@
 # Step 34 integration tests
 
-The tests compose the production Application lifecycle, RTSP source, GPS,
+The tests use the same `create_runtime()` factory as main for the Application lifecycle, RTSP source, GPS,
 AlertManager, SQLite repository, recorder, Beast HTTP server, WebRtcManager,
 libdatachannel and skai-ice. They let the HTTP server bind ephemeral loopback ports directly with `web.port: 0` and keep YAML,
 SQLite, snapshots and recordings in a unique temporary directory removed on
-teardown. WHIP is disabled in these deterministic tests.
+teardown. WHIP is disabled in the Step 34-b tests; Step 34-c adds a loopback uplink receiver.
 
 | Test | Behavior checked |
 | --- | --- |
@@ -46,8 +46,10 @@ ctest --test-dir build --output-on-failure
 The portable tests have the `rtsp-webrtc` label, matching both `ctest -L rtsp`
 and `ctest -L webrtc`. The GPU variant is built only when the inference module
 is available and has the `rtsp-jetson` label, so `ctest -LE jetson` excludes it.
-The tests currently compose production lifecycle adapters rather than launching
-`main`; executable launch and signal handling remain covered by `Process.*`.
+Both main and these tests call `create_runtime()`. The factory owns module
+composition, queue ownership, WHIP/WHEP media fanout, the detection sink, runtime
+metrics, health probes, and the running flag. Executable launch and signal
+handling remain covered by `Process.*`.
 
 ## Cloud uplink check on 2026-09-26
 
@@ -81,3 +83,25 @@ events, and the persistence test exercises its async alert worker. YAML accepts
 port 0 while rejecting negative/out-of-range ports; the server owns the port
 allocation from bind onward, removing the release-before-bind reservation.
 The separate runtime-composition review finding is addressed in part B.
+
+## Review fixes, part B
+
+`RuntimeFactory.OwnsDistinctEphemeralPortsAndLifecycleStatus` starts two runtime
+instances using port 0 and verifies their HTTP ports differ. Running state is
+owned by Runtime: before start it reports starting, an offline RTSP input reports
+degraded after start, and shutdown clears the running flag. The pipeline tests
+no longer assemble modules or set that flag themselves. Their persistence test
+also checks the real runtime metrics and health providers and all eight probes.
+
+The follow-up was split into Step 34-b (shared runtime) and Step 34-c (loopback
+WHIP/SEI regression protection) because their initial combined implementation
+and test diff was 868 lines, above the repository's 800-line limit.
+
+The review checks also exposed two pre-existing RTSP test timing problems: a
+consumer can pop a recovered frame before the producer publishes Connected
+health, and the RTSP server task pool could still be active at process exit.
+Recovery tests now wait for the published health state. The last active fixture
+waits for the RTSP task pool to finish using
+[GStreamer's test cleanup API](https://gstreamer.freedesktop.org/documentation/gst-rtsp-server/rtsp-thread-pool.html#gst_rtsp_thread_pool_cleanup).
+A two-server regression keeps one client playing while the other fixture stops,
+so global cleanup cannot stop an unrelated active fixture.

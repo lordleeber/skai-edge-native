@@ -131,8 +131,8 @@ gtest_discover_tests(skai-rtsp-jetson-tests DISCOVERY_TIMEOUT 60 PROPERTIES LABE
 
 # Step 34 composes production modules around a deterministic RTSP fixture.
 add_executable(skai-pipeline-tests integration/pipeline_test.cpp)
-target_include_directories(skai-pipeline-tests PRIVATE ${OpenCV_INCLUDE_DIRS})
-target_link_libraries(skai-pipeline-tests PRIVATE skai-inference-module skai-web skai-alerts skai-recording
+target_include_directories(skai-pipeline-tests PRIVATE support ${OpenCV_INCLUDE_DIRS})
+target_link_libraries(skai-pipeline-tests PRIVATE skai-runtime skai-web skai-alerts skai-recording
     skai-rtsp-source skai-rtsp-test-fixture ${OpenCV_LIBS}
     LibDataChannel::LibDataChannel GTest::gtest_main)
 gtest_discover_tests(skai-pipeline-tests DISCOVERY_TIMEOUT 60
@@ -141,10 +141,14 @@ gtest_discover_tests(skai-pipeline-tests DISCOVERY_TIMEOUT 60
 if(TARGET skai-yolo-detector)
     add_executable(skai-pipeline-jetson-tests integration/pipeline_test.cpp)
     target_compile_definitions(skai-pipeline-jetson-tests PRIVATE SKAI_PIPELINE_TENSORRT=1)
-    target_include_directories(skai-pipeline-jetson-tests PRIVATE ${OpenCV_INCLUDE_DIRS})
-    target_link_libraries(skai-pipeline-jetson-tests PRIVATE skai-web skai-alerts
+    target_include_directories(skai-pipeline-jetson-tests PRIVATE support ${OpenCV_INCLUDE_DIRS})
+    target_link_libraries(skai-pipeline-jetson-tests PRIVATE skai-runtime skai-web skai-alerts
         skai-recording skai-rtsp-source skai-rtsp-test-fixture skai-inference-module
         ${OpenCV_LIBS} LibDataChannel::LibDataChannel GTest::gtest_main)
     gtest_discover_tests(skai-pipeline-jetson-tests DISCOVERY_TIMEOUT 60
         PROPERTIES LABELS "rtsp-jetson" TIMEOUT 120)
 endif()
+
+add_executable(skai-runtime-factory-tests integration/runtime_factory_test.cpp)
+target_link_libraries(skai-runtime-factory-tests PRIVATE skai-runtime GTest::gtest_main)
+gtest_discover_tests(skai-runtime-factory-tests DISCOVERY_TIMEOUT 60 PROPERTIES TIMEOUT 20)

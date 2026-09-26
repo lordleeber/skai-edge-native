@@ -567,7 +567,8 @@ TEST(RtspRecovery, RecoversAfterServerRestartWithoutChangingUrl) {
     auto recovered = frames.pop_for(std::chrono::seconds(6));
     ASSERT_TRUE(recovered.has_value()) << output.str();
     EXPECT_GT(recovered->sequence, first->sequence);
-    EXPECT_EQ(source.diagnostics().health, skai::SourceHealth::Connected);
+    EXPECT_TRUE(wait_for_health(source, skai::SourceHealth::Connected,
+                                std::chrono::seconds(2))) << output.str();
     EXPECT_GE(source.diagnostics().reconnect_count, 1U);
 }
 
@@ -597,7 +598,8 @@ TEST(RtspRecovery, DetectsStallAndReconnectsWhenFramesResume) {
     auto recovered = frames.pop_for(std::chrono::seconds(6));
     ASSERT_TRUE(recovered.has_value()) << output.str();
     EXPECT_GT(recovered->sequence, first->sequence);
-    EXPECT_EQ(source.diagnostics().health, skai::SourceHealth::Connected);
+    EXPECT_TRUE(wait_for_health(source, skai::SourceHealth::Connected,
+                                std::chrono::seconds(2))) << output.str();
 }
 
 TEST(RtspRecovery, RebuildsDecodeChainWhenCodecChangesAfterRestart) {
