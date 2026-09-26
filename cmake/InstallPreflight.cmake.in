@@ -1,0 +1,20 @@
+# Refuse ambiguous recovery state before installing any runtime files.
+set(database "$ENV{DESTDIR}/var/lib/skai-edge/skai-edge.db")
+if(NOT EXISTS "${database}" AND NOT IS_SYMLINK "${database}")
+    foreach(suffix -wal -shm)
+        if(EXISTS "${database}${suffix}" OR IS_SYMLINK "${database}${suffix}")
+            message(FATAL_ERROR
+                "SQLite sidecar ${database}${suffix} exists without the main database. "
+                "Stop the service and explicitly recover or reset the database before "
+                "installing. No sidecars were removed.")
+        endif()
+    endforeach()
+endif()
+
+# Administrator-owned full units must be migrated explicitly, never overwritten.
+set(local_unit "$ENV{DESTDIR}/etc/systemd/system/skai-edge.service")
+if(EXISTS "${local_unit}" AND NOT IS_SYMLINK "${local_unit}")
+    message(WARNING "${local_unit} overrides the vendor unit. "
+        "Follow docs/step37-install.md to back it up, migrate customizations to "
+        "drop-ins, and remove the obsolete Step 36 full unit before restarting.")
+endif()

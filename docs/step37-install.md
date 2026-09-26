@@ -65,6 +65,9 @@ New configuration/state directories have mode 0750. Reinstalling updates the
 executable, UI, dependency manifest and vendor unit. Existing config, SQLite,
 media, symlinks and directory permissions are preserved. Runtime database
 migrations remain responsible for upgrading an existing schema at startup.
+If the main database is absent but a `-wal` or `-shm` sidecar remains, installation
+fails before copying any runtime files. Sidecars are preserved for explicit
+operator recovery; an empty seed must not inherit an old WAL.
 No real camera data, local configuration, model or WHIP token is packaged.
 
 The default prefix is `/usr/local`. To change it, configure
@@ -110,16 +113,85 @@ Use the actual configured HTTP port. Check readiness before enabling boot
 startup. Local overrides in `/etc/systemd/system/` take priority over the vendor
 unit; `systemctl cat skai-edge` shows the effective unit and drop-ins.
 
-For an upgrade, build the updated executable, then install it while stopped:
+## Migrate a Step 36 deployment
+
+Step 36 installed a full unit at `/etc/systemd/system/skai-edge.service`. That
+administrator unit takes precedence over the Step 37 vendor unit, including its
+configured executable prefix. The installer warns and preserves it. Perform this
+one-time migration before restarting a deployment that followed Step 36.
+
+Stop the service and back up the existing full unit outside the unit search path:
+
+```sh
+sudo systemctl stop skai-edge
+sudo cp -a /etc/systemd/system/skai-edge.service /root/skai-edge.service.step36.backup
+systemctl cat skai-edge
+sudo install -d -m 0755 /etc/systemd/system/skai-edge.service.d
+sudoedit /etc/systemd/system/skai-edge.service.d/override.conf
+```
+
+Compare the backup with the newly installed vendor unit. Move intentional local
+settings into the drop-in, using the appropriate sections. Do not copy the entire
+old unit or its obsolete `ExecStart`. If deliberately overriding `ExecStart`,
+clear the previous value first and use the newly configured executable path.
+Preserve and review existing drop-ins too. Remove the full unit only after the
+backup and customization review are complete:
+
+```sh
+sudo rm /etc/systemd/system/skai-edge.service
+```
+
+For a custom prefix outside systemd's load path, link the new vendor unit after
+removing the old full unit:
+
+```sh
+sudo systemctl link /your/prefix/lib/systemd/system/skai-edge.service
+```
+
+Reload and verify the actual unit and executable before starting:
+
+```sh
+sudo systemctl daemon-reload
+systemctl show skai-edge -p FragmentPath -p ExecStart
+systemctl cat skai-edge
+```
+
+`FragmentPath` must resolve to the newly installed vendor unit and `ExecStart`
+must name the configured prefix. Complete the ownership and readiness steps in
+the upgrade procedure below before restarting. The installer never deletes
+administrator units or edits their customizations.
+
+## Upgrade and recovery
+
+Build the updated executable, then install it while stopped. On a Step 36 host,
+complete the one-time full-unit migration above after installing and before
+restarting. Every live install must restore config and state ownership, including
+reinstalls that recreate missing directories or configuration:
 
 ```sh
 sudo systemctl stop skai-edge
 sudo cmake --install build/production
+sudo chgrp skai-edge /etc/skai-edge /etc/skai-edge/config.yaml
+sudo chown -R skai-edge:skai-edge /var/lib/skai-edge
 sudo systemctl daemon-reload
 sudo systemctl start skai-edge
 ```
 
-The installer does not start services or create host
+Review any newly seeded configuration and restore the required model before
+starting. Do not rely on `StateDirectory=skai-edge` to repair child ownership:
+systemd can skip recursive ownership changes when the top directory already
+belongs to the service account. The explicit commands above restore access even
+when root recreated a missing `recordings`, `alerts`, `models`, or config path.
+
+If installation reports an orphan SQLite sidecar, keep the service stopped.
+Back up the complete database directory before attempting recovery. Recover the
+matching main database and sidecars together, or explicitly archive the orphan
+sidecars away from the database basename when intentionally resetting state.
+Do not delete potentially committed WAL data as an automatic install step.
+Retry installation only after resolving that state, then restore ownership as
+above. Validate `/health`, recording writes and model loading after restart.
+
+The installer does not start services, change host ownership or create host
 accounts. Packaging as `.deb` is deferred until repeated deployment needs it.
 
 ## Staging and regression tests
@@ -143,16 +215,20 @@ ctest --test-dir build --output-on-failure
 
 The suite covers layout, valid empty schema, absolute YAML paths, permissions,
 reinstall preservation, symlinks, runtime-only artifacts, exact pins and prefix
-validation. It also starts the installed executable from an unrelated working
+validation, preserved legacy-unit warnings, orphan WAL/SHM rejection and the
+migration/ownership procedure contracts. It also starts the installed executable from an unrelated working
 directory without `LD_LIBRARY_PATH`, receives RTSP frames, serves every installed
 UI asset, reopens SQLite and stops cleanly. The TensorRT version is labeled
 `install-jetson`; the TensorRT OFF version exercises the portable runtime.
 Tests use temporary DESTDIRs and serialize installation to avoid racing CMake's
 shared install manifest. They never install or start a system-wide service.
 
-On 2026-09-26, local Jetson validation passed all eight install checks with
-TensorRT enabled, all eight with TensorRT OFF, and the complete 325-test suite.
+On 2026-09-26, local Jetson validation passed all 13 install checks with
+TensorRT enabled, all 13 with TensorRT OFF, and the complete 330-test suite.
 A separate `BUILD_TESTING=OFF` production build installed successfully into
 `build/install-production-stage`; its executable ran without `LD_LIBRARY_PATH`.
 The first six install regressions failed before the install rules were added.
+The five review regressions also failed before their fixes. Ownership and unit
+migration instructions are checked as documentation contracts; no root-level
+upgrade or administrator-unit migration was performed on the host.
 These are local development results, not independent CI evidence.

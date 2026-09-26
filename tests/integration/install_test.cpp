@@ -112,4 +112,84 @@ TEST_F(Install, RejectsAnInstallTimePrefixChangeBeforeCopyingFiles) {
     EXPECT_NE(command({SKAI_CMAKE, "--install", SKAI_BUILD_DIR, "--prefix", "/opt/skai-edge"}, rejected), 0);
     EXPECT_FALSE(std::filesystem::exists(rejected));
 }
+
+TEST_F(Install, WarnsAboutAndPreservesTheStep36AdministratorUnit) {
+    const auto legacy = root / "etc/systemd/system/skai-edge.service";
+    std::filesystem::create_directories(legacy.parent_path());
+    const std::string content = "[Service]\nExecStart=/usr/local/bin/skai-edge\n# operator setting\n";
+    std::ofstream(legacy) << content;
+    ASSERT_EQ(install(), 0) << output;
+    EXPECT_EQ(installed_read(legacy), content);
+    EXPECT_NE(output.find("overrides the vendor unit"), std::string::npos) << output;
+}
+
+TEST_F(Install, DocumentsBackupDropInsAndRemovalOfTheLegacyFullUnit) {
+    const auto guide = installed_read(SKAI_SOURCE_DIR "/docs/step37-install.md");
+    const auto begin = guide.find("## Migrate a Step 36 deployment");
+    ASSERT_NE(begin, std::string::npos);
+    const auto migration = guide.substr(begin, guide.find("\n## ", begin + 1) - begin);
+    const auto backup = migration.find("sudo cp -a /etc/systemd/system/skai-edge.service");
+    const auto drop_in = migration.find("sudoedit /etc/systemd/system/skai-edge.service.d/override.conf");
+    const auto remove = migration.find("sudo rm /etc/systemd/system/skai-edge.service");
+    const auto reload = migration.find("sudo systemctl daemon-reload");
+    ASSERT_NE(backup, std::string::npos);
+    ASSERT_NE(drop_in, std::string::npos);
+    ASSERT_NE(remove, std::string::npos);
+    ASSERT_NE(reload, std::string::npos);
+    EXPECT_LT(backup, drop_in); EXPECT_LT(drop_in, remove); EXPECT_LT(remove, reload);
+    EXPECT_NE(migration.find("FragmentPath"), std::string::npos);
+    EXPECT_NE(migration.find("custom prefix"), std::string::npos);
+}
+
+TEST_F(Install, RejectsCommittedOrphanWalWithoutSeedingOrChangingSidecars) {
+    const auto database = root / "var/lib/skai-edge/skai-edge.db";
+    const auto wal = std::filesystem::path(database.string() + "-wal");
+    const auto shm = std::filesystem::path(database.string() + "-shm");
+    const auto pid = fork();
+    ASSERT_GE(pid, 0);
+    if (pid == 0) {
+        sqlite3* db = nullptr;
+        if (sqlite3_open(database.c_str(), &db) != SQLITE_OK) _exit(1);
+        const auto result = sqlite3_exec(db, "PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0;"
+            "CREATE TABLE recovery_data(value TEXT); INSERT INTO recovery_data VALUES('committed');",
+            nullptr, nullptr, nullptr);
+        // Simulate a crash without SQLite close/checkpoint.
+        _exit(result == SQLITE_OK ? 0 : 1);
+    }
+    int status = 0;
+    ASSERT_EQ(waitpid(pid, &status, 0), pid);
+    ASSERT_TRUE(WIFEXITED(status)); ASSERT_EQ(WEXITSTATUS(status), 0);
+    ASSERT_GT(std::filesystem::file_size(wal), 32u);
+    const auto wal_before = installed_read(wal), shm_before = installed_read(shm);
+    std::filesystem::remove(database);
+    EXPECT_NE(install(), 0) << output;
+    EXPECT_NE(output.find("SQLite sidecar"), std::string::npos) << output;
+    EXPECT_FALSE(std::filesystem::exists(database));
+    EXPECT_EQ(installed_read(wal), wal_before); EXPECT_EQ(installed_read(shm), shm_before);
+}
+
+TEST_F(Install, RejectsOrphanShmWithoutCreatingADatabase) {
+    const auto database = root / "var/lib/skai-edge/skai-edge.db";
+    std::filesystem::remove(database);
+    const auto shm = std::filesystem::path(database.string() + "-shm");
+    std::ofstream(shm) << "preserve shared-memory evidence";
+    EXPECT_NE(install(), 0) << output;
+    EXPECT_FALSE(std::filesystem::exists(database));
+    EXPECT_EQ(installed_read(shm), "preserve shared-memory evidence");
+}
+
+TEST_F(Install, UpgradeRestoresConfigurationAndStateOwnershipBeforeRestart) {
+    const auto guide = installed_read(SKAI_SOURCE_DIR "/docs/step37-install.md");
+    const auto begin = guide.find("## Upgrade and recovery");
+    ASSERT_NE(begin, std::string::npos);
+    const auto upgrade = guide.substr(begin, guide.find("\n## ", begin + 1) - begin);
+    const auto install = upgrade.find("sudo cmake --install build/production");
+    const auto config = upgrade.find("sudo chgrp skai-edge /etc/skai-edge /etc/skai-edge/config.yaml");
+    const auto state = upgrade.find("sudo chown -R skai-edge:skai-edge /var/lib/skai-edge");
+    const auto start = upgrade.find("sudo systemctl start skai-edge");
+    ASSERT_NE(install, std::string::npos); ASSERT_NE(config, std::string::npos);
+    ASSERT_NE(state, std::string::npos); ASSERT_NE(start, std::string::npos);
+    EXPECT_LT(install, config); EXPECT_LT(install, state);
+    EXPECT_LT(config, start); EXPECT_LT(state, start);
+}
 } // namespace

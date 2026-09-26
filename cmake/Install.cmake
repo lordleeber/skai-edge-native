@@ -6,6 +6,7 @@ string(REPLACE "/usr/local/bin/skai-edge" "\"${CMAKE_INSTALL_FULL_BINDIR}/skai-e
     SKAI_INSTALL_UNIT "${SKAI_INSTALL_UNIT}")
 file(WRITE "${PROJECT_BINARY_DIR}/install/skai-edge.service" "${SKAI_INSTALL_UNIT}")
 configure_file(cmake/InstallState.cmake.in install/InstallState.cmake @ONLY)
+configure_file(cmake/InstallPreflight.cmake.in install/InstallPreflight.cmake @ONLY)
 
 add_executable(skai-database-seed src/storage/database_seed.cpp)
 target_link_libraries(skai-database-seed PRIVATE skai-storage)
@@ -22,6 +23,7 @@ set_target_properties(skai-edge PROPERTIES INSTALL_RPATH_USE_LINK_PATH TRUE)
 install(CODE "if(NOT CMAKE_INSTALL_PREFIX STREQUAL \"${CMAKE_INSTALL_PREFIX}\")
     message(FATAL_ERROR \"Configure CMAKE_INSTALL_PREFIX before building - install-time --prefix would break configured paths\")
 endif()" COMPONENT Runtime)
+install(SCRIPT "${PROJECT_BINARY_DIR}/install/InstallPreflight.cmake" COMPONENT Runtime)
 install(TARGETS skai-edge RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}" COMPONENT Runtime)
 install(DIRECTORY web/ DESTINATION "${CMAKE_INSTALL_DATADIR}/skai-edge/web"
     FILE_PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ
