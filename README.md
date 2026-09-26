@@ -331,3 +331,5 @@ Step 37 adds `cmake --install`, including deployment configuration, an empty
 production-schema database and persistent state directories. See
 [native installation](docs/step37-install.md) for production builds, recursive
 dependency checkout, staging, account setup and upgrades.
+
+Profiling stage definitions: [Step 38-a metrics](docs/step38-profiling-metrics.md).

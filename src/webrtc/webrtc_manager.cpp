@@ -393,7 +393,11 @@ bool WebRtcSession::activate_media(const EncodedAccessUnit* initial_keyframe) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (closed_ || cleanup_started_) return false;
     media_queue_.reset();
-    if (initial_keyframe) media_queue_.push(*initial_keyframe);
+    if (initial_keyframe) {
+        auto queued = *initial_keyframe;
+        queued.queued_at = std::chrono::steady_clock::now();
+        media_queue_.push(std::move(queued));
+    }
     media_running_ = true;
     try {
         media_worker_ = std::thread(&WebRtcSession::media_loop, this);
@@ -408,7 +412,9 @@ bool WebRtcSession::activate_media(const EncodedAccessUnit* initial_keyframe) {
 void WebRtcSession::enqueue(const EncodedAccessUnit& unit) noexcept {
     if (!media_running_) return;
     try {
-        media_queue_.push(unit);
+        auto queued = unit;
+        queued.queued_at = std::chrono::steady_clock::now();
+        media_queue_.push(std::move(queued));
     } catch (...) {
     }
 }
@@ -423,6 +429,12 @@ void WebRtcSession::media_loop() noexcept {
     while (media_running_) {
         auto unit = media_queue_.pop_for(std::chrono::milliseconds(100));
         if (!unit) continue;
+        if (unit->queued_at != std::chrono::steady_clock::time_point{}) {
+            const auto wait_ms = std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - unit->queued_at).count();
+            std::lock_guard<std::mutex> lock(mutex_);
+            media_queue_wait_.observe(wait_ms);
+        }
         if (unit->discontinuity) {
             waiting_for_keyframe = true;
             timestamp_initialized = false;
@@ -510,6 +522,7 @@ WebRtcPeerDiagnostics WebRtcSession::diagnostics() const {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         result.session_id = id_;
+        result.media_queue_wait = media_queue_wait_;
         result.peer_state = peer_state_;
         result.ice_state = ice_state_;
         result.local_candidate = local_candidate_;

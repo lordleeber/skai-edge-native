@@ -210,6 +210,12 @@ TEST_F(PipelineSuite, PersistsRtspDetectionsAlertsSnapshotsAndPlayableRecording)
         << " detections=" << api_->latest_detections().detections.size()
         << " units=" << recording_->status().access_units_written
         << " status=" << status_->snapshot().status << '\n' << logs_.str();
+    const auto profile = status_->snapshot().profiling;
+    for (const auto stage : {skai::ProfileStage::PreprocessWall, skai::ProfileStage::InferenceGpu,
+            skai::ProfileStage::PostprocessWall, skai::ProfileStage::RecordingQueueWait}) {
+        EXPECT_GT(profile[static_cast<std::size_t>(stage)].count, 0U);
+    }
+    EXPECT_EQ(profile[static_cast<std::size_t>(skai::ProfileStage::AnnotationWall)].count, 0U);
     const auto persisted = alerts();
     ASSERT_EQ(persisted.size(), 1U); // cooldown prevents a new alert every frame
     const auto& alert = persisted.front();
@@ -416,6 +422,10 @@ TEST_F(PipelineSuite, WhepRouteDeliversRtspH264AndDeletesConnectedPeer) {
     EXPECT_EQ(peer->state(), rtc::PeerConnection::State::Connected);
     EXPECT_GT(bytes.load(), 100U);
     EXPECT_EQ(manager_->session_count(), 1U);
+    const auto diagnostic = manager_->diagnostics();
+    ASSERT_EQ(diagnostic.peers.size(), 1U);
+    EXPECT_GT(diagnostic.peers.front().media_queue_wait.count, 0U);
+    EXPECT_GE(diagnostic.peers.front().media_queue_wait.min_ms, 0);
     EXPECT_EQ(request("/api/v1/status").result(), http::status::ok);
     const std::string location(response[http::field::location]);
     ASSERT_FALSE(location.empty());

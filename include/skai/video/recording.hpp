@@ -12,6 +12,7 @@
 #include <atomic>
 #include <memory>
 #include <mutex>
+#include "skai/status.hpp"
 #include <string>
 #include <thread>
 
@@ -21,7 +22,8 @@ class RecordingModule final : public LifecycleModule {
 public:
     RecordingModule(BoundedQueue<EncodedAccessUnit>& input, Logger& logger,
                     std::shared_ptr<RecordingController> control,
-                    std::shared_ptr<EventChannel> events = {});
+                    std::shared_ptr<EventChannel> events = {},
+                    std::shared_ptr<RuntimeStatus> status = {});
     ~RecordingModule() override;
 
     bool initialize(const Config& config) override;
@@ -46,6 +48,7 @@ private:
     Logger& logger_;
     std::shared_ptr<RecordingController> control_;
     std::shared_ptr<EventChannel> events_;
+    std::shared_ptr<RuntimeStatus> status_;
     RecordingConfig config_;
     std::unique_ptr<gst::Pipeline> pipeline_;
     GstElement* appsrc_ = nullptr; // borrowed from pipeline_; worker-only

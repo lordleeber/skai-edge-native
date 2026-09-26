@@ -69,7 +69,9 @@ std::string webrtc_diagnostics_json(const WebRtcDiagnostics& diagnostics) {
                << ",\"packets_sent\":" << peer.packets_sent
                << ",\"packets_retransmitted\":" << peer.packets_retransmitted
                << ",\"media_queue_drops\":" << peer.media_queue_drops
-               << ",\"keyframe_events\":" << peer.keyframe_events
+               << ",\"media_queue_wait\":";
+        write_timing_json(output, peer.media_queue_wait);
+        output << ",\"keyframe_events\":" << peer.keyframe_events
                << ",\"failure_stage\":" << json_string(peer.failure_stage)
                << ",\"close_reason\":" << json_string(peer.close_reason)
                << ",\"last_error\":" << json_string(peer.last_error) << '}';
@@ -175,6 +177,13 @@ std::string metrics_json(const StatusSnapshot& status, const MetricsSnapshot& me
     output << ",\"inference_latency_ms\":";
     if (status.last_inference_ms) output << *status.last_inference_ms;
     else output << "null";
+    output << ",\"profiling\":{";
+    for (std::size_t i = 0; i < profile_stage_names.size(); ++i) {
+        if (i) output << ',';
+        output << json_string(profile_stage_names[i]) << ':';
+        write_timing_json(output, status.profiling[i]);
+    }
+    output << '}';
     output << ",\"inference_queue\":{\"depth\":" << metrics.inference_queue_depth
            << ",\"dropped\":" << metrics.inference_queue.dropped
            << ",\"discarded\":" << metrics.inference_queue.discarded

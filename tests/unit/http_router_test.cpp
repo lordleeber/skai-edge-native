@@ -419,3 +419,14 @@ TEST(ApiState, InferenceFailureInvalidatesOnlyTheCurrentGeneration) {
         [&](bool available) { was_available = available; }));
     EXPECT_FALSE(was_available);
 }
+
+TEST(HttpRouter, ExposesSeparateCumulativeProfileStagesWithoutInventingMeasurements) {
+    skai::RuntimeStatus runtime;
+    runtime.observe_profile(skai::ProfileStage::InferenceGpu, 7);
+    skai::ApiState api;
+    const auto response = skai::web::route_request(
+        {http::verb::get, "/api/v1/metrics", 11}, runtime.snapshot(), api);
+    EXPECT_NE(response.body().find("\"profiling\":{"), std::string::npos);
+    EXPECT_NE(response.body().find("\"inference_gpu\":{\"count\":1,\"total_ms\":7"), std::string::npos);
+    EXPECT_NE(response.body().find("\"annotation_wall\":{\"count\":0,\"total_ms\":0,\"mean_ms\":null"), std::string::npos);
+}

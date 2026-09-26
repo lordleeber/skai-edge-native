@@ -124,8 +124,10 @@ void RecordingController::set_media_available(bool available, std::string reason
 
 RecordingModule::RecordingModule(BoundedQueue<EncodedAccessUnit>& input, Logger& logger,
                                  std::shared_ptr<RecordingController> control,
-                                 std::shared_ptr<EventChannel> events)
-    : input_(input), logger_(logger), control_(std::move(control)), events_(std::move(events)) {}
+                                 std::shared_ptr<EventChannel> events,
+                                 std::shared_ptr<RuntimeStatus> status)
+    : input_(input), logger_(logger), control_(std::move(control)), events_(std::move(events)),
+      status_(std::move(status)) {}
 
 RecordingModule::~RecordingModule() { wait(); }
 
@@ -348,6 +350,11 @@ void RecordingModule::run() noexcept {
             continue;
         }
         auto unit = input_.pop_for(std::chrono::milliseconds(25));
+        if (unit && status_ && unit->queued_at != std::chrono::steady_clock::time_point{}) {
+            status_->observe_profile(ProfileStage::RecordingQueueWait,
+                std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - unit->queued_at).count());
+        }
         const auto queue_drops = input_.stats().dropped;
         if (queue_drops != observed_queue_drops_) {
             observed_queue_drops_ = queue_drops;

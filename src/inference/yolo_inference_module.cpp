@@ -188,6 +188,8 @@ void YoloInferenceModule::run() noexcept {
         annotation_.inference_ms = timing.preprocess.wall_ms +
                                    timing.inference_wall_ms +
                                    timing.postprocess_wall_ms;
+        double annotation_ms = 0;
+        const auto annotation_start = std::chrono::steady_clock::now();
         Frame annotated;
         if (output_) {
             if (!annotate_frame(*frame, detections, coco_class_names(), annotation_,
@@ -198,6 +200,8 @@ void YoloInferenceModule::run() noexcept {
                 continue;
             }
         }
+        if (output_) annotation_ms = std::chrono::duration<double, std::milli>(
+            std::chrono::steady_clock::now() - annotation_start).count();
         std::vector<DetectionDto> published;
         if (api_ || detection_sink_) {
             published.reserve(detections.detections.size());
@@ -219,6 +223,12 @@ void YoloInferenceModule::run() noexcept {
         auto commit = [&] {
             previous = now;
             if (status_) {
+                status_->observe_profile(ProfileStage::PreprocessWall, timing.preprocess.wall_ms);
+                status_->observe_profile(ProfileStage::PreprocessGpu, timing.preprocess.gpu_ms);
+                status_->observe_profile(ProfileStage::InferenceWall, timing.inference_wall_ms);
+                status_->observe_profile(ProfileStage::InferenceGpu, timing.inference_gpu_ms);
+                status_->observe_profile(ProfileStage::PostprocessWall, timing.postprocess_wall_ms);
+                if (output_) status_->observe_profile(ProfileStage::AnnotationWall, annotation_ms);
                 if (has_previous) {
                     status_->update_detector(annotation_.fps,
                                              annotation_.inference_ms);
