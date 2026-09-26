@@ -8,6 +8,7 @@ import os
 import pathlib
 import platform
 import re
+import secrets
 import shutil
 import signal
 import socket
@@ -86,12 +87,8 @@ def prepare_config(source, root, alert_class):
     return config, path
 
 
-def remote_driver(driver_url, host):
-    try:
-        address = ipaddress.IPv4Address(urllib.parse.urlsplit(driver_url).hostname)
-    except ValueError:
-        return False
-    local = {str(host)}
+def local_ipv4_addresses():
+    local = set()
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as descriptor:
         for _, name in socket.if_nameindex():
             try:
@@ -99,17 +96,34 @@ def remote_driver(driver_url, host):
                 local.add(socket.inet_ntoa(data[20:24]))
             except OSError:
                 pass
+    return local
+
+
+def validate_host(host, skip_device_check):
+    if not skip_device_check and (host.is_loopback or str(host) not in local_ipv4_addresses()):
+        raise RuntimeError('--host must be a non-loopback IPv4 address assigned to this Jetson')
+
+
+def remote_driver(driver_url, host):
+    try:
+        address = ipaddress.IPv4Address(urllib.parse.urlsplit(driver_url).hostname)
+    except ValueError:
+        return False
+    local = local_ipv4_addresses() | {str(host)}
     return (address.is_private and not address.is_loopback and not address.is_unspecified and
             not address.is_multicast and str(address) not in local)
 
 
 def confirm_lan(path, observed_url):
     report = json.loads(path.read_text())
-    host = ipaddress.IPv4Address(urllib.parse.urlsplit(report.get('url', '')).hostname)
+    url = urllib.parse.urlsplit(report.get('url', ''))
+    host = ipaddress.IPv4Address(url.hostname)
+    run_id = report.get('run_id', '')
     if (not report.get('automated_passed') or not report.get('checks', {}).get('jetson') or
-            report.get('url') != (observed_url or '').rstrip('/') or host.is_loopback or
+            not isinstance(run_id, str) or not re.fullmatch('[0-9a-f]{32}', run_id) or
+            url.fragment != 'smoke=' + run_id or report.get('url') != observed_url or host.is_loopback or
             host.is_unspecified or host.is_multicast):
-        raise RuntimeError('confirmation requires passed Jetson checks and the exact observed URL')
+        raise RuntimeError('confirmation requires passed Jetson checks and the exact observed URL with run ID')
     report.update(lan_browser='manual_confirmed', status='passed',
                   lan_confirmation_utc=time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()))
     temporary = path.with_suffix('.tmp')
@@ -117,6 +131,40 @@ def confirm_lan(path, observed_url):
     temporary.replace(path)
     print('PASS operator-confirmed LAN browser video')
     return 0
+
+
+def observe_live_video(browser, api, process, peer, seconds):
+    first_media = previous_media = browser.media()
+    first_rtsp = previous_rtsp = api('/api/v1/metrics')['rtsp']['frames_received']
+    first_bytes = previous_bytes = peer['bytes_sent']
+    start = time.monotonic()
+    samples = 0
+    while time.monotonic() - start < seconds or not samples:
+        # Observe at least one useful interval, including for short portable runs.
+        time.sleep(0.5)
+        if process.poll() is not None:
+            raise RuntimeError('owned skai-edge process exited during observation')
+        media = browser.media()
+        if (media['title'] != 'SKAI Edge Console' or media['width'] <= 0 or media['height'] <= 0 or
+                media['time'] <= previous_media['time'] or media['frames'] <= previous_media['frames']):
+            raise RuntimeError('video stopped advancing during observation')
+        metrics = api('/api/v1/metrics')
+        rtsp = metrics['rtsp']
+        if rtsp['health'] != 'connected' or rtsp['frames_received'] <= previous_rtsp:
+            raise RuntimeError('RTSP stopped advancing during observation')
+        current = next((p for p in metrics['webrtc']['peers']
+                        if p['session_id'] == peer['session_id']), None)
+        if (not current or current['peer_state'] != 'connected' or
+                current['ice_state'] not in ['connected', 'completed'] or
+                current['selected_interface'] != peer['selected_interface'] or
+                current['bytes_sent'] <= previous_bytes):
+            raise RuntimeError('peer stopped sending during observation')
+        previous_media, previous_rtsp, previous_bytes = media, rtsp['frames_received'], current['bytes_sent']
+        samples += 1
+    return {'elapsed_seconds': time.monotonic() - start, 'samples': samples,
+            'session_id': peer['session_id'], 'media_start': first_media, 'media_end': previous_media,
+            'rtsp_frames_start': first_rtsp, 'rtsp_frames_end': previous_rtsp,
+            'bytes_sent_start': first_bytes, 'bytes_sent_end': previous_bytes}
 
 
 def main():
@@ -157,7 +205,8 @@ def main():
             ('smoke-jetson-' + time.strftime('%Y%m%d-%H%M%S') + '-' + str(os.getpid()))).resolve()
     root.mkdir(parents=True, exist_ok=False)
     root.chmod(0o700)
-    report = {'checks': {}, 'automated_passed': False, 'lan_browser': 'manual_pending'}
+    report = {'run_id': secrets.token_hex(16), 'checks': {},
+              'automated_passed': False, 'lan_browser': 'manual_pending'}
     edge = driver = browser = None
     handles = []
 
@@ -175,6 +224,7 @@ def main():
             if platform.machine() != 'aarch64' or not pathlib.Path('/etc/nv_tegra_release').is_file():
                 raise RuntimeError('Jetson/L4T is required; portable harness uses --skip-device-check')
             passed('jetson', pathlib.Path('/etc/nv_tegra_release').read_text().splitlines()[0])
+        validate_host(host, args.skip_device_check)
         config, config_path = prepare_config(args.config, root, args.alert_class)
         if not args.webdriver_url and not args.geckodriver:
             raise RuntimeError('provide geckodriver or --webdriver-url for real browser checks')
@@ -190,8 +240,8 @@ def main():
                                           log_path.read_text()), args.timeout, edge)
         base = 'http://' + str(host) + ':' + match[1]
         local = 'http://127.0.0.1:' + match[1]
-        report['url'] = base
-        print('Browser URL: ' + base, flush=True)
+        report['url'] = base + '/#smoke=' + report['run_id']
+        print('Browser URL: ' + report['url'], flush=True)
 
         def api(path, method='GET'):
             request = urllib.request.Request(local + path, method=method,
@@ -234,7 +284,7 @@ def main():
                                              driver_path.read_text()), args.timeout, driver)[1]
             args.webdriver_url = 'http://127.0.0.1:' + port
         browser = BrowserProbe(args.webdriver_url, args.timeout, args.openh264_dir, args.openh264_abi)
-        browser.open(base)
+        browser.open(report['url'])
         passed('browser_ui_and_video', browser.verify())
         peers = api('/api/v1/metrics')['webrtc']['peers']
         selected = [p for p in peers if p['peer_state'] == 'connected' and
@@ -243,7 +293,7 @@ def main():
         if not selected:
             raise RuntimeError('ICE diagnostics lack a connected peer on the configured interface')
         passed('ice_host_interface', selected[0]['selected_interface'])
-        time.sleep(args.seconds)
+        passed('live_observation', observe_live_video(browser, api, edge, selected[0], args.seconds))
         api('/api/v1/recording/stop', 'POST')
         def recording_stopped():
             value = api('/api/v1/recordings')

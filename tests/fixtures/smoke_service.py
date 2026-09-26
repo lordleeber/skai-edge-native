@@ -7,6 +7,7 @@ import signal
 import sqlite3
 import time
 import urllib.request
+import urllib.parse
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import yaml
@@ -33,19 +34,33 @@ if args.config:
 class Handler(BaseHTTPRequestHandler):
     loaded_url = ''
     recording_active = True
+    observation_start = None
+
+    def backend(self, path):
+        address = urllib.parse.urlsplit(Handler.loaded_url)
+        return urllib.parse.urlunsplit((address.scheme, address.netloc, path, '', ''))
 
     def log_message(self, *_):
         pass
 
     def do_GET(self):
-        if self.path == '/api/v1/status':
+        if self.path == '/fixture/observe':
+            Handler.observation_start = time.monotonic()
+            body = {}
+        elif self.path == '/api/v1/status':
             body = {'status': 'running', 'fixture_mode': mode, 'video': {'fps': 25},
                     'detector': {'fps': None if mode == 'no-inference' else 25,
                                  'last_inference_ms': 10}}
         elif self.path == '/api/v1/metrics':
-            body = {'rtsp': {'health': 'connected', 'frames_received': 100},
-                    'webrtc': {'peers': [{'peer_state': 'connected', 'ice_state': 'completed',
-                                         'selected_interface': 'lo', 'bytes_sent': 5000}]}}
+            now = time.monotonic()
+            observing = Handler.observation_start
+            frames = int((observing if observing and mode == 'freeze-rtsp' else now) * 25)
+            sent = int((observing if observing and mode == 'freeze-bytes' else now) * 5000)
+            peers = [] if observing and mode == 'disconnect-peer' and now - observing > 0.05 else [
+                {'session_id': 'fixture-peer', 'peer_state': 'connected', 'ice_state': 'completed',
+                 'selected_interface': 'lo', 'bytes_sent': sent}]
+            body = {'rtsp': {'health': 'connected', 'frames_received': frames},
+                    'webrtc': {'peers': peers}}
         elif self.path == '/api/v1/alerts':
             body = {'items': [] if mode == 'no-alert' else
                     [{'id': 'new-alert', 'snapshot_path': str(snapshot),
@@ -66,18 +81,23 @@ class Handler(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', '0'))) or '{}')
         if args.driver:
             if self.path == '/session':
+                Handler.observation_start = None
                 value = {'sessionId': 'fixture', 'capabilities': {'browserName': 'firefox'}}
             elif self.path.endswith('/url'):
                 Handler.loaded_url = body['url']
                 value = None
             elif self.path.endswith('/execute/async'):
-                info = json.load(urllib.request.urlopen(Handler.loaded_url + '/api/v1/status'))
+                info = json.load(urllib.request.urlopen(self.backend('/api/v1/status')))
+                urllib.request.urlopen(self.backend('/fixture/observe')).close()
+                Handler.observation_start = time.monotonic()
                 value = {'valid': info.get('fixture_mode') != 'bad-sdp', 'status': 201, 'deleted': True}
             elif self.path.endswith('/execute/sync'):
-                info = json.load(urllib.request.urlopen(Handler.loaded_url + '/api/v1/status'))
+                info = json.load(urllib.request.urlopen(self.backend('/api/v1/status')))
+                tick = Handler.observation_start if Handler.observation_start and \
+                    info.get('fixture_mode') == 'freeze-browser' else time.monotonic()
                 value = {'title': 'SKAI Edge Console', 'width': 640, 'height': 480,
-                         'time': time.monotonic(), 'frames': 0 if
-                         info.get('fixture_mode') == 'no-browser' else int(time.monotonic() * 25)}
+                         'time': tick, 'frames': 0 if
+                         info.get('fixture_mode') == 'no-browser' else int(tick * 25)}
             else:
                 value = None
             self.respond({'value': value})

@@ -29,7 +29,8 @@ scripts/smoke_test_jetson.sh config/config.local.yaml \
 ```
 
 Use your Jetson's LAN IPv4 address and a class actually visible in the RTSP
-scene. The example `chair` is specific to the camera used during development.
+scene. Before launching the process, the runner checks that this address is
+assigned to a local interface and is not loopback. The example `chair` is specific to the camera used during development.
 `--alert-class` creates a one-frame rule at confidence 0.1 in the isolated YAML;
 the detector's configured confidence threshold still applies. Omitting it
 preserves your configured rules. Missing detections or alerts cause a timeout,
@@ -46,6 +47,7 @@ not fabricated inference results or direct database inserts.
 | Browser UI and video | Firefox loads the production console; nonzero video dimensions, advancing time and increasing frame callbacks/playback counters |
 | WHEP SDP | Browser creates an offer, checks HTTP 201/SDP/Location, accepts the answer and deletes the session with HTTP 204 |
 | ICE interfaces | Connected media peer has sent bytes and diagnostics identify an interface in the configured whitelist |
+| Observation window | Throughout `--seconds`, polls every 0.5 seconds require advancing browser time/frames, RTSP decoded frames and bytes sent by the same connected ICE peer |
 | Alert persistence | A new API alert and snapshot exist; after shutdown, read-only SQLite reopen/integrity check finds the same alert, snapshot and detection classes |
 | Recording | HTTP stop finalizes recording, every MP4 is decoded by FFmpeg to EOS, and ffprobe counts positive video frames |
 | Shutdown | The owned process exits zero after SIGTERM and logs `skai-edge stopped`; forced termination fails |
@@ -54,6 +56,8 @@ Firefox's WebRTC playback counter can stay zero in headless mode; the probe also
 counts [video frame callbacks](https://developer.mozilla.org/en-US/docs/Web/API/HTMLVideoElement/requestVideoFrameCallback).
 It requires both new frames and advancing media time. A fetched HTML page or a
 successful SDP response alone cannot pass the browser/media check.
+The observation lasts at least the requested duration and one polling interval;
+the report retains elapsed time, sample count and starting/ending counters.
 
 Logs, isolated configuration, SQLite, snapshots, MP4s and `report.json` remain in
 the reported directory for inspection. The directory is mode 0700 and copied
@@ -73,11 +77,14 @@ record that observation for its exact URL:
 ```sh
 scripts/smoke_test_jetson.sh \
   --confirm-lan-report build/smoke-jetson-RUN/report.json \
-  --observed-url http://172.16.1.50:ACTUAL_PORT/
+  --observed-url 'http://172.16.1.50:ACTUAL_PORT/#smoke=RUN_ID'
 ```
 
 This is an explicit operator attestation. It requires successful automated
-Jetson checks and refuses a different URL/port. It cannot turn a failed run or
+Jetson checks and refuses a different URL or run ID. Copy the entire printed URL,
+including its fragment: each run generates a random 128-bit ID, so a reused port
+cannot accept an earlier run's observation. Reports without a run ID are rejected.
+It cannot turn a failed run or
 a `--skip-device-check` portable run into successful Jetson acceptance.
 
 For automatic acceptance from another LAN computer, use its Firefox WebDriver
@@ -120,7 +127,19 @@ Step 35-a pins `SKAI_SMOKE_PYTHON` to CMake's checked `Python3_EXECUTABLE`
 for every `SmokeScript.*` test. A regression shadows PATH's `python3` with a
 failing interpreter and requires the runner to use the configured interpreter.
 
-The host binding, continuous observation and unique-run manual acceptance fixes
-follow in dependent Step 35-b. Both parts are required for final Step 35
-acceptance; the split keeps each implementation/test diff below 800 lines.
+Step 35-b validates the assigned LAN address before starting the owned process,
+monitors browser/RTSP/peer progress throughout the observation window and adds
+the random run ID to both the report and browser URL. Regressions freeze media
+after the initial browser check, disconnect the peer, freeze its byte counter or
+RTSP frames, reuse a port across run IDs and attempt legacy confirmation.
+Both parts are required for final Step 35 acceptance; the split keeps each
+implementation/test diff below 800 lines.
 The development results remain local/operator evidence, not independent CI.
+
+The reviewed runner was rerun on the real Jetson with a 10-second window. It
+collected 20 samples over 10.50 seconds: Firefox decoded frames increased from
+6 to 216, RTSP frames from 201 to 463, and the same `wlP1p1s0` peer's sent bytes
+from 177,736 to 2,398,422. TensorRT, WHEP, SQLite reopen, MP4 decode and clean
+shutdown also passed. The identified URL and counters are retained in
+`build/smoke-review35-b/report.json`. This new local-browser run remains incomplete;
+the earlier LAN observation is not reused for its new run ID.
