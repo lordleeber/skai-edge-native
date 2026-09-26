@@ -1,5 +1,7 @@
 #pragma once
 
+#include "skai/profiling.hpp"
+
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -28,6 +30,7 @@ struct RuntimeStatusSnapshot {
         std::string last_error;
     };
     std::optional<Encoder> encoder;
+    ProfileSnapshot profiling{};
 };
 
 // Lock-free cross-module metrics for the control plane. Writers publish a
@@ -35,6 +38,9 @@ struct RuntimeStatusSnapshot {
 // measurements.
 class RuntimeStatus {
 public:
+    void observe_profile(ProfileStage stage, double ms) { profiling_.observe(stage, ms); }
+    void reset_profiling() { profiling_.reset(); }
+
     void set_running(bool running) noexcept { running_.store(running); }
 
     void set_detector_expected(bool expected) noexcept {
@@ -87,6 +93,7 @@ public:
 
     RuntimeStatusSnapshot snapshot() const {
         RuntimeStatusSnapshot result;
+        result.profiling = profiling_.snapshot();
         const bool running = running_.load();
         const bool video = video_available_.load(std::memory_order_acquire);
         const bool detector = detector_available_.load(std::memory_order_acquire);
@@ -122,6 +129,7 @@ public:
     }
 
 private:
+    ProfileMetrics profiling_;
     static std::int64_t now_ns() noexcept {
         return std::chrono::duration_cast<std::chrono::nanoseconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count();

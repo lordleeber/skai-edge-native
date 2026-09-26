@@ -32,10 +32,14 @@ SystemMetrics SystemMetricsSampler::sample() {
         previous_wall_ = now;
         previous_cpu_seconds_ = cpu_seconds;
     }
-    std::ifstream gpu_load("/sys/devices/platform/17000000.gpu/load");
-    int permille = -1;
-    if (gpu_load >> permille && permille >= 0 && permille <= 1000) {
-        result.gpu_percent = permille / 10.0;
+    for (const auto* device : {"/sys/devices/platform/17000000.gpu/load",
+            "/sys/devices/platform/gpu.0/load", "/sys/devices/platform/bus@0/gpu.0/load"}) {
+        std::ifstream gpu_load(device);
+        int permille = -1;
+        if (gpu_load >> permille && permille >= 0 && permille <= 1000) {
+            result.gpu_percent = permille / 10.0;
+            break;
+        }
     }
     std::error_code error;
     auto path = std::filesystem::absolute(disk_path_, error);

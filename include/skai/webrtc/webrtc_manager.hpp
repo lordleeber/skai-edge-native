@@ -1,6 +1,7 @@
 #pragma once
 
 #include "skai/config.hpp"
+#include "skai/profiling.hpp"
 #include "skai/core/bounded_queue.hpp"
 #include "skai/logging.hpp"
 #include "skai/video/encoded_access_unit.hpp"
@@ -57,6 +58,7 @@ struct WebRtcPeerDiagnostics {
     std::uint64_t packets_sent = 0;
     std::uint64_t packets_retransmitted = 0;
     std::uint64_t media_queue_drops = 0;
+    TimingSummary media_queue_wait;
     std::uint64_t keyframe_events = 0;
     std::string failure_stage;
     std::string close_reason;
@@ -124,6 +126,7 @@ private:
     std::atomic<std::uint64_t> packets_retransmitted_{0};
     std::atomic<std::uint64_t> keyframe_events_{0};
     std::atomic<std::uint64_t>* media_errors_;
+    TimingSummary media_queue_wait_;
     std::string peer_state_ = "new";
     std::string ice_state_ = "new";
     std::string local_candidate_;

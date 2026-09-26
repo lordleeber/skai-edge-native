@@ -83,7 +83,7 @@ skai::Runtime::Runtime(std::string config_path, skai::Logger& logger,
     auto* web_state = web_server.get();
     modules.web = std::move(web_server);
     modules.recording = std::make_unique<skai::RecordingModule>(
-        encoded_access_units, logger, recording_control, events);
+        encoded_access_units, logger, recording_control, events, runtime_status);
     if (backend_factory || skai::inference_backend_available()) {
         auto alert_manager = std::make_shared<skai::AlertManager>(
             gps_state, events, alert_repository, &logger);
@@ -138,6 +138,7 @@ skai::Runtime::~Runtime() { stop(); wait(); }
 
 bool skai::Runtime::initialize() {
     auto& app = *state_->app;
+    state_->runtime_status->reset_profiling();
     if (!app.initialize()) return false;
     const auto runtime_status = state_->runtime_status;
     const auto api_state = state_->api_state;

@@ -344,6 +344,7 @@ bool H264Encoder::capture_sample(GstSample* sample) {
     GstMapInfo mapped{};
     if (!gst_buffer_map(buffer, &mapped, GST_MAP_READ)) return false;
     EncodedAccessUnit unit;
+    unit.queued_at = std::chrono::steady_clock::now();
     unit.sequence = GST_BUFFER_OFFSET_IS_VALID(buffer) ? GST_BUFFER_OFFSET(buffer) : 0;
     unit.has_pts = GST_CLOCK_TIME_IS_VALID(GST_BUFFER_PTS(buffer));
     unit.pts_ns = unit.has_pts ? GST_BUFFER_PTS(buffer) : 0;

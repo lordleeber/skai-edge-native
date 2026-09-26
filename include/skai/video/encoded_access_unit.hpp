@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <vector>
 
@@ -18,6 +19,8 @@ struct EncodedAccessUnit {
     // Identifies the RTSP media pipeline instance; PTS restarts when it changes.
     std::uint64_t source_generation = 0;
     std::vector<std::uint8_t> bytes;
+    // Monotonic entry time for a local encoded queue; never an RTP timestamp.
+    std::chrono::steady_clock::time_point queued_at{};
 };
 
 inline std::uint32_t h264_rtp_timestamp(std::uint64_t pts_ns) noexcept {

@@ -1,6 +1,7 @@
 #include "skai/video/rtsp_source.hpp"
 
 #include <gst/app/gstappsink.h>
+#include <pthread.h>
 #include <gst/rtsp/gstrtsptransport.h>
 #include <gst/video/video.h>
 
@@ -361,8 +362,8 @@ void RtspSource::connect_rtp_pad(GstPad* pad) {
                                         ? gst_element_factory_make("capsfilter", nullptr)
                                         : nullptr;
     GstElement* tee = publish_h264 ? gst_element_factory_make("tee", nullptr) : nullptr;
-    GstElement* decode_queue = publish_h264 ? gst_element_factory_make("queue", nullptr) : nullptr;
-    GstElement* encoded_queue = publish_h264 ? gst_element_factory_make("queue", nullptr) : nullptr;
+    GstElement* decode_queue = publish_h264 ? gst_element_factory_make("queue", "skai-decode") : nullptr;
+    GstElement* encoded_queue = publish_h264 ? gst_element_factory_make("queue", "skai-demux") : nullptr;
     GstElement* encoded_sink = publish_h264
                                    ? gst_element_factory_make("appsink", "encoded_sink")
                                    : nullptr;
@@ -528,7 +529,10 @@ bool RtspSource::capture_access_unit(GstSample* sample) {
     if (unit.bytes.empty()) return false;
     try {
         if (access_unit_sink_) access_unit_sink_(unit);
-        if (encoded_access_units_) encoded_access_units_->push(std::move(unit));
+        if (encoded_access_units_) {
+            unit.queued_at = std::chrono::steady_clock::now();
+            encoded_access_units_->push(std::move(unit));
+        }
     } catch (const std::exception& failure) {
         logger_.log(LogLevel::Error, "video", failure.what());
         return false;
@@ -560,6 +564,7 @@ void RtspSource::publish_media_status(bool available, const std::string& reason)
 }
 
 void RtspSource::capture_loop() noexcept {
+    pthread_setname_np(pthread_self(), "skai-rtsp");
     RtspRecovery recovery(std::chrono::milliseconds(config_.stall_timeout_ms),
                           std::chrono::milliseconds(config_.reconnect_delay_ms),
                           std::chrono::milliseconds(config_.max_reconnect_delay_ms));
