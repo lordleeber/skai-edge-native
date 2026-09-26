@@ -4,13 +4,14 @@ The tests use the same `create_runtime()` factory as main for the Application li
 AlertManager, SQLite repository, recorder, Beast HTTP server, WebRtcManager,
 libdatachannel and skai-ice. They let the HTTP server bind ephemeral loopback ports directly with `web.port: 0` and keep YAML,
 SQLite, snapshots and recordings in a unique temporary directory removed on
-teardown. WHIP is disabled in the Step 34-b tests; Step 34-c adds a loopback uplink receiver.
+teardown. A loopback WHIP endpoint negotiates a real receiver alongside the WHEP receiver.
 
 | Test | Behavior checked |
 | --- | --- |
 | `Pipeline.PersistsRtspDetectionsAlertsSnapshotsAndPlayableRecording` | A fixed white patch is published as H.264 through the RTSP fixture, decoded, detected, persisted with GPS and a JPEG snapshot, exposed through real HTTP routes, and recorded. Recording stops through HTTP; SQLite is reopened after shutdown and each finalized MP4 is decoded to frames and EOS. |
 | `Pipeline.ProductionInferenceInvalidatesFailuresAndPublishesRecovery` | Injected backend failures invalidate API detections and emit the production unavailable event; recovery emits detections and persists alerts through the production async queue. |
 | `Pipeline.WhepRouteDeliversRtspH264AndDeletesConnectedPeer` | A receiver gathers an offer through skai-ice, sends it to the Beast WHEP route, applies the answer, connects and receives multiple H.264 frames from the RTSP source. HTTP status remains accessible; DELETE removes the peer and a repeated DELETE returns 404. |
+| `Pipeline.SharedRuntimePublishesWhipDetectionSeiMetricsAndHealth` | The real WHIP receiver gets RTSP H.264 carrying the deterministic person detection SEI. Connected peer/ICE metrics and all health probes come from the shared runtime; shutdown deletes the WHIP resource. |
 | `PipelineJetson.PersistsRtspDetectionsAlertsSnapshotsAndPlayableRecording` | Runs the same persistence and recording chain with the real YoloInferenceModule and TensorRT engine, using the generated gradient image from the existing inference regression tests. |
 
 The portable inference backend is compiled only into the test executable. It
@@ -44,7 +45,7 @@ ctest --test-dir build --output-on-failure
 ```
 
 The portable tests have the `rtsp-webrtc` label, matching both `ctest -L rtsp`
-and `ctest -L webrtc`. The GPU variant is built only when the inference module
+and `ctest -L webrtc`. The GPU variant is built only when TensorRT/CUDA inference
 is available and has the `rtsp-jetson` label, so `ctest -LE jetson` excludes it.
 Both main and these tests call `create_runtime()`. The factory owns module
 composition, queue ownership, WHIP/WHEP media fanout, the detection sink, runtime
@@ -105,3 +106,22 @@ waits for the RTSP task pool to finish using
 [GStreamer's test cleanup API](https://gstreamer.freedesktop.org/documentation/gst-rtsp-server/rtsp-thread-pool.html#gst_rtsp_thread_pool_cleanup).
 A two-server regression keeps one client playing while the other fixture stops,
 so global cleanup cannot stop an unrelated active fixture.
+
+## Review fixes, part C
+
+The existing WHIP receiver fixture is shared by the publisher tests and the
+pipeline suite. Pipeline tests enable WHIP through YAML and replace only the
+inference backend. No detections or encoded units are injected into the publisher:
+the test requires the runtime's production detection sink and RTSP fanout to
+produce an actual received H.264 SEI unit with the detection UUID and person box.
+A temporary mutation disconnecting the production detection sink made this test
+fail; the original sink was restored before the final build and test run.
+The failure/recovery check counts new detection events after recovery, so an old
+successful event cannot satisfy it.
+
+Configuration permits HTTP only for the literal `127.0.0.1` address with an
+explicit valid port and path, allowing this local endpoint. Other HTTP hosts,
+hostname lookalikes, credentials in the authority and invalid ports are rejected;
+remote WHIP endpoints still require HTTPS. Tests preserve and restore WHIP_TOKEN
+and use a fixed local token. This configuration exception does not disable TLS
+verification for HTTPS endpoints.
