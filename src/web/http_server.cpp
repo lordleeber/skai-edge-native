@@ -380,7 +380,7 @@ bool HttpServer::start() {
         state_->context.run();
         serving_.store(false);
     });
-    logger_.log(LogLevel::Info, "web", "HTTP server started");
+    logger_.log(LogLevel::Info, "web", "HTTP server started on port " + std::to_string(state_->port));
     return true;
 }
 
